@@ -9,6 +9,7 @@ ROSY는 관측한 세계 상태, 현장 미션 조정, 로봇의 안전한 실�
 - [ROSY 소스 및 전체 안내](rosy/README.md)
 - [설치·빌드·실행 안내](docs/RUNNING.md)
 - [구성요소별 검증 상태](rosy/STATUS.md)
+- [제출본 검증 기록](docs/VERIFICATION.md)
 - [제출 기준과 갱신 방법](docs/SUBMISSION.md)
 
 소스는 `rosy/`를 프로젝트 루트로 사용합니다. 빌드와 실행 명령은 해당 디렉터리에서 수행합니다.

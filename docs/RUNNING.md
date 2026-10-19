@@ -39,4 +39,4 @@ bash tools/run_fleet_sim.sh
 
 ## 검증 범위
 
-이번 제출 작업에서는 가져온 소스의 Git 트리 일치와 안내 문서의 로컬 링크를 확인합니다. ROS 2 빌드, 시뮬레이션, 실제 로봇 시험은 수행하지 않았습니다. 원본의 [상태 문서](../rosy/STATUS.md)와 기존 시험 기록은 원본 기준의 기록입니다. `rosy/.github/workflows/`에 보존된 워크플로는 이 제출 저장소의 루트 워크플로가 아니므로 GitHub Actions에서 자동 실행되지 않습니다.
+제출본의 빌드·시뮬레이션·회귀 시험 결과는 [검증 기록](VERIFICATION.md)에 있습니다. 원본의 [상태 문서](../rosy/STATUS.md)와 기존 시험 기록은 원본 기준의 기록입니다. `rosy/.github/workflows/`에 보존된 워크플로는 이 제출 저장소의 루트 워크플로가 아니므로 GitHub Actions에서 자동 실행되지 않습니다.
