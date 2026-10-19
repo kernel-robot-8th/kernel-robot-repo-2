@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>fleet</name>
+  <version>0.1.4</version>
+  <description>ROSY FLEET seed — formation geometry, slot assignment, reference stream relay, FOR-004 session (ROSY-FLEET-SRS-001 FOR-001~004)</description>
+  <maintainer email="dev@rosy.local">rosy</maintainer>
+  <license>Apache-2.0</license>
+
+  <!-- D-18/D-126: Fleet production code has no ROS imports. It consumes selected
+       core_common protocol modules, the shared intent grammar, and succession
+       rule. This package dependency preserves colcon build order; the ROS-free
+       site deployment loads the source tree without rosdep-installing CORE. -->
+  <exec_depend version_gte="0.0.2">core_common</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>web_common</exec_depend>
+  <exec_depend>python3-httpx</exec_depend>
+  <!-- 15 이상이어야 한다: transport.py 가 `websockets.exceptions.InvalidStatus`,
+       새 asyncio 클라이언트(`connection.respond`)와 `connect(proxy=None)`(D-361 9)을 쓴다. -->
+  <exec_depend version_gte="15.0">python3-websockets</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-cryptography</exec_depend>
+  <!-- 관제 서버(`fleet console`)만 쓴다. 대형 릴레이·CLI 는 이것 없이도 돈다. -->
+  <exec_depend>python3-fastapi</exec_depend>
+  <exec_depend>python3-uvicorn</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+  <!-- 시험만 core_features 를 참조한다 (test_geometry.py 의 follow_goal 대조, D-60). -->
+  <test_depend>core_features</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

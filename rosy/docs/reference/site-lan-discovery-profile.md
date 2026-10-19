@@ -1,0 +1,53 @@
+# SERION 현장 LAN 발견 규칙 v0.1
+
+상태: ROSY 적용 초안 (2026-09-26). 다른 SERION 제품에 적용할 때는 해당 제품의 API·신원 계약을 별도로 승인한다. 이 문서는 mDNS/DNS-SD를 현장 주소 **후보**를 찾는 공통 방식으로 정의한다. 등록, 페어링, 명령 권한은 각 제품의 기존 인증 계약이 결정한다.
+
+## 서비스 카탈로그
+
+| 제공자 | DNS-SD 서비스 종류 | 전송 대상 | 현재 상태 |
+|---|---|---|---|
+| ROSY 로봇 CORE | `_rosy._tcp.local` | 로봇 CORE API, 기본 8080 | Pi 부팅 상태 서비스에서 광고 |
+| ROSY Ubuntu Fleet | `_rosy-fleet._tcp.local` | 사이트 HTTPS 프록시, 기본 8443 | Ubuntu Avahi 서비스와 확인 도구 준비 |
+| ROSY Vision 카메라 수신기 | `_rosy-overhead._tcp.local` | TLS WSS `/overhead/v1/frames`, 보통 8443 | Site Avahi 광고, 앱은 선택 목록으로 표시 |
+| ROSY Dock | `_rosy-dock._tcp.local` | HTTP 상태 관찰, 80 | 공통 TXT 광고; 명령 재지정 권한 없음 |
+| ROSY Signal | `_rosy-signal._tcp.local` | HTTP 상태 관찰, 80 | 공통 TXT 광고; 명령 재지정 권한 없음 |
+| ROSY 모델 호스트 | `_rosy-model._tcp.local` | 실제 SSH 서비스, 보통 22 | D-452; listener 생존 시만 광고, 추론 API 아님 |
+| 다른 SERION 미들웨어·장치 | 제품별 고유 서비스 종류를 먼저 할당 | 해당 제품의 공개 API | 이 저장소에서 구현하지 않음 |
+
+한 서비스 종류는 하나의 연결 프로토콜과 역할을 뜻한다. `_http._tcp` 같은 범용 이름에 모든 제품을 섞지 않는다. 서비스 인스턴스 이름은 사람이 보는 표시용이고, SRV target의 `<hostname>.local`은 주소 후보이며, 둘 다 장치 신원의 증거가 아니다. 같은 호스트가 여러 역할을 제공하면 역할별 서비스 레코드를 따로 광고한다.
+
+모든 새 광고는 다음 TXT 키를 넣는다. TXT는 공개 정보만 포함한다. 알 수 없는 키는 무시하며, 필수 키가 중복되거나 값이 맞지 않으면 해당 광고를 버린다.
+
+| 키 | 뜻 | 로봇 값 | Fleet 값 | Rosy Vision 값 | Dock 값 | Signal 값 | Model 값 |
+|---|---|---|---|---|---|---|---|
+| `product` | 제품군 | `rosy` | `rosy` | `rosy` | `rosy` | `rosy` | `rosy` |
+| `role` | API 역할 | `robot` | `fleet` | `overhead-camera` | `dock` | `signal` | `model-host` |
+| `proto` | 연결 계약 버전 | `core-v1` | `site-v1` | `rosy-overhead/1` | `rosy-dock/1` | `rosy-signal/1` | `ssh/2` |
+| `tls` | 연결 TLS 요구 | `none` (기존 HTTP) 또는 `required` (D-432 TLS) | `required` | `required` | `none` | `none` | `none` (SSH 호스트 키 인증) |
+| `tls_host` | TLS 인증서 검증 호스트명 | TLS 구성의 예상 호스트명 | 설치자가 별도 제공 | `<hostname>.local` SAN에 일치 | 해당 없음 | 해당 없음 | 해당 없음 |
+| `transport` | 추가 전송 구분 | 해당 없음 | 해당 없음 | 해당 없음 | 해당 없음 | 해당 없음 | `ssh` |
+
+기존 로봇 광고의 `stage`, `release`, `name`, `network`는 운영 표시를 위해 유지한다. 등록 토큰, 사용자 이름, Wi-Fi 암호, SSH 정보, 사이트 CA, 원시 장치 UID, 로봇 번호, ROS Domain ID를 TXT에 넣지 않는다. 기존 이미지가 공통 TXT 없이 광고되더라도 Fleet의 기존 관찰 화면은 읽을 수 있다. 새 제품은 자신의 역할·버전·포트와 실제 리스너가 일치하도록 광고해야 한다.
+
+## 발견에서 연결까지
+
+1. 같은 링크의 DNS-SD를 조회한다. LAN의 Avahi가 기본 경로다. 멀티캐스트가 차단된 VLAN이나 격리 Wi-Fi에서는 기존 수동 주소 설정을 사용한다.
+2. 서비스 종류, 필수 TXT, `.local` 호스트명, IP 종류, 포트 형식을 검사한다. 중복 인터페이스의 동일 레코드만 합친다. 동일한 예상 호스트명에 서로 다른 주소·포트가 보이면 자동 선택을 중단한다.
+3. 설치자가 예상 호스트명을 지정한다. 이는 사이트 구성/QR/서명된 설치 자료에서 받은 값이어야 하며, 광고에서 임의로 선택하지 않는다.
+4. 연결은 발견한 IP로 시도하되 TLS SNI와 인증서 호스트명 검사는 예상 호스트명으로 한다. 별도로 배포된 사이트 CA가 필요하다. Fleet은 `/healthz`가 `200`과 1024바이트 이하 JSON 객체를 돌려주고 `status`가 `"ok"`여야 주소로 채택한다. `role` 키가 있으면 TXT `role`(`fleet`)과 같아야 하고, 모르는 키는 무시한다(D-370 공개 상태 모양 대비; `degraded`·`down`은 채택하지 않는다).
+5. 주소 검증 이후에도 등록과 권한 부여는 기존 페어링·토큰 절차를 거친다. 신원 불일치, 다중 후보, TLS 오류, 서비스 종료는 대기/오류 상태로 표시하고 다른 장치로 자동 전환하지 않는다.
+6. ROSY 로봇을 사이트 Fleet 로스터에 넣는 등록은 [D-361](../adr/D-361-site-console-enrolls-robot-by-screen-code.md)를 따른다: 콘솔에서 로봇 화면 코드를 입력하면 Fleet이 로봇에서 직접 교환하고, 주소는 등록 때 고정한다.
+
+기존 HTTP 로봇은 광고만으로 명령 주소를 바꾸지 않는다. D-432의 명시적 개발 프로필에서는 CORE의 검증된 TLS 리스너와 별도 배포 CA, 예상 호스트명, 만료되는 사이트·장치 승인 범위가 모두 있을 때만 HTTPS/WSS 주소를 다시 발견한다. Dock·Signal의 HTTP 광고는 관찰용이며 인증된 명령 경로로 승격하지 않는다. Fleet의 로봇 발견 화면도 등록 전 관찰용이다. 로봇 FleetAgent는 승인된 지속 연결 `pairing_token`, 예상 `.local` 호스트명, 별도로 설치된 사이트 CA가 모두 있을 때만 `_rosy-fleet._tcp`를 찾아 outbound WSS로 연결한다. 재접속할 때마다 광고와 TLS health를 다시 확인한다. SD의 `pairing_credential`은 일회성 등록 값이므로 Agent 토큰으로 사용하지 않는다. 현장 호스트와 Pi에서 실제 연결은 별도 검증이 필요하다.
+
+Ubuntu Fleet PC에는 안정적인 호스트명을 지정하고 `<hostname>.local`을 사이트 TLS 인증서 SAN에 넣는다. Compose의 HTTPS 포트를 LAN에서 접근 가능한 주소에 바인딩한다. `rosy-fleet-advertise.service`는 Fleet API를, `rosy-overhead-advertise.service`는 같은 HTTPS proxy의 카메라 WSS 경로를 각자 광고한다. Android 앱은 `_rosy._tcp` 로봇과 `_rosy-overhead._tcp` 수신기를 함께 보여 주지만 WSS 프레임은 오버헤드 수신기에만 보낸다. mDNS 결과는 주소 후보이며, TLS 인증서 검증과 source별 token이 계속 필요하다. 서비스 생존 여부는 광고와 별도로 TLS health로 검사한다. 광고만으로 SSH 계정·호스트 키·배포 권한을 찾거나 생성하지 않는다.
+
+천장 카메라의 콘솔 승인 페어링은 [D-341](../adr/D-341-overhead-console-approved-pairing.md)(Proposed)을 본다. 발견은 여전히 자격을 주지 않는다. **3·4항 보충(D-341):** 천장 카메라의 첫 접촉(페어링 요청·조회)은 광고된 `tls_host`를 후보로 쓸 수 있다. 이름 있는 운용자의 코드 입력 승인과 설치자의 지문 상호 확인이 끝난 뒤에는 페어링 결과로 받은 `tls_host`와 사이트 CA가 정본이고, 이후 광고는 주소만 공급한다. 이 보충은 D-341 절차를 거친 `paired` 카메라에만 적용되며, 다른 제품과 수동 경로에는 3·4항이 그대로 적용된다. TXT 공개 키 `pair=rosy-pair/1`을 더한다.
+
+## D-452 모델 호스트와 역할 목록
+
+모델 호스트의 `tls=none`은 SSH 인증이 없다는 뜻이 아니다. 실제 sshd 포트만 광고하고 `transport=ssh`를 필수로 검증한다. 모델 배포는 기존 승인된 논리 이름의 HostKeyAlias·known_hosts·StrictHostKeyChecking을 유지한다. TXT에는 계정·키·credential을 넣지 않는다.
+
+관제 역할 목록은 로봇 등록 목록과 분리한다. 발견, 승인 신원, 실제 접속 검증을 각각 표시하며 광고만으로 ready를 만들지 않는다. Pilot·Cam처럼 inbound listener가 없는 앱은 승인된 source/session 목록의 presence로만 나타낸다. 같은 LAN 밖은 승인 directory와 정상 DNS/profile을 사용하는 별도 경로이며 mDNS로 모든 망을 찾는다고 표시하지 않는다.
+
+LAN 밖 경로의 첫 구현은 팀 테일넷(D-477)의 MagicDNS 이름이다. 로봇은 `tag:rosy-robot` 태그로, 관제·모델 PC는 각자 태그로 tailnet에 등록되며, 실제 tailnet 이름·주소는 공개 문서에 적지 않는다(D-226). 테일넷 안의 SSH 로그인은 D-418의 키 체계를 그대로 따른다.

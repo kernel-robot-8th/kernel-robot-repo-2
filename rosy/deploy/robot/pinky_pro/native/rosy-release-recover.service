@@ -1,0 +1,33 @@
+[Unit]
+Description=ROSY native release recovery gate
+OnFailure=rosy-boot-status.service
+DefaultDependencies=no
+Requires=local-fs.target
+After=local-fs.target
+Before=rosy-core.service rosy-runtime.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/rosy/native-runtime/recover-release.sh
+TimeoutStartSec=60
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectSystem=strict
+# recover re-verifies the old release (native_release.verify -> signing,
+# which needs tempfile). Without PrivateTmp the temp dirs are read-only under
+# ProtectSystem=strict and recovery after a power cut mid-activation fails,
+# so CORE never starts (D-412 device twin, scenario h3, 2026-10-02).
+PrivateTmp=yes
+ProtectHome=true
+# D-189 D1: recover always takes native-release.lock and may rewrite the
+# activation journal under /var/lib/rosy/releases, and it swaps the
+# /opt/rosy/{current,previous} links through a temporary link in /opt/rosy.
+# ProtectSystem=strict makes all of that read-only unless it is listed here.
+StateDirectory=rosy/releases
+# Only root reads the journal (rosy-boot-status, rosy-diag run as root).
+StateDirectoryMode=0700
+ReadWritePaths=/opt/rosy
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,410 @@
+---
+module: docs
+logical_modules: []
+owner: 거버넌스
+last_verified:
+  commit: bed604ef
+  date: 2026-09-30
+gates:
+  SOURCE:
+    state: GO
+    evidence: D-61 Accepted, D-72/D-77/D-153/D-154 본문·색인 일치. SD 개인화 설계/실행 계획 정렬; focused
+      ADR/network 계약 검증 (2026-09-21 Windows); D-169/D-170 추가 (2026-09-22); D-177/D-181
+      Proposed 추가 (2026-09-23, 구 D-176은 origin과 번호 충돌로 이명 — D-180은 perf/sd-single-verify
+      브랜치 선점); D-178 Accepted 승격 — 2차 회차 완료+기준선 갱신 (2026-09-23)
+    cmd: python tools/harness/rosy_harness.py lint
+  LOCAL:
+    state: GO
+    evidence: '게이트 cmd 123 passed (2026-09-30 Windows): isaac_sim 스코어카드 잠정 행·fleet
+      크기 재판정·io closure D-84 예외·버전 핀 v1.59를 같은 회차에 정리. 이전 blocker(dashboard malformed
+      heading)는 상류 커밋에서 이미 해소됐고, isaac_sim/fleet 2건도 이번 회차에 해소'
+    cmd: python -m pytest test/test_network_topology_contracts.py test/test_harness_contracts.py
+      test/test_module_scorecard.py test/architecture/test_module_structure.py -q
+  ROS-SIM:
+    state: N/A
+  ARTIFACT:
+    state: N/A
+  DEVICE:
+    state: N/A
+  FIELD:
+    state: N/A
+adrs:
+- D-783
+- D-770
+- D-738
+- D-736
+- D-733
+- D-729
+- D-723
+- D-721
+- D-708
+- D-665
+- D-663
+- D-662
+- D-661
+- D-660
+- D-659
+- D-656
+- D-652
+- D-642
+- D-643
+- D-644
+- D-645
+- D-646
+- D-640
+- D-627
+- D-626
+- D-625
+- D-620
+- D-529
+- D-465
+- D-462
+- D-461
+- D-456
+- D-459
+- D-458
+- D-17
+- D-18
+- D-45
+- D-61
+- D-72
+- D-75
+- D-77
+- D-78
+- D-79
+- D-80
+- D-81
+- D-82
+- D-83
+- D-84
+- D-85
+- D-86
+- D-87
+- D-88
+- D-89
+- D-90
+- D-91
+- D-92
+- D-93
+- D-94
+- D-95
+- D-96
+- D-97
+- D-98
+- D-99
+- D-100
+- D-101
+- D-102
+- D-103
+- D-104
+- D-105
+- D-106
+- D-107
+- D-108
+- D-109
+- D-110
+- D-111
+- D-112
+- D-113
+- D-114
+- D-115
+- D-116
+- D-117
+- D-118
+- D-119
+- D-120
+- D-121
+- D-122
+- D-123
+- D-124
+- D-129
+- D-130
+- D-131
+- D-132
+- D-133
+- D-141
+- D-144
+- D-145
+- D-151
+- D-152
+- D-153
+- D-154
+- D-155
+- D-156
+- D-157
+- D-158
+- D-159
+- D-163
+- D-164
+- D-165
+- D-166
+- D-167
+- D-169
+- D-170
+- D-172
+- D-177
+- D-178
+- D-181
+- D-182
+- D-183
+- D-184
+- D-186
+- D-246
+- D-256
+- D-263
+- D-265
+- D-271
+- D-272
+- D-273
+- D-274
+- D-275
+- D-276
+- D-281
+- D-282
+- D-283
+- D-284
+- D-285
+- D-286
+- D-287
+- D-288
+- D-291
+- D-292
+- D-293
+- D-294
+- D-295
+- D-296
+- D-297
+- D-298
+- D-299
+- D-300
+- D-301
+- D-302
+- D-304
+- D-305
+- D-306
+- D-307
+- D-308
+- D-309
+- D-310
+- D-311
+- D-312
+- D-313
+- D-314
+- D-315
+- D-316
+- D-317
+- D-318
+- D-319
+- D-320
+- D-321
+- D-322
+- D-323
+- D-325
+- D-326
+- D-327
+- D-328
+- D-330
+- D-331
+- D-332
+- D-333
+- D-334
+- D-335
+- D-336
+- D-339
+- D-340
+- D-345
+- D-348
+- D-352
+- D-353
+- D-354
+- D-355
+- D-357
+- D-358
+- D-359
+- D-360
+- D-361
+- D-363
+- D-364
+- D-365
+- D-366
+- D-367
+- D-368
+- D-369
+- D-370
+- D-371
+- D-374
+- D-375
+- D-376
+- D-377
+- D-382
+- D-390
+- D-413
+- D-425
+- D-426
+- D-431
+- D-432
+- D-435
+- D-439
+- D-442
+- D-443
+- D-444
+- D-445
+- D-447
+- D-450
+- D-449
+- D-454
+- D-451
+- D-453
+- D-455
+- D-777
+- D-784
+plans:
+- docs/plans/2026-10-17-native-map-adoption.md
+- docs/plans/2026-10-15-omx-learning-operations-design.md
+- docs/plans/2026-10-15-omx-learning-operations.md
+- docs/plans/2026-10-11-core-drive-composition-first.md
+- docs/plans/2026-10-11-platform-structure-migration.md
+- docs/plans/2026-10-11-rosy-platform-identity-and-structure-design.md
+- docs/plans/2026-10-11-rosy-platform-identity-and-structure.md
+- docs/plans/2026-10-11-core-responsibility-and-driving-design.md
+- docs/plans/2026-10-11-core-responsibility-and-driving.md
+- docs/plans/2026-10-05-model-pc-pixel-label-pipeline.md
+- docs/plans/2026-10-04-d329-matrix-schema.md
+- docs/plans/2026-10-04-d443-signal-supervision.md
+- docs/plans/2026-10-03-pi-ncnn-opencv-implementation.md
+- docs/plans/2026-10-03-app-ownership-shared-transport-and-layout-migration.md
+- docs/plans/2026-10-02-platform-architecture-v02-migration.md
+- docs/plans/2026-10-01-omx-demonstration-lerobot-design.md
+- docs/plans/2026-10-01-pilot-omx-gazebo-practice.md
+- docs/plans/2026-09-30-action-message-identity-design.md
+- docs/plans/2026-09-30-action-message-identity.md
+- docs/plans/2026-09-30-site-app-roles-and-shared-link-plan.md
+- docs/plans/2026-09-30-app-identity-rename-plan.md
+- docs/plans/2026-09-30-dock-device-implementation-plan.md
+- docs/plans/2026-09-29-robot-fleet-protocol-conformance-plan.md
+- docs/plans/2026-09-29-on-demand-activation-measurement-baseline.md
+- docs/plans/2026-09-29-fleet-robot-code-enrollment-plan.md
+- docs/plans/2026-09-15-module-harness-design.md
+- docs/plans/2026-09-17-interface-design-implementation-design.md
+- docs/plans/2026-09-17-remaining-gates-adr-plan.md
+- docs/plans/2026-09-17-remaining-runtime-adr-plan.md
+- docs/plans/2026-09-17-remaining-execution-adr-plan.md
+- docs/plans/2026-09-18-rosy-games-remaining-adr-plan.md
+- docs/plans/2026-09-20-ui-grammar-boundary-plan.md
+- docs/plans/2026-09-20-fleet-console-ops-plan.md
+- docs/plans/2026-09-21-hardware-mapping-g5-design.md
+- docs/plans/2026-09-21-hardware-mapping-g5.md
+- docs/plans/2026-09-21-semantic-road-control-design.md
+- docs/plans/2026-09-21-semantic-road-control.md
+- docs/plans/2026-09-21-camera-preview-dashboard-design.md
+- docs/plans/2026-09-21-camera-preview-dashboard.md
+- docs/plans/2026-09-21-rosy-sd-personalization-design.md
+- docs/plans/2026-09-21-rosy-sd-personalization.md
+- docs/plans/2026-09-21-module-coupling-consistency-plan.md
+- docs/plans/2026-09-22-pinky-pro-flashable-image-design.md
+- docs/plans/2026-09-22-pinky-pro-flashable-image.md
+- docs/plans/2026-09-26-role-menu-rollout.md
+- docs/plans/2026-09-26-role-aware-empty-state-recovery-plan.md
+- docs/plans/2026-09-26-site-task-scheduling-and-broker-design.md
+- docs/plans/2026-09-26-site-task-scheduling-and-broker-implementation.md
+- docs/plans/2026-09-26-web-surface-video-role-boundaries.md
+- docs/plans/2026-09-26-site-host-placement-design.md
+- docs/plans/2026-09-26-site-host-placement-implementation.md
+- docs/plans/2026-09-27-omx-lerobot-control-boundary-implementation-plan.md
+- docs/plans/2026-09-27-product-source-layout-migration.md
+- docs/plans/2026-09-27-rosy-platform-role-and-contract-implementation-plan.md
+- docs/plans/2026-09-27-site-candidate-signing.md
+- docs/plans/2026-09-27-site-registry-credential-separation.md
+- docs/plans/2026-09-27-uiux-surface-closure.md
+- docs/plans/2026-09-28-control-and-contract-boundary-audit.md
+- docs/plans/2026-09-28-site-camera-preview-rectification.md
+- docs/plans/2026-09-28-camera-fault-supervised-demo-design.md
+- docs/plans/2026-09-28-camera-fault-supervised-demo.md
+- docs/plans/2026-09-29-pinky-deployment-fast-path.md
+- docs/plans/2026-09-29-embodied-reasoning-device-action-design.md
+- docs/plans/2026-09-29-er2-manipulation-official-api-research.md
+- docs/plans/2026-09-29-er2-isaac-sim-architecture-assessment.md
+- docs/plans/2026-09-29-er2-semantic-actions-mission-implementation.md
+- docs/plans/2026-09-29-er2-adr-consistency-review.md
+- docs/plans/2026-09-29-fleet-mission-control-arbitration-implementation.md
+- docs/plans/2026-09-29-er2-agent-loop-gap-map.md
+- docs/plans/2026-09-29-d268-policy-evidence-disposition.md
+- docs/plans/2026-09-29-policy-evidence-contract-design.md
+- docs/plans/2026-09-29-policy-evidence-contract.md
+- docs/plans/2026-09-30-goal-evidence-producer-and-verifier-design.md
+- docs/plans/2026-09-30-goal-evidence-producer-and-verifier.md
+- docs/plans/2026-09-30-er2-mission-feedback-loop.md
+- docs/plans/2026-10-04-pilot-device-stop-contract-measurement.md
+- docs/plans/2026-10-04-web-gate-ladder-fleet-readiness-adr-plan.md
+---
+## 지금 상태
+
+- ROS-SIM/ARTIFACT/DEVICE/FIELD는 docs가 문서 모듈이라 N/A다.
+- D-61 Accepted. 모듈 progress/logs와 생성 index/STATUS가 계약 시험으로 산다.
+- concept 16과 D-72 L1·증거·capability 계약이 live다. 운용자 콘솔은 CORE `/dashboard` 하나(D-77). G4 DEVICE는 HOLD (D-80).
+- D-263은 메뉴 추가 판단과 탐색 원칙을 정한다. 역할별 화면 이관(D-204)은 별도 브랜치 작업이며 현재 `/dashboard`의 대체 구현 증거는 없다.
+- D-265는 역할상 허용된 기반 화면을 패널 수와 분리하고 WEB-002의 기존 항목을 새 화면에 배치한다. 구현 순서는 `2026-09-26-role-menu-rollout.md`에 있다.
+- UI/UX 평가 기준은 D-153(세 계층 G1/G2/G3, 판정 단위 표면)이다. 첫 회차(`docs/validation/uiux-surfaces-<date>/`) 전에는 표면 UI/UX 판정을 GO로 쓰지 않는다.
+- D-306는 화면별 소유권과 개선 종료 조건을 고정한다. Fleet 키보드 목표·역할 `/device` 결과·게임 상태/정지·LCD 긴 문자열·Gazebo 뷰어 탭을 SOURCE/LOCAL에서 개선했다. 전체 G2/G3와 실물·현장 증거는 남았고 sensing 진단은 D-266 해제 전 PARKED다.
+- D-309는 CORE/Fleet/게임 호스트의 판정·권한·안전 소유권과 프론트의 표시·입력 책임을 고정한다. Fleet 디스패치 안전·송신 시간 서버 판정·예외 우선 목록, 게임 보드 생성 시각·지연 표시, 역할 화면 SAFE_STOP 표시는 LOCAL 검증됐고 변경 후 로컬 캡처를 확인했다. 화면별 전체 G2/G3와 물리 수용은 HOLD다.
+- D-315는 현재 소스 폴더를 코드 책임 분류로 해석하며, 경로·ROS package·실행 프로세스·최종 writer·배포 closure를 별도 증거로 본다. README와 하위 AGENTS를 현행 트리에 맞췄다. runtime/sensing(package control) 분리는 소비자·launch·writer·시험·설치 경계를 추가 감사한 뒤 별도 ADR로 결정한다. SOURCE 문서 검증은 이번 변경에서 수행하며 ROS-SIM/ARTIFACT/DEVICE/FIELD 수용을 주장하지 않는다.
+- D-317은 `control`과 `core_common`을 실제 producer/consumer·writer·test·install 경계로 감사한 뒤에만 더 작은 재배치를 결정한다. 현재는 D-310 경로와 ROS package명을 유지한다. D-316 Pinky task attempt 결과 상관관계는 SOURCE/LOCAL에 한정한다. [경계 감사 계획](plans/2026-09-28-control-and-contract-boundary-audit.md)
+- D-310은 제품 전용 기존 패키지 여덟 개의 `products/<모델>`·`drivers/` 소스 배치를 Accepted로 결정했다. 격리 후보의 SOURCE/LOCAL·WSL Jazzy 빌드와 이동 전 기준선 대비 CORE/IO ARM64 OCI 설치 closure 동등성을 확인하고, 사용자 요청에 따라 로컬 `main`에 소스 경로를 통합한다. 실제 aarch64/Jazzy native payload 비교는 NOT_RUN이므로 전체 ARTIFACT 동등성, 이미지 발행, 장치·현장 수용은 HOLD다. D-231·D-305의 충돌하는 위치 조항만 부분 대체한다.
+- 남은 게이트는 D-78–D-81이 가른다. ARTIFACT는 네이티브 Pi(D-78). 옛 ROS-SIM GO는 무효(D-79). Fleet 콘솔 v1 gather는 REST(D-81).
+- D-154는 공통 Pinky 이미지와 장치별 identity/Wi-Fi/Fleet bootstrap을 분리한다. 현재 CORE `FleetAgent`와 Hub listen 경로는 미구현이므로 두 대 실기 등록·heartbeat·명령·재접속·단절 HOLD를 보기 전까지 FLEET은 HOLD다.
+- D-164는 Pinky Pro 제품 파일을 ISO가 아닌 서명된 Raspberry Pi raw disk image
+  `rosy-os-pinky-pro-<release-id>-arm64.img.xz`로 고정한다. `.img.xz` 생성, offline
+  signature, read-only mount 검증과 full-media readback은 서로 다른 증거다.
+- ADR 본문은 `docs/adr/D-<n>-<slug>.md`에 있고, 제목·Status 색인은 `reference/ROSY ADR Log.md`가 맡는다. 작성 절차는 `adr/AGENTS.md`를 따른다.
+
+## 다음 gate
+
+- D-462는 기존 Pinky 앱의 반복 영상 등록·픽셀 독립 검수·latest decision export를 확장한다.
+  SQLite 단일 snapshot과 exact approval/class/representation binding을 호스트·Chromium에서 검증한다.
+  실제 영상-camera-CAD projection과 root-owned builder/bridge의 독립 학습 수용은 남아 있다.
+
+1. ARTIFACT/DEVICE는 deploy·rosy_core gate가 소유한다. docs가 GO로 옮기지 않는다.
+2. ADR 본문과 Log 색인의 일치는 harness로 확인한다. 기존 결정과 날짜별 검증 기록은 당시 근거를 보존한다.
+
+## 현재 유효한 금지사항
+
+- ADR은 append-only다: 기존 D-n 본문을 고쳐 쓰지 않고 `Superseded`로 표시한 뒤 새 ID를 만든다. 어휘 정정(D-72 S7)은 예외로 기록했다.
+- API 경로·envelope 변경은 `reference/ROSY API & Protocol Reference.md`와 `contracts/foundation/core_common/protocol/schemas.py`를 함께 바꾼다(D-18).
+- `docs/`에 구현 코드를 두지 않는다.
+- 모듈 `index.md`와 루트 `STATUS.md`는 생성물이다. `tools/harness/rosy_harness.py generate`로만 갱신한다.
+
+## Site Fleet task scheduler (2026-09-26)
+
+- Durable SQLite task acceptance, single-dispatcher claims, traffic-wait identity, expiry, queued cancellation, and console readback are implemented under D-271.
+- Evidence: 485 Fleet tests passed, 5 skipped; 13 Chromium browser tests passed. Docker Compose config validated, Fleet image built, and a loopback container preserved a queued task across restart on its named volume.
+- Broker decision: Gate A has no measured independent-worker/backlog requirement. Keep SQLite and defer RabbitMQ.
+- Ubuntu/SITE/TLS, full Compose, real CORE, robot, GPU, DEVICE, and FIELD acceptance remain open. Automatic policy dispatch remains HOLD.
+- Detailed record: `docs/validation/2026-09-26-site-task-scheduler-local.md`.
+
+## Site candidate publisher authentication (2026-09-27)
+
+- D-301 records detached Ed25519 signing of the exact candidate manifest. The Ubuntu verifier and public key must be enrolled independently of the candidate; no production site key is present.
+- Focused candidate/signature tests: 27 passed; document-placement/harness contract tests: 84 passed; harness lint: 0 errors (19 unrelated evidence-freshness warnings); Compose config and changed-file flake8 passed. A clean `linux/amd64` Docker candidate was built, signed with an X:-only throwaway test key, verified before load, loaded, then verified against all image IDs/platforms.
+- Approved site key provisioning, Ubuntu host activation, RTX/GPU, phone/CORE connection, and FIELD acceptance remain HOLD until the production trust anchor and target are validated. LOCAL artifact checks do not advance those gates.
+
+## Site registry credential separation (2026-09-27)
+
+- D-302 clarifies D-276: each named user's API bearer is distinct from the CORE `/registry` credential. Compose uses a separate `registry_token` secret and `ROSY_SITE_REGISTRY_TOKEN`.
+- Root cause reproduced in Docker: Compose reused the operator token for both `site-users.yaml` and `--token-env`, so Fleet refused startup. D-302 gives CORE `/registry` a separate secret. Regression tests pin the mapping.
+- Commit candidate `9aa985e96eee981b876990b3a57a0db64b803054` was clean-built, signed with an X:-only throwaway key, verified before image load, loaded, and verified against all three image IDs/platforms. The exact candidate's full Compose stack reached healthy Fleet/Vision/proxy; 401/403 role checks, idempotent task/readback/cancel, and named-volume task persistence passed.
+- A synthetic TLS/WebSocket ceiling-phone stream produced a Fleet sighting at the calibrated `(2.0, 1.0)` map position. Missing calibration-corner and 1600 ms stale frames were rejected, and raw frames were not returned by the sighting API. Ubuntu, NVIDIA/RTX, production credentials, physical phone/CORE, and FIELD remain unverified.
+- A synthetic CORE Agent also paired over TLS WebSocket and delivered a PRT event through the candidate's hub. Separate registry-token authorization, viewer-only event history, event-ID deduplication, and event readback after Fleet restart passed. This is simulator evidence, not a live CORE/device acceptance.
+
+## ER2 Fleet/OMX stop-generation fence (2026-09-29)
+
+- D-336 SOURCE implementation adds persisted Fleet authority epochs, configured local OMX StopLocal fanout, an OMX persistent startup-closed software latch, final-submit serialization, and named-operator/Fleet-generation/action-reconciliation re-arm checks. Failed local re-arm recloses Fleet dispatch and requests local stop rollback.
+- Verification: OMX adapter 85 passed/3 skipped; API web 70 passed/13 skipped; contract/harness tests 78 passed; harness lint 0 errors/17 freshness warnings. Fleet suite 658 passed/5 skipped with one unrelated WebSocket integration timeout at `uvicorn.Server.started`; the re-arm contract test passed alone. The isolated WebSocket retry stalled without output and was interrupted; see the execution plan for the exact boundary.
+- The Fleet OMX inventory defaults empty. Deployment UID/socket permissions, injected current-fence provider, ROS/gripper driver selection, safety-rated E-stop, physical stop readback, ROS-SIM, DEVICE, and FIELD remain unverified and disabled.
+
+## 공통 판단 책임·배포 0단계 (2026-10-11)
+
+- D-647 Proposed와 중앙 판단 계획에 논리 책임·배포·승인 경계를 선행 관문으로 추가했다. B안은 잠정 추천이며 D-435는 아직 Proposed다. 실제 분리·모델·알림·장치 시험은 미실행이다.
+
+## 공통 판단 목표 구조와 분리 계획 (2026-10-11)
+
+- D-648 Proposed와 목표 트리/의존/사례표·분리 계획을 작성했다. Situation assessment, Decision 후보, execution/site 순수 규칙, 현재 Fleet 원장 어댑터와 coordination을 구별했다. 실제 소스 이동·설치·장치 gate 변화는 없다.

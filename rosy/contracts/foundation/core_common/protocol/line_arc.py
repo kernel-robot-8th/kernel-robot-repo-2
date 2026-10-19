@@ -1,0 +1,37 @@
+"""D-520 2: the line_follow.arc status record (split from schemas.py, which has no size room)."""
+from __future__ import annotations
+
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+
+class LineArcIrCorrection(BaseModel):
+    """D-520 2: the one IR correction of an arc (side: left | right, phase: away | level | done)."""
+
+    side: Optional[str] = None
+    phase: Optional[str] = None
+    away_m: float = 0.0
+    level_m: float = 0.0
+    used: bool = False
+
+
+class LineArcStatus(BaseModel):
+    """D-520 2: the map-guided arc after a junction instruction's turn (state: running | ended |
+    stopped). Fleet reads from_place_id and a new arc_seq as the instruction carried."""
+
+    arc_seq: int
+    from_place_id: Optional[str] = None
+    end_place_id: str
+    curvature_1pm: float
+    length_m: float
+    travelled_m: float = 0.0
+    state: str = "running"
+    reason: Optional[str] = None
+    ir_correction: LineArcIrCorrection = Field(default_factory=LineArcIrCorrection)
+    #: D-744 6: the arc opened on Fleet's map circle (exit_segment.map_anchor), not the pose-derived one.
+    map_anchor_used: bool = False
+    #: D-744 6: why not (none_sent | malformed | stale | future | no_sample | epoch | carry | radial |
+    #: heading | ir_chain); None when used, or when the arc stopped before its circle was placed.
+    map_anchor_reason: Optional[str] = None
+

@@ -1,0 +1,45 @@
+name: android
+
+# Rosy Cam ceiling camera phone app (operations/site_ui/cam, D-377). JVM unit tests only;
+# no emulator, no signing. Runs when the app tree changes, or the shared
+# inputs its tests read: discovery TXT vectors and the D-370 icon SVGs.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "operations/site_ui/cam/**"
+      - "middleware/robot_ui/pilot/**"
+      - ".github/workflows/android.yml"
+      - "test/fixtures/protocol/**"
+      - "shared/web/**"
+  pull_request:
+    paths:
+      - "operations/site_ui/cam/**"
+      - "middleware/robot_ui/pilot/**"
+      - ".github/workflows/android.yml"
+      - "test/fixtures/protocol/**"
+      - "shared/web/**"
+
+jobs:
+  android-unit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [operations/site_ui/cam, middleware/robot_ui/pilot/android]
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # Both apps use AGP 8.7.2; the committed Cam wrapper pins Gradle 8.11.1.
+      # Select the matrix project explicitly; Pilot has no separate wrapper.
+      - name: Unit tests
+        run: bash "$GITHUB_WORKSPACE/operations/site_ui/cam/gradlew" --project-dir "$GITHUB_WORKSPACE/${{ matrix.app }}" "-Prosy.buildRoot=$RUNNER_TEMP/rosy-android-build" "-Pkotlin.project.persistent.dir=$RUNNER_TEMP/rosy-kotlin-state" testDebugUnitTest --no-daemon

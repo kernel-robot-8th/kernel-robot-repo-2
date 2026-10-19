@@ -1,0 +1,260 @@
+# 역할 화면과 Fleet 배치 재평가 — 2026-09-27
+
+## 범위와 판정
+
+사용자가 지적한 겹침·과밀·시각 위계 문제를 현재 역할별 `/console`, `/setup`, `/device`와 Fleet `/console`에서 확인했다. 이 회차는 Windows Chromium과 가짜 CORE/Fleet 응답을 사용한 **LOCAL** 점검이다. 화면 수정은 완료했지만 D-153의 전체 상태 행렬, 8항 G3 수용과 D-255의 B2 벤치·B3 진단 편입이 남아 있으므로 **제품 전체 UI/UX 판정은 HOLD**다.
+
+| 표면 | 수정 전 근거 | 수정과 현재 LOCAL 근거 |
+|---|---|---|
+| 역할 운용 1366×768 | 관측 열 아래의 카메라가 뷰포트 바닥에서 잘림 | 카메라를 상태 열에 놓고 지도에 관측 열을 모두 줬다. 문서 스크롤 0, 활성 조작 패널과 E-stop은 화면 안에 있다. 상태 열만 내부 스크롤한다. |
+| 작업 준비·설치 390×844 | 입력창의 content-box 때문에 문서가 6px 가로로 넘침. 서로 다른 작업의 경계가 흐림 | 입력창 box sizing을 고치고 절차 패널을 공유 컴포넌트 바깥의 래퍼로 묶었다. 패널 교차와 가로 넘침 0. 절차 페이지의 세로 스크롤은 유지한다. |
+| Fleet 1920×1080 | 지도 대부분은 비었고 24rem 오른쪽 열에 목록·발견·대형·신호가 몰림 | 지도 43%, 개입 57%로 배분하고 목록과 사이트 조작을 개입 영역의 별도 열에 놓았다. 로봇 목록은 자체 스크롤, 문서 스크롤 0. 반복 영문 소제목을 걷고 한국어 제목의 크기를 올렸다. |
+| Fleet 390·320px | 상단 인증·상태·전체 정지가 화면 밖으로 밀리고 320px 로봇 상태 태그가 19px 넘침 | 상단을 폭에 맞춰 행으로 재배치하고 상태 태그가 접히게 했다. 두 폭에서 문서 가로 넘침 0, 상태와 정지 버튼은 화면 안에 있다. |
+| 조작 그룹 키보드 | 비활성화 후 재활성화된 `ui-button` 탭 세 개가 모두 Tab 순서에 들어감 | 실제 공용 `ui-button`을 시험에 포함해 재현했고, 선택 탭 한 개만 Tab 순서에 남도록 복원했다. 방향키 뒤 포커스도 확인했다. |
+
+## 배치 결정과 유지보수 경계
+
+- D-280의 차분한 색과 공유 토큰을 유지한다. 색을 추가하지 않고 작업, 관측, 개입의 공간 비율을 조정했다.
+- 카메라 위치는 `panels.yaml`의 slot 선언으로 옮겼다. API 계약이나 패널 동작은 바꾸지 않았다.
+- 설치·정비 카드의 면과 테두리는 `.procedure-panel` 래퍼가 그린다. 공용 `ui-section`을 화면 CSS에서 다시 그리지 않으므로 공유 컴포넌트 계약을 지킨다. 래퍼는 패널 unmount와 함께 제거된다.
+- Fleet의 관제 범위 설명은 지도 아래 기본 닫힌 disclosure로 옮겼다. 내용은 키보드로 다시 펼칠 수 있다. E-stop·연결 상태·대형 상태는 계속 바로 보인다.
+- 되돌릴 때 이 회차의 manifest, shell CSS/JS, Fleet HTML/CSS를 한 단위로 되돌린다. API나 데이터 저장 형식의 마이그레이션은 없다.
+
+## 검증과 캡처
+
+| 게이트 | 명령·근거 | 판정 |
+|---|---|---|
+| G1 HMI | `ROSY_RUN_BROWSER_TESTS=1 python -m pytest src/hmi/web/test src/hmi/dashboard/test -q` | 최신 `main` 통합 후 105 passed |
+| G1 역할 화면 API | `ROSY_RUN_BROWSER_TESTS=1 python -m pytest src/runtime/api_web/test/test_d283_console_browser.py -q` | 최신 `main` 통합 후 5 passed |
+| G1 Fleet | `ROSY_RUN_BROWSER_TESTS=1 python -m pytest test/test_fleet_console_browser.py -q` | 최신 `main` 통합 후 17 passed |
+| 문서 harness | `python tools/harness/rosy_harness.py lint`; `python -m pytest test/test_network_topology_contracts.py test/test_harness_contracts.py -q` | 0 errors/21 warnings; 75 passed/21 warnings |
+| G2 로컬 뷰포트 | `/console` 1366×768·390×844, `/setup`·`/device` 1366×768·390×844, Fleet 1920×1080·390×844·320×844 | 이 범위의 겹침·가로 넘침 확인 |
+
+캡처는 드라이브 규칙에 따라 저장소가 아닌 `X:\DevTemp\`에만 둔다: `d283-console-core-browser/`, `rosy-uiux-current-surfaces/`, `fleet_console_fit.png`, `fleet_console_mobile_320.png`, `fleet_console_mobile_390.png`. 위 명령으로 재생성할 수 있다. X:의 일회성 캡처가 유지되는 기간에만 직접 육안 대조할 수 있으므로 D-153의 보존형 G2 회차 완료로 세지 않는다.
+
+## D-153 G3 8항 점검
+
+| 항목 | 확인한 근거 | 남은 한계 |
+|---|---|---|
+| 정직 | CORE 미제공 Navigation/SLAM 조작은 비활성, Fleet 불가 조작은 기존 계약 시험에서 차단 | 실제 장치 기능 표본 없음 |
+| 증거 상태 | CORE 최초 기동·Fleet 정상/빈 목록/큐 fixture를 구분 | 현재 역할 화면의 delayed·disconnected 등 전체 상태 캡처 미완료 |
+| 색 | 기존 토큰을 재사용했고 새 장식색을 넣지 않음 | 실제 LCD·현장 조명 판정 없음 |
+| 위계 | 운용 카메라가 지도에서 분리되고 Fleet 목록·사이트 조작에 서로 다른 공간을 부여 | 현장 거리에서 시인성 확인 필요 |
+| 불가역 | E-stop은 상단에 있고 Fleet 확인 대화상자 회귀를 실행 | 물리 정지 readback 없음 |
+| 어휘 | 반복 영문 eyebrow를 없애고 작업·현장 명칭을 유지 | 설치자 인터뷰 없음 |
+| 표면 질문 | 운용 상태/관측/조작, Fleet 로봇/대형/신호를 캡처에서 대조 | 실시간 사이트 운용 판단 없음 |
+| 표면 문법 | 운용·Fleet 데스크톱 무스크롤, 절차 화면 세로 스크롤, 모바일 줄바꿈 확인 | 전 상태·전 장치 크기 수용 아님 |
+
+이 표는 에이전트 육안 검토 기록이다. D-153의 표면별 GO에는 보존된 전체 G2 상태 셀과 G3 위반 0의 별도 판정이 필요하다. D-255 B2/B3, 이미지 설치, 로봇·사이트 실측도 이 LOCAL 작업으로 승격하지 않는다.
+
+## 후속 확인: 현재 역할 화면의 증거 상태
+
+`/console`의 로봇 상태 패널에서 위치·배터리 `delayed`·`disconnected`·`unavailable`이 모두 “수신 대기”로 표시되는 결함을 확인했다. 서버의 증거 판정을 바꾸지 않고, 현재 역할 화면에서 각각 “지연 · 마지막 수신 후 경과 시간”, “연결 끊김”, “정보 없음”으로 구분했다. `fresh`인데 값이 비어 있는 경우도 0으로 대체하지 않는다.
+
+실제 FastAPI 앱과 CORE 서비스 fixture를 통과하는 Chromium 시험은 세 상태 × 1366×768·390×844의 6셀에서 문구, `data-evidence`, 가로 넘침, 페이지 오류를 검사한다. 캡처는 드라이브 규칙에 따라 `X:\DevTemp\rosy-uiux-evidence-matrix\`에만 생성한다. 이 6셀은 **LOCAL 브라우저 증거**이며, 저장소에 보존된 전체 G2 행렬이나 BENCH/DEVICE 증거로 세지 않는다. D-153의 나머지 상태·표면 셀, G3 8항 최종 판정, D-255 B2/B3는 계속 별도 게이트다.
+
+## D-306 후속 확인: Fleet 지도 목표 지정
+
+Fleet 지도에서 `rosy_02` 목표를 선택하고 방향키로 한 칸 이동한 상태를 Windows Chromium의 1920×1080, 390×844, 320×844에서 캡처했다. 세 뷰포트 모두 가로 넘침과 페이지 오류가 없었고, 실제 포커스는 `map-canvas`였다. 대상과 현재 좌표 `(1.07, 1.03) m`, 방향키·Enter·Escape 안내가 보였다. 모바일 뷰포트에서 지도 포커스 링, 상단 전체 정지, 지도 아래 로봇 목록을 육안으로 확인했다.
+
+| 셀 | LOCAL 결과 | 캡처 (일회성, X:) |
+|---|---|---|
+| Fleet 목표 선택 1920×1080 | 포커스·좌표 안내·가로 넘침 0·페이지 오류 0 | `X:\DevTemp\rosy-uiux-d306\fleet_goal_viewport_1920x1080.png` |
+| Fleet 목표 선택 390×844 | 동일 | `X:\DevTemp\rosy-uiux-d306\fleet_goal_viewport_390x844.png` |
+| Fleet 목표 선택 320×844 | 동일 | `X:\DevTemp\rosy-uiux-d306\fleet_goal_viewport_320x844.png` |
+
+Fleet 브라우저 회귀는 18 passed, 포커스 복귀를 보완한 후 목표 지정·확인 계약 집중 회귀는 4 passed였다. 확인 취소 시 목표 API 0회, 승인 시 지정 로봇에 1회가 시험되었다. X: 캡처는 장기 보존 증거가 아니며 빈 지도·지연·연결 끊김·권한 거부 등 전체 G2 셀, G3 최종 판정, 실제 로봇 이동은 HOLD다.
+
+## D-306 후속 확인: 다른 표면의 LOCAL 개선
+
+| 표면 | 이번 변경과 LOCAL 증거 | 남은 판정 |
+|---|---|---|
+| `/device` Host Agent 절차 | 네트워크·릴리스 요청의 대기·거부·오류·접수 문구를 해당 조작 옆에 유지한다. Host Agent를 잃으면 과거 성공 문구를 가린다. 현재 teleop 자격을 빠뜨린 기존 시험 fixture를 정렬한 뒤 dashboard·역할 브라우저 46 passed. | `/setup`·`/device`의 지연·연결 끊김·권한 거부 등 전체 G2와 G3는 미완료. 장치 결과 readback은 별도. |
+| 게임 보드 1280×800 | 최초 데이터 전 점수는 `—`이며 단계·점수·유실 변화만 보조기기에 알린다. `/stop`의 요청 중·접수·실패 및 재시도, 연결 오류의 마지막 수신값을 표시한다. 브라우저 9 passed, 게임 호스트 110 passed, 공유 UI 계약 58 passed. | 접수 문구는 물리 정지 증거가 아니다. 전체 G2·실제 경기/장치 정지는 HOLD. |
+| LCD 320×240 | 긴 로봇 ID·상태·주소를 화면 여백 안에서 말줄임한다. PIL/QR 129 passed, 8개 LOCAL PNG를 육안으로 확인했다. | 거리·각도·조명에서 실물 LCD 판독성이 없어 DEVICE/BENCH HOLD. |
+| Gazebo 읽기 전용 뷰어 1280×800 | 두 탭을 방향키·Home·End로 전환하고 포커스 및 탭·패널 관계를 표시한다. viewer 시험 59 passed, 라이브/지난 결과 캡처에서 가로 넘침·페이지 오류 0. | 데모/호스트 화면 증거로 실제 Gazebo 카메라·인지, 실물 운용을 증명하지 않는다. |
+| 레거시 sensing 진단 | D-253의 PARKED와 D-266의 해제 조건을 유지했다. | 소유·보안·상태 행렬 승인 전 운영 화면 G2/GO에 포함하지 않는다. |
+
+일회성 캡처는 저장소 밖 `X:\DevTemp\games_board_stop_retry.png`, `X:\DevTemp\games_board_host_disconnected.png`, `X:\DevTemp\rosy-uiux-lcd-2026-09-27\`, `X:\DevTemp\rosy-uiux-d306\gazebo_viewer_{live,results}_1280x800.png`에 있다. 이 회차는 상태별 전체 캡처와 독립 수용이 없어 D-153의 표면별 최종 GO를 선언하지 않는다.
+
+## D-306 G2/G3 후속 회차 (현재 판정)
+
+위 수치와 캡처는 최초 배치 회차의 기록이다. 후속 수정·평가의 최신 근거는 아래 표면별 카드가 소유한다. X: 캡처는 일회성 LOCAL 증거이며 실제 로봇·LCD·현장 수용으로 승격하지 않는다.
+
+| 표면 | 후속 회차 근거 | 현재 차단 조건 |
+|---|---|---|
+| Fleet | [fleet-g2-matrix.md](fleet-g2-matrix.md): D-309 후속에서 팔로워 지연 나이, 예외 우선 로스터, 정상 로봇 중립색을 반영했다. 현재 코드에서 8상태×3뷰포트+첫 기동 27장을 다시 캡처했고 브라우저 24 passed, 상태 24셀 pageerror·가로 넘침 0이다. | 실제 사이트·로봇 E-STOP/목표 readback, 사람 G3 수용이 남아 있다. surface **HOLD** |
+| 역할별 `/setup`·`/device` | [roles-g2-matrix.md](roles-g2-matrix.md): 첫 기동 포함 운영자·관리자 매트릭스 60셀을 현재 main에서 재실행했다. 1366×768·390×844 가로 넘침·페이지 오류 0, E-stop 표시 60/60. | 실제 Host Agent readback, CORE/물리 E-STOP, 사람 G3 수용이 남아 있다. 각 surface **HOLD** |
+| 게임 호스트 | [games-g2-matrix.md](games-g2-matrix.md): overlay 생성 시각 기반 지연, 결측 시각 `unavailable`, 공·팀 중립/식별색 규칙을 반영했다. 현재 코드 13셀 캡처, 브라우저 14 passed, 넘침·페이지 오류 0이다. | 실제 카메라·경기·양측 로봇 정지 readback과 사람 G3 수용이 남아 있다. surface **HOLD** |
+| 로봇 얼굴 LCD | [lcd-g2-matrix.md](lcd-g2-matrix.md): 실제 노드 콜백→타이머 경로의 320×240 축소와 만료 복귀를 HOST에서 확인했다. | Pi 설치 폰트, 거리·각도·조도 판독성, 실제 만료·복귀는 아직 측정하지 않았다. DEVICE/BENCH와 surface **HOLD** |
+
+기존 `/console` 6셀은 위 "현재 역할 화면의 증거 상태"에 기록했다. 레거시 sensing 진단은 D-253/D-266에 따라 **PARKED**다. 제품 전체 D-153 UI/UX 판정은 **HOLD**다.
+
+## D-309 실행 후 LOCAL 판정 (2026-09-27)
+
+| 표면 | 현재 코드·브라우저 근거 | 남은 수용 |
+|---|---|---|
+| Fleet | 서버 532 passed/5 skipped, 브라우저 22 passed. 변경 후 `X:\DevTemp\fleet_console_exception_first.png`, `fleet_console_overlay.png`, `fleet_console_mobile_320.png`, `fleet_console_mobile_390.png`를 확인했다. 기본 목록은 개입 대상만 보이고 전체 보기로 정상 로봇에 접근한다. | 로봇 송신은 팔로워 수신·추종 readback이 아니다. 현장 목표 이동·정지와 전체 G3는 HOLD. |
+| 역할 `/setup`·`/device` | 역할 매트릭스 단독 재실행 1 passed. `X:\DevTemp\rosy-uiux-d306-roles-g2\matrix.json`의 56셀 중 SAFE_STOP 6셀, 가로 넘침 0, pageerror 0을 확인했다. 동시 Chromium 실행은 브라우저 종료 오류가 있었고 단독 실행에서 재현되지 않았다. | 실제 CORE·장치의 정지 readback과 전체 역할별 G3는 HOLD. |
+| 게임 보드 | 서버 102 passed, 브라우저 12 passed. 변경 후 `X:\DevTemp\games_board_play.png`, `games_board_delayed.png`에서 생성 시간과 지연을 확인했다. | 실제 카메라·로봇·물리 정지와 전체 G3는 HOLD. |
+| LCD | 기존 PIL 148 passed와 320×240 캡처 9개. 이번 코드 변경 없음. | Pi 실물 가독성·만료·각도·조도는 HOLD. |
+
+위 X: 파일은 일회성 로컬 캡처이며 저장소 증거 아카이브나 DEVICE/FIELD 수용을 대신하지 않는다. D-153의 화면별 G2/G3 GO는 선언하지 않는다.
+
+## D-309 후속 회귀 (LOCAL)
+
+- Fleet 상태 조회 상실 후 마지막 좌표를 가리고 목표·취소 조작을 막는다. 복구 시 새 조회값으로 돌아온다. 브라우저 23 passed, 상실·복구 단독 1 passed. 캡처: `X:\DevTemp\fleet_console_gather-lost-after-live.png`.
+- `/setup` waypoint는 서버가 준 pose 증거가 fresh이고 좌표가 유효할 때만 저장을 연다. 전송 중 중복 요청과 끊김 뒤 재활성화를 막는다. 담당 세션 Chromium 4 passed, 신규 단독 1 passed.
+- 게임 보드는 지연 상태 전환을 보조기기에 알리고 첫 연결 실패 때 경기 정보 없음으로 말한다. 브라우저 13 passed, 영향 시험 3 passed. 캡처: `X:\DevTemp\games_board_delayed.png`, `games_board_first_error.png`.
+- LCD는 잘못된 카드 유지 시간을 기본 15초로 되돌린다. 호스트 시험 137 passed/4 skipped. 실제 LCD 카드 만료·GIF 복귀와 현장 가독성은 미검증이다.
+
+이 회귀는 화면별 LOCAL 범위만 보강한다. 기존 표면별 HOLD와 DEVICE/FIELD 수용 대기는 유지한다.
+
+## D-309 남은 항목 후속 실행 (LOCAL)
+
+- Fleet: 현재 코드로 27장 상태·뷰포트 캡처를 재생성하고, 첫 조회 보류→회복·빈 경보/토글 숨김·지도 주석 가독성을 고쳤다. 브라우저 24 passed, 상태 24셀 페이지 오류·가로 넘침 0. 네이티브 확인은 D-309의 버튼 캡처 + dialog 문구 + 취소 POST 0/승인 POST 1 기록으로 확인했다.
+- 역할 `/device`: Host Agent poll이 진행 중 버튼을 다시 여는 중복 요청을 막았다. 역할 G2 매트릭스는 현재 56셀로 정정했고, 신규 Chromium 2 passed·기존 56셀 가로 넘침/페이지 오류 0을 확인했다.
+- 게임: 현재 코드의 1280×800 상태 13셀을 다시 찍고 레거시 시간 증거 없는 응답을 `unavailable`로 남기는 회귀를 추가했다. 브라우저 14 passed, 상태 캡처 넘침/페이지 오류 0.
+- LCD: 320×240 직접 PIL 시험이 놓친 실제 노드의 1000×750 카드 축소 경로를 고쳤다. 콜백→타이머 호스트 시험 포함 face 139 passed/4 skipped.
+
+현재 X: 캡처와 호스트 시험은 LOCAL이다. 사이트·로봇·Pi LCD 대상 식별/실물 readback, 게임 카메라·정지, G3 사람 평가는 별도 BENCH/DEVICE/FIELD **HOLD**다.
+
+## 역할 화면 첫 기동 (LOCAL)
+
+인증된 `/setup`·`/device`에서 첫 상태 응답을 기다리는 6개 역할·뷰포트 셀을 전체 화면으로 캡처했다. [역할 G2 카드](roles-g2-matrix.md)에 `X:\DevTemp\rosy-uiux-d306-roles-g2\first-boot-matrix.json`과 PNG 경로, 익명 세션 비노출 시험을 기록했다. 병합 후 첫 기동 브라우저 시험 1 passed다. 이는 CORE의 첫 상태 응답 전 화면 표시만 검증하며, 실물 SAFE_STOP 또는 Host Agent 결과는 증명하지 않는다.
+
+2026-09-27 실물 로봇에 읽기 전용으로 접속해 릴리스 `2026.09.26-017`(소스 `b093fe45`)과 CORE·IO·부팅 표시 active를 확인했다. Host Agent는 설치되지 않아 네트워크·릴리스 GET이 `HOST_AGENT_UNAVAILABLE`이다. 현재 main의 UI/LCD 수정은 이 이미지에 없으며, 로봇 주소·인증 값은 카드에 남기지 않는다. 실물 화면 판독·물리 정지·Fleet 연동은 미검증이다.
+
+사이트 Fleet·Vision·HTTPS proxy를 이 PC의 Docker Compose에서 별도 `rosy-uiux-local` 프로젝트로 실행했다. 3개 서비스 healthy, 인증된 Fleet API 200, 실제 컨테이너 화면 1280×800의 페이지 오류·가로 넘침 0을 확인했다. 로컬 접근은 `https://localhost:18445/console`이며 인증 값·자가서명 CA·캡처는 `X:\DevTemp\rosy-uiux-local-site\`에 있다. 등록 로봇은 연결되지 않는 `demo_01`이므로 실제 로봇 페어링·카메라·현장 수용은 HOLD다.
+
+역할 `/device`의 [G2 카드](roles-g2-matrix.md)는 Host Agent 원본 조회 시각을 CORE가 판정하는 계약과 60셀 매트릭스를 반영한다. 첫 기동 6셀은 별도 캡처다. 현재 실물 로봇에는 Host Agent가 설치되지 않았으므로 계약 구현과 LOCAL 화면 검증만 완료했고 DEVICE는 HOLD다.
+
+## 후속 상태 표시 회귀 — LOCAL
+
+| 표면 | 이번 화면 회귀 | 확인 범위 | 남은 수용 |
+|---|---|---|---|
+| Fleet | 대형/발견 조회가 끊기면 과거 릴레이·지도 슬롯·장치 주소를 지우고, 회복하면 새 서버 결과를 표시 | Chromium 실패→복구 2건, 서버 관련 시험 50+40건 | 실제 페어링·목표·정지 readback |
+| `/setup`·`/device` | 도크 기존 유형 재사용 시 숨은 새 유형 입력을 제외; Host 403/503 뒤 과거 SSID·버전을 지우고 조작 잠금 | 역할/Host Chromium 2+4건, 관련 계약 24+62건 | 실물 Host Agent 결과, 권한별 전체 G2, G3 사람 평가 |
+| 게임 | 지연·끊김 때 필드 위치·점수·경기 단계를 마지막 수신값으로 표기하고 fresh 회복 시 해제 | 게임 호스트 111건, 최신 전체 Chromium 14건 | 실제 카메라·양쪽 로봇 정지 |
+| LCD | 비정상 배터리값은 `--`; 카드 중 standby/idle이 와도 카드 만료까지 백라이트 유지 | face 160 passed/4 skipped, 색 19건 | Pi LCD 폰트·거리·각도·조도·실물 만료 |
+
+이 표는 후속 커밋의 LOCAL 회귀를 요약한다. 이전 27/60/13셀 캡처를 새 HEAD에서 전부 다시 찍은 결과가 아니므로 D-153 G2/G3 GO로 올리지 않는다. 로컬 Fleet 이미지를 이번 소스에서 재빌드해 Fleet·Vision·proxy healthy, 인증된 API 200, `console.js` 해시 일치, 1280×800 화면 페이지 오류·가로 넘침 0을 확인했다. `X:\DevTemp\rosy-uiux-local-site\fleet-console.png`는 일회성 캡처이며 실제 로봇/현장 결과가 아니다.
+
+## 실제 화면 배치 개선 — LOCAL (2026-09-28)
+
+| 화면 | 변경 | 검증 | 남은 수용 |
+|---|---|---|---|
+| Fleet 지도 | 지도가 없을 때 빈 캔버스 대신 중앙 안내를 표시하고, 사용할 수 없는 지도 영역의 높이를 줄인다. 실패 시 오래된 픽셀과 목표 선택 상태를 지우며 회복 시 지도를 다시 표시한다. | `2768216f`; 1920/390px Chromium 실패→회복 회귀와 로컬 Docker Fleet 재빌드. Fleet·Vision·proxy healthy, 인증된 health/session/state 200, 화면 pageerror·가로 넘침 0. `X:\DevTemp\fleet_map_unavailable_{1920,390}.png`, `X:\DevTemp\rosy-uiux-local-site\fleet-console.png` | 실제 사이트 지도·로봇 페어링·목표 이동 readback HOLD |
+| `/device` Host 작업 | 핵심 상태와 증거, 조작·결과를 먼저 배치하고 상세 진단을 펼침 영역으로 옮긴다. 모바일 작업 시작 위치는 2395px에서 508px로, 문서 높이는 6661px에서 3346px로 줄었다. | `0656555d`; 1366/390px 전후 캡처, 관련 브라우저 집중 5건·호스트 62건 통과, pageerror·가로 넘침 0. `X:\DevTemp\rosy-role-visual-flow\` | 실물 Host Agent readback·권한별 전체 G2·G3 사람 평가 HOLD |
+| 게임 보드 | 1280px 필드 너비를 588px에서 720px로 늘리고 관측 정보를 옆 패널로 이동한다. 390px 상단 배지 겹침을 해소하고 600px 세로 스크롤에서도 정지 행이 보이게 한다. | `ad90287d`; 1280/390/600px 핵심 Chromium 4건·호스트 111건 통과, 가로 넘침 0. 전체 Chromium 15건 중 처음 2건은 시간 의존 테스트 fixture 때문에 실패했고 clock 고정 후 집중 재시험 2건 통과. `X:\DevTemp\rosy-games-layout\` | 실제 양측 로봇·카메라·정지 readback HOLD |
+| LCD E-STOP | 비상 정지 경보를 화면 상단 36px 배지로 올려 배터리 수치보다 먼저 읽히게 한다. 정상 화면은 픽셀 동일하다. | `5792e551`; 320×240 전후 이미지, face 162건 통과. `X:\DevTemp\rosy-lcd-visual-g3\` | 실제 Pi LCD 거리·각도·조도 판독과 물리 정지 HOLD |
+
+위 결과는 화면 구현과 LOCAL 표시 회귀다. Docker demo 로봇과 호스트 브라우저 캡처는 D-153의 DEVICE/FIELD 또는 G3 사람 평가를 대신하지 않는다.
+
+
+## 2026-09-28 localization pending action regression - LOCAL
+
+The follow-up in `b3d8e6cd` was checked for the 10-second capability poll, repeated initial-pose submission while pending, and repeated SLAM start while pending. The focused panel browser regression passed, and the full panel browser suite passed **14 tests**. The complete role G2 matrix was refreshed: **60 cells**, overflow 0, pageerror 0, E-stop visible 70/70, and canceled confirmation POST 0.
+
+The administrator `/setup` full-shell captures at 1366x768 and 390x844 were visually inspected. PNGs and `matrix.json` are in `X:\DevTemp\rosy-uiux-d306-roles-g2\`. This is LOCAL browser evidence with mocked/local API responses. Physical localization/SLAM readback, physical E-stop, and G3 evaluation were not performed; D-153 and D-255 B2/B3 remain **HOLD**.
+
+
+## 2026-09-28 administrator device security feedback - LOCAL
+
+The `6b0aaaa7` administrator `/device` security follow-up was exercised in Chromium. The panel regression covers token list loss on both polling and post-create/post-delete refresh, preserved create/delete outcomes, one-time secret visibility across token failures and safety polling, dirty safety form preservation during the 15-second readback, save-time field locking, and applying values from the CORE PUT response. The full panel browser suite passed **15 tests**.
+
+The current-main role G2 matrix passed **5 tests** and generated **60 cells** across 1366x768 and 390x844: overflow 0, pageerror 0, E-stop visible 60/60, canceled-confirmation POST 0. Administrator `/device` screenshots were visually inspected at both viewports. PNGs and `matrix.json` are under `X:\DevTemp\rosy-uiux-d306-roles-g2\`. Impeccable detector returned `[]`; `git diff --check` passed.
+
+The regression found that a token-list GET failure after a successful create/delete left the previous list visible. Those refresh failures now use the same stale-list clearing path as poll failures, while preserving the independent mutation result and one-time secret. This completes the SOURCE/LOCAL follow-up check. Actual Host Agent, CORE safety readback, physical E-stop, and G3 evaluation are separate; broader D-153, DEVICE, and FIELD acceptance remain **HOLD**.
+
+## 2026-09-28 host hardware refresh feedback
+
+The board hardware panel keeps the administrator refresh request result separate from periodic measurement status. FastAPI/Chromium interaction checks at 1366×768 and 390×844 confirmed that periodic GET updates do not replace an accepted POST result; the wording still identifies receipt rather than completion. The current role matrix separately covers 60 role/state/viewport cells with no overflow or page errors. Actual Host Agent readback and broader D-153/G3/DEVICE/FIELD acceptance remain **HOLD**.
+
+The system panel now creates the administrator robot-name editor once. Previously each identity poll checked the `<dl>` for a form even though the form was its sibling, so it appended another editor every 30 seconds. FastAPI/Chromium interaction checks at both widths confirmed one form remained after repeated polls, the draft survived, and save receipt was displayed. Physical identity readback and broader D-153/G3/DEVICE/FIELD acceptance remain **HOLD**.
+
+The hardware-panel registry requires the administrator role, so non-administrators cannot reach that button; access is blocked at `/device` entry. A conditional button hint would have been unreachable and was removed. The current role G2 matrix includes operator `/device` denial. Actual Host Agent readback and full D-153/G3/DEVICE/FIELD acceptance remain **HOLD**.
+
+## 2026-09-28 host readback and console mode feedback - LOCAL
+
+The `a81dbcb2` administrator `/device` host-status follow-up was checked with a Chromium panel regression. Runtime, robot identity, CORE capabilities, and detailed inventory polling were exercised independently; each GET failure cleared only its own stale readback while the other successful values remained visible. The focused `/console` regression overlapped a MANUAL mode POST with mode and capability polling, then verified CORE acceptance remained visible while current-mode readback was still IDLE. Later MANUAL readback and a capability error did not overwrite the action outcome.
+
+The full panel browser suite passed **17 tests**. The complete role G2 browser suite passed **6 tests** and refreshed **60 role/surface/state/viewport cells**. All 60 cells had overflow 0 and pageerror 0; E-stop was visible in all 60. The console mode POST and its distinct readback were captured at 1366x768 and 390x844 with overflow 0, no page errors, and visible E-stop. Screenshots and JSON are under `X:\DevTemp\rosy-uiux-d306-roles-g2\`; the role matrix is `matrix.json` and console records are `console-mode-feedback-matrix.json`. Administrator `/device` normal captures at both viewports and both console captures were visually inspected.
+
+These are LOCAL Chromium results using a FastAPI fixture. Actual Host Agent and robot mode readbacks, physical E-stop, user G3 evaluation, and DEVICE/FIELD acceptance remain **HOLD**. D-153 and D-255 B2/B3 are not advanced by these captures.
+
+## 2026-09-28 targeted `/device` feedback verification
+
+Current-main FastAPI/Chromium interaction checks at 1366×768 and 390×844 accelerated only the relevant 10-second and 30-second polls. Both widths retained exactly one identity editor and the typed draft across repeated reads, then displayed the save receipt. A hardware refresh POST receipt remained visible after subsequent measurement GET updates. The full role G2 capture also passed at 60 cells with pageerror 0, horizontal overflow 0, and E-stop visible 60/60. Screenshots are under `X:\DevTemp\rosy-uiux-d306-roles-g2\admin-device-feedback-*.png`. These are local fixtures, not actual Host Agent/CORE readback, physical stop, or G3 human acceptance; DEVICE/FIELD and full D-153 acceptance remain **HOLD**.
+
+## 2026-09-28 console teleoperation feedback - LOCAL
+
+The `1af1fa41` `/console` teleoperation feedback update was exercised in Chromium. Focused browser regressions verified that state, capability, safety, and commissioning read failures keep their own reason until successful readback; readiness polling does not replace hold, release, shared forced-stop, timeout, or terminal-zero delivery-failure feedback.
+
+The full dashboard panel suite passed **19 tests**. Role G2 passed **7 tests** and refreshed **60 cells**: overflow 0, pageerror 0, E-stop visible 60/60, canceled-confirmation POST 0. Additional full-shell `/console` captures at 1366x768 and 390x844 show the robot-state read failure beside the preserved release/stop feedback; both have overflow 0, no page errors, visible E-stop, and one terminal zero POST. The local capture fixture explicitly adds `console.teleop` to the console manifest and returns controlled API responses; this is not runtime capability or robot acceptance evidence. PNGs and `console-teleop-feedback-matrix.json` are under `X:\DevTemp\rosy-uiux-d306-roles-g2\` and were visually inspected.
+
+SOURCE/LOCAL browser verification is complete for this follow-up. Actual device motion/stop readback, physical E-stop, G3, and broader D-153 DEVICE/FIELD acceptance remain **HOLD**.
+
+## 2026-09-28 console line-follow and docking feedback - LOCAL
+
+The `02600b2a` `/console` line-follow and docking changes were exercised in focused Chromium regressions and in the full shell. Line-follow status loss cleared old mode facts and disabled both controls until fresh status returned; Navigation capability errors stayed separate from the POST result. A pending line-follow request remained locked during polling, and CORE acceptance stayed distinct from mode readback. Docking status loss cleared stale state and blocked commands; the selected dock survived a list refresh, and status/list/action messages stayed separate while pending requests locked all controls.
+
+The full dashboard panel suite passed **21 tests**. Role G2 passed **8 tests** and refreshed **60 cells**: horizontal overflow 0, page errors 0, E-stop visible 60/60, and canceled-confirmation POST 0. Full-shell screenshots cover both panels at 1366x768 and 390x844 with overflow 0, no page errors, visible E-stop, and one expected POST per panel. The fixture adds line-follow and docking tabs to the console manifest and returns controlled local API responses; it does not prove deployed capability advertisement, robot motion, or physical docking behavior. Screenshots and `console-line-follow-docking-matrix.json` are under `X:\DevTemp\rosy-uiux-d306-roles-g2\line-follow-docking\` and were visually inspected.
+
+SOURCE/LOCAL browser verification is complete for this follow-up. Actual line-follow and docking readback/motion, physical E-stop, G3, DEVICE/FIELD, and broader D-153 acceptance remain **HOLD**.
+
+## 2026-09-28 console map freshness and action feedback - LOCAL
+
+The `5c414c2c` map follow-up was checked in focused Chromium regressions and full-shell captures. Robot-state, Navigation-capability, and commissioning read errors appeared in the readiness region without replacing map-data status. With no map, clicking a target produced an explicit not-sent result and no confirmation or POST. After map recovery, accepted and failed target requests each remained visible after a manually triggered 10-second map refresh.
+
+The full dashboard panel suite passed **22 tests**. Dedicated full-shell `/console` captures at 1366x768 and 390x844 showed an empty-map state, robot-state read failure, and separate no-request action feedback; each had overflow 0, no page errors, and visible E-stop. The fixture uses local controlled API responses and inserts the map panel into the local console manifest if absent. Screenshots and `console-map-data-action-matrix.json` are under `X:\DevTemp\rosy-uiux-d306-roles-g2\map-data-action\` and were visually inspected.
+
+The 2026-09-28 attempt recorded **8 passed, 1 failed** in the administrator `/device` `confirm_cancel` case and did not complete a fresh matrix. This result is superseded by the latest-main rerun recorded in [roles-g2-matrix.md](roles-g2-matrix.md): the full role procedure matrix passed, including that cancel path. Actual robot/map readback, target application, physical E-stop, G3, DEVICE/FIELD, and D-153 acceptance remain **HOLD**.
+
+## 2026-09-28 administrator board hardware refresh feedback - LOCAL
+
+The `17f30137` `/device` board-hardware refresh feedback was checked with a focused Chromium panel regression and full-shell captures. While the refresh POST was pending, a newer measurement GET changed the measurement status without replacing the pending action result. The accepted POST receipt remained visible through later measurements, and a POST failure remained visible through a measurement-read failure. The UI labels acceptance as request receipt and points operators to the measurement timestamp/readback to confirm completion.
+
+The focused panel regression passed **1 test**. The full-shell capture test passed at 1366x768 and 390x844; both screenshots were visually inspected and showed overflow 0, no page errors, and visible E-stop. The local fixture accelerates only the hardware poll and provides controlled API/measurement responses. Screenshots and `admin-hardware-refresh-matrix.json` are under `X:\DevTemp\rosy-uiux-d306-roles-g2\host-hardware-refresh\`.
+
+This completes SOURCE/LOCAL browser verification for this follow-up. It does not prove Host Agent hardware measurement or physical device completion. Full G2 coverage, G3, DEVICE/FIELD, and broader D-153 acceptance remain **HOLD**.
+
+## 2026-09-28 administrator identity editor polling regression - LOCAL
+
+The `df260822` system-panel fix was verified with a focused Chromium interaction regression and full-shell captures. Repeated identity readbacks did not create duplicate forms; an edited name remained in the single editor during later polls. Saving disabled the input and button while pending. After the PUT receipt, a stale identity readback did not replace the receipt or draft, and the action feedback remained separate from current identity status.
+
+The focused panel test passed **1 test**. The full-shell test passed at 1366x768 and 390x844. Both captures were visually inspected and reported horizontal overflow 0, page errors 0, and visible E-stop. The fixture accelerates only the 30-second identity poll and returns a controlled stale GET plus accepted PUT response. Screenshots and `admin-device-identity-feedback-matrix.json` are under `X:\DevTemp\rosy-uiux-d306-roles-g2\admin-device-identity-feedback\`.
+
+This completes SOURCE/LOCAL browser verification for `df260822`. It does not prove actual Host Agent or physical identity readback. Full G2 coverage, G3, DEVICE/FIELD, and broader D-153 acceptance remain **HOLD**.
+
+## 2026-09-28 board hardware permission hint reachability - LOCAL
+
+The reported `b61fb526` non-administrator hint is not present in the current `main` source: later commit `fb2b220c` removed the conditional message after confirming the device surface and `host.hardware` panel both require the administrator role. A focused current-main Chromium role check passed: an operator receives the access-denied `/device` screen, a link back to `/console`, and no hardware or host-operations panel. Desktop and mobile denial captures were visually inspected.
+
+The administrator hardware panel regression passed **1 test**: the action status starts hidden, the refresh button references it with `aria-describedby`, and the live request result appears after interaction. The full-shell admin capture test passed at 1366x768 and 390x844; accepted-request feedback is visible in both. Operator denial captures and matrix are under `X:\DevTemp\rosy-uiux-d306-roles-g2\operator-device-entry-denied\`; admin hardware captures remain under `X:\DevTemp\rosy-uiux-d306-roles-g2\host-hardware-refresh\`.
+
+LOCAL browser verification covers the actual admin action and the actual operator entry denial. It cannot verify the claimed non-admin disabled-button explanation because that control is unreachable under current access policy. Exposing it requires a separate role/surface access decision. Full G2 and Impeccable were not rerun; actual Host Agent readback, G3, DEVICE/FIELD, and broader D-153 acceptance remain **HOLD**.
+
+## 2026-09-28 latest-main role G2 rerun after readiness wait fix
+
+The role G2 test on `757fb38f` first stopped at administrator `/device` `confirm_cancel`: the fixture asserted rollback availability after waiting only for panel creation, before the Host Agent release readback had arrived. The fixture returned a fresh release record with previous version `r1`; the panel enables rollback after that readback. I updated the test to wait for the release card to report available data and `r1` before testing the cancel path.
+
+Rerun command: `ROSY_RUN_BROWSER_TESTS=1 python -X utf8 -m pytest src/hmi/dashboard/test/test_role_g2_browser.py::test_role_procedure_g2_local_matrix -q` ? **1 passed, 60 cells**. The generated matrix has overflow 0, page errors 0, and E-stop visible in 60/60 cells. The failed attempt did not write a completed matrix; the passing rerun did.
+
+This adjusts fixture synchronization only, not product behavior. Local API evidence does not prove physical E-stop, Host Agent operation, G3, DEVICE/FIELD, or D-153 acceptance; those remain **HOLD**.
+
+## 2026-09-28 Fleet map/camera and accessible section headings
+
+Desktop Fleet now places its map and camera preview side by side so the declared 1920×1080 screen fits without page scrolling. At 390px and 320px the content stacks vertically; the camera frame no longer pushes the page sideways. The discovery, formation, and signals groups are semantic level-three headings with the prior visual styling.
+
+The recaptured 24 status cells at 1920×1080, 390×844, and 320×844 have no horizontal overflow or page errors; desktop cells also have no vertical document overflow. Three first-boot captures were refreshed. The full Fleet browser and dialog suite passed **32 tests**, Fleet host tests passed **543** with **5 skipped**, and the tagged Docker Fleet image built and ran its CLI help command. Artifacts are under `X:\DevTemp\rosy-uiux-d309-fleet-g2\`.
+
+These are SOURCE/LOCAL results. Real site TLS/camera, CORE/robot readback, physical E-stop, operator G3, and DEVICE/FIELD remain **HOLD**.
+
+## 2026-09-28 overhead camera discovery empty state - DEVICE UI
+
+On the connected Lenovo tablet (1200x2000), the camera settings screen discovered a robot CORE record but no Site Vision receiver. Before the follow-up, the visible robot record suppressed the generic empty state, leaving the camera destination unclear. The screen now separates the Site Vision and robot CORE groups, explains when no receiver is advertised, marks CORE as informational, labels the 18-second discovery window, and offers a rescan when records are present.
+
+The updated debug app was installed with `adb install -r` without clearing app data. Screenshots under `X:\DevTemp\rosy-overhead-device-review\` show the initial screen, discovery in progress, completed scan with a missing receiver, and 1.3x system text scale. The text-scale setting was restored to 1.0. The settings content remained readable and within the viewport at the tested size.
+
+This verifies device UI layout and the local mDNS result only. No Site Vision endpoint was discovered, and no camera stream, TLS handshake, or frame readback was tested. It does not advance D-153, G3, or FIELD acceptance.

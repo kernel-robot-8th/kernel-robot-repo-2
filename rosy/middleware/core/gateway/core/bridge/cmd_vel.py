@@ -1,0 +1,300 @@
+"""바퀴로 나가는 한 주기 (ROS 없이 검사할 수 있게 떼어낸 것).
+
+`_publish_cmd_vel` 은 네 가지를 순서대로 한다: 값을 고르고, 준비가 안 됐으면
+0 으로 누르고, 바퀴로 내보내고, 그 **뒤에** 알린다. 순서가 기능의 절반인데
+브리지 안에 있으면 rclpy 없는 호스트에서 아무도 검사하지 못한다 — 알림 한
+줄을 지워도 모든 테스트가 초록이다. 그래서 순서만 여기로 나온다.
+
+SAF-002 정지가 늦어지지 않게 하는 규칙 두 가지:
+
+* 이벤트 발행(`announce_pending`)은 구독자를 동기로 부르고 그중 하나가 감사
+  로그를 쓴다. 내보내기 앞에 두면 그 비용만큼 정지가 늦게 바퀴에 닿는다.
+* 절전 정책의 관측(`on_activity`)도 마찬가지다. 관측이 바퀴 앞에 설 이유가
+  없다. 절전 정책이 바퀴에 미치는 것은 `motion_ready` 하나이고(D-440 5), 그
+  게이트는 값을 0 으로 누를 수만 있다.
+"""
+
+from __future__ import annotations
+
+from threading import RLock
+import time
+from typing import Any, Callable, Optional, Protocol
+
+from core_features.command.manager import ZERO, Twist, CommandManager
+from core_features.command._execution_fence import CONTEXT_CHANGED
+from rosy.contracts.motion import (BaseTwist, EstopStatus, GuardedMotion, MotionKind,
+                                   PortCapabilities, PortDecision, PortState)
+
+
+# Stage (b) records the existing clip implementation; Arbiter admission is (c).
+GUARD_REVISION = "command-manager-b-v1"
+GUARD_LIFETIME_S = 0.3
+_BINDING_TOKEN = object()
+# A faulting motion gate would otherwise log at 50 Hz; same 5 s as the bridge's wheels_sent warning.
+GATE_FAULT_WARN_PERIOD_S = 5.0
+_gate_fault_warned_at = float("-inf")
+
+
+class PinkyTwistPort:
+    """Cycle-local identity gate around the existing final writer callback.
+
+    This private Python capability is a trusted-process invariant, not a
+    security boundary against code inspecting private attributes. It never
+    grants producer authority, reads physical E-stop or releases any stop.
+    """
+
+    def __init__(self, send: Callable[[Any], None], *, clock=time.monotonic):
+        self._send = send
+        self._clock = clock
+        self._lock = RLock()
+        self._original = None
+        self._issued_at = None
+        self._closed = False
+        self._state = "ready"
+
+    def _bind(self, cmd: GuardedMotion) -> None:
+        with self._lock:
+            if (self._closed or self._issued_at is not None or type(cmd) is not GuardedMotion
+                    or type(cmd.payload) is not BaseTwist or cmd._token is not _BINDING_TOKEN
+                    or cmd.guard_revision != GUARD_REVISION):
+                raise ValueError("invalid cycle grant")
+            self._issued_at = self._clock()
+            self._original = cmd
+
+    def submit(self, cmd: GuardedMotion) -> PortDecision:
+        with self._lock:
+            if (self._closed or type(cmd) is not GuardedMotion or cmd is not self._original
+                    or cmd._token is not _BINDING_TOKEN):
+                return PortDecision(False, self._state, "invalid_cycle_grant")
+            now = self._clock()
+            if not self._issued_at <= now < self._issued_at + GUARD_LIFETIME_S:
+                self._original = None
+                self._state = "hold"
+                return PortDecision(False, "hold", "cycle_grant_expired")
+            # Consume under the same lock before entering the writer. A lost
+            # ACK or exception never makes this original replayable.
+            self._original = None
+            self._state = "active"
+        try:
+            self._send(Twist(cmd.payload.linear_mps, cmd.payload.angular_radps))
+        except Exception:
+            with self._lock:
+                self._state = "hold"
+            raise
+        return PortDecision(True, "active", "written")
+
+    def close(self) -> None:
+        with self._lock:
+            self._original = None
+            self._closed = True
+            self._state = "disabled"
+
+    def capabilities(self) -> PortCapabilities:
+        return PortCapabilities((MotionKind.BASE_TWIST,), frames=("base_link",), supports_stream=True)
+
+    def cancel(self, intent_id: str) -> PortDecision:
+        # Stage (b) has no intent header/identity and cannot cancel by id.
+        return PortDecision(False, self.state().state, "intent_identity_unavailable")
+
+    def state(self) -> PortState:
+        with self._lock:
+            return PortState(self._state)
+
+    def estop_status(self) -> EstopStatus:
+        return EstopStatus(None)
+
+
+class _Output(Protocol):
+    linear: float
+    angular: float
+
+
+class _Command(Protocol):
+    def select_output(self) -> _Output: ...
+    def announce_pending(self) -> None: ...
+
+
+class _Power(Protocol):
+    # 인자 이름까지 `PowerManager.on_activity` 와 같게 적는다 — 구조적
+    # 타입은 이름으로 맞추므로, 다르게 적으면 mypy 가 들어오는 날 오류다.
+    def on_activity(self, source: str) -> None: ...
+
+
+class _Readiness(Protocol):
+    def is_ready(self) -> bool: ...
+
+
+def cmd_vel_cycle(command: _Command, power: _Power, send: Callable[[Any], None],
+                  readiness: Optional[_Readiness] = None,
+                  warn: Optional[Callable[[str], None]] = None,
+                  *, trial_guard=None, now=None,
+                  motion_ready: Optional[Callable[[], bool]] = None,
+                  notify_written: Optional[Callable[[Twist], None]] = None) -> None:
+    """Serialize every actual manager cycle, including all ZERO/exception paths.
+
+    An overlapping/reentrant cycle cannot add a second writer. With a private
+    restriction it requests STOP; it does not assert a physical stop happened.
+    Sticky start also prevents installing a restriction over an in-flight legacy
+    selection. Protocol-only test doubles keep their existing uninstalled path.
+    """
+    actual = isinstance(command, CommandManager)
+    if actual:
+        if not command._cycle_lock.acquire(blocking=False):
+            if command._execution_fence is not None:
+                command._execution_fence.request_stop()
+            return
+        command._cycle_started = True
+    try:
+        _cmd_vel_cycle(command, power, send, readiness, warn, trial_guard=trial_guard,
+                       now=now, motion_ready=motion_ready, notify_written=notify_written,
+                       execution_fence=command._execution_fence if actual else None)
+    finally:
+        if actual:
+            command._cycle_lock.release()
+
+
+def _cmd_vel_cycle(command, power, send, readiness, warn, *, trial_guard,
+                   now, motion_ready, notify_written, execution_fence):
+    """값을 고르고, 바퀴로 내보내고, 그 뒤에 알린다.
+
+    `readiness` 가 HOLD 이면 고른 값 대신 0 을 내보낸다 — 최종 발행자는
+    50 Hz 로 살아 있되, 하드웨어 그래프가 HOLD 인 동안 낡은 Nav2/수동 후보를
+    흘려보내지 않는다.
+
+    `motion_ready` (D-440 5) 도 같은 준비 HOLD 다: 절전에서 깨어난 뒤 주행에
+    필요한 기기(LiDAR 등)가 준비를 확인하기 전에는 0 이다. 이 게이트는 값을 0
+    으로 누를 수만 있다 — E-stop·워치독·먹서 선택은 `select_output` 이 그대로
+    정하고, 발행과 `announce_pending` 은 매 주기 그대로 일어난다. 정확히 `True`
+    가 아니면(False, 다른 값, 예외) 준비되지 않은 것으로 본다.
+
+    `send` 에는 고른 값을 **통째로** 넘긴다. `(linear, angular)` 두 개를
+    자리로 넘기면 받는 쪽에서 둘을 바꿔 적어도 타입은 맞고, 그것은
+    전진 명령을 제자리 회전으로 바꾼다.
+
+    `notify_written` observes successful host writes after submission locks and
+    the cycle port close, before power/events. It is not a physical wheel ACK.
+    Observer failures never retry motion or turn a successful write into an
+    unknown delivery. Unknown writes receive no success notification.
+    """
+    def notify(out):
+        if notify_written is not None:
+            try:
+                notify_written(out)
+            except Exception as exc:
+                if warn is not None:
+                    warn(f"cmd_vel write observation failed: {exc}")
+
+    def zero():
+        send(ZERO)
+        notify(Twist())
+
+    receipt = None
+    try:
+        out = command.select_output()
+        if execution_fence is not None:
+            receipt = execution_fence.receipt_for(out)
+    except Exception as exc:
+        # 고르기가 예외를 내면 (안전 정책 평가 등) 0 을 내보낸다. 예외가 rclpy
+        # 타이머 밖으로 새면 50 Hz 최종 발행자가 멈추고, 바퀴는 마지막 값을 쥔다.
+        if trial_guard is not None:
+            try:trial_guard.stop('selection_failed')
+            except Exception:pass
+        zero()
+        if warn is not None:
+            warn(f"cmd_vel output failed: {exc}")
+        return
+    gate_fault = None
+    if readiness is not None:
+        try:
+            ready = readiness.is_ready()
+        except Exception as exc:
+            if execution_fence is None:
+                raise
+            if receipt is not None:
+                execution_fence.request_stop(receipt.context.parent)
+            ready, gate_fault = False, exc
+        if not ready:
+            out = ZERO
+    if motion_ready is not None:
+        try:
+            ready = motion_ready() is True
+        except Exception as exc:
+            if execution_fence is not None and receipt is not None:
+                execution_fence.request_stop(receipt.context.parent)
+            ready, gate_fault = False, exc   # warned after the wheels, like every other cost
+        if not ready:
+            out = ZERO
+    port = None
+    try:
+        port = PinkyTwistPort(send)
+        guarded = GuardedMotion(BaseTwist(out.linear, out.angular), GUARD_REVISION, _BINDING_TOKEN)
+        port._bind(guarded)
+    except Exception as exc:
+        if port is not None:
+            port.close()
+        if execution_fence is not None and receipt is not None:
+            execution_fence.request_stop(receipt.context.parent)
+        if trial_guard is not None:
+            try:trial_guard.stop('port_binding_failed')
+            except Exception:pass
+        zero()
+        if warn is not None:
+            warn(f"cmd_vel guard failed: {exc}")
+        return
+    submission_error = None
+    def submit():
+        if execution_fence is None:
+            return port.submit(guarded)
+        decision = execution_fence.submit(
+            receipt, out, (guarded.payload.linear_mps, guarded.payload.angular_radps),
+            lambda: port.submit(guarded))
+        return (PortDecision(False, "hold", "execution_context_changed")
+                if decision is CONTEXT_CHANGED else decision)
+    try:
+        try:
+            if trial_guard is None:
+                decision = submit()
+            else:
+                from core_features.command.bounded_trial import BoundedTrial
+                if type(trial_guard) is not BoundedTrial:
+                    raise ValueError('exact bounded trial owner required')
+                decision = trial_guard.submit_fenced(
+                    guarded.payload.linear_mps,guarded.payload.angular_radps,
+                    submit,now=now)
+        except Exception as exc:
+            if trial_guard is None and execution_fence is None:raise
+            if execution_fence is not None and receipt is not None:
+                execution_fence.request_stop(receipt.context.parent)
+            if trial_guard is not None:
+                try:trial_guard.stop('submission_unknown')
+                except Exception:pass
+            submission_error = exc
+    finally:
+        port.close()
+    if submission_error is not None:
+        try:zero()
+        except Exception:pass  # Physical stop remains UNKNOWN, never retry motion.
+        if warn is not None:warn(f'cmd_vel delivery unknown: {submission_error}')
+        return
+    if decision is None:
+        if execution_fence is not None and receipt is not None:
+            execution_fence.request_stop(receipt.context.parent)
+        zero()
+        return
+    if not decision.accepted:
+        if trial_guard is not None:
+            try:trial_guard.stop('submission_rejected')
+            except Exception:pass
+        zero()
+        if warn is not None:
+            warn(f"cmd_vel guard refused: {decision.reason}")
+        return
+    notify(Twist(guarded.payload.linear_mps, guarded.payload.angular_radps))
+    if guarded.payload.linear_mps != 0.0 or guarded.payload.angular_radps != 0.0:
+        power.on_activity("cmd_vel")
+    command.announce_pending()
+    if gate_fault is not None and warn is not None:
+        global _gate_fault_warned_at
+        if time.monotonic() - _gate_fault_warned_at >= GATE_FAULT_WARN_PERIOD_S:
+            _gate_fault_warned_at = time.monotonic()
+            warn(f"cmd_vel motion readiness failed: {gate_fault}")
