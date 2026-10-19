@@ -1,0 +1,244 @@
+"""core.bridge.goal_tracker — Nav2 목표 세대 관리. ROS 무의존.
+
+`goal()` 이 진행 중 재목표를 막던 동안에는 액션 핸들이 항상 하나였고, 브리지는
+`_goal_handle` 하나로 충분했다. SWM-001 의 moving goal 이 그 전제를 깼다:
+2 Hz 로 목표를 갈아끼우면 선점된 목표의 결과가 뒤늦게 도착하고, 그것을 최신
+목표의 결과로 읽으면 두 가지가 무너진다 —
+
+1. 선점 결과(abort)가 nav_state 를 FAILED 로 떨어뜨려 SWM-004 HOLD 의 취소가
+   `NavigationManager.cancel` 의 early-return 에 걸린다. 로봇은 계속 달린다.
+2. 결과 콜백이 핸들을 지워버려, 정작 살아 있는 목표를 취소할 수단이 사라진다.
+
+그래서 목표에 세대(generation)를 붙이고, **살아 있는 핸들 전부**를 들고 있는다.
+여기에는 rclpy 가 없다 — 핸들은 그냥 불투명한 객체다.
+"""
+
+from __future__ import annotations
+
+import threading
+from typing import Any
+from uuid import UUID
+
+
+class GoalTracker:
+    """어떤 결과가 현재 목표의 것인지, 무엇을 취소해야 하는지."""
+
+    MAX_CANCELLED_CORRELATIONS = 128
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._generation = 0
+        self._live: dict[int, Any] = {}
+        self._correlation_ids: dict[int, str | None] = {}
+        self._native_ids: dict[int, UUID] = {}
+        self._pending_generations: set[int] = set()
+        self._unresolved_overflow = False
+        self._transport_generation = 0
+        self._cancelled_correlation_ids: dict[int, str] = {}
+
+    @property
+    def live_count(self) -> int:
+        with self._lock:
+            return len(self._live)
+
+    def transport_snapshot(self) -> tuple[int, bool, bool]:
+        with self._lock:
+            return (self._transport_generation, bool(self._pending_generations) or self._unresolved_overflow,
+                    bool(self._live))
+
+    def opening(self, correlation_id: str | None = None,
+                native_run_id: UUID | None = None) -> int:
+        """목표를 보내기 직전. 이 세대 번호를 콜백까지 들고 간다."""
+        with self._lock:
+            self._correlation_ids.clear()
+            self._generation += 1
+            self._transport_generation += 1
+            self._pending_generations.add(self._generation)
+            if len(self._pending_generations) > self.MAX_CANCELLED_CORRELATIONS:
+                self._pending_generations.pop()
+                self._unresolved_overflow = True
+            self._correlation_ids[self._generation] = correlation_id
+            if native_run_id is not None:
+                self._native_ids[self._generation] = native_run_id
+            return self._generation
+
+    def native_run_id(self, generation: int) -> UUID | None:
+        with self._lock:
+            return self._native_ids.get(generation)
+
+    def correlation_id(self, generation: int) -> str | None:
+        with self._lock:
+            correlation_id = self._correlation_ids.get(generation)
+            if correlation_id is not None:
+                return correlation_id
+            canceled_id = self._cancelled_correlation_ids.get(
+                generation)
+            return canceled_id
+
+    def was_cancelled(self, generation: int) -> bool:
+        with self._lock:
+            correlation_id = self._cancelled_correlation_ids.pop(
+                generation, None)
+            return correlation_id is not None
+
+    def is_cancelled(self, generation: int) -> bool:
+        with self._lock:
+            return generation in self._cancelled_correlation_ids
+
+    def accepted(self, generation: int, handle: Any) -> bool:
+        """액션 서버가 받아들였다.
+
+        현재 세대면 등록하고 True. 지난 세대면 **등록하지 않고** False 다 —
+        호출자는 그 핸들을 바로 취소해야 한다. 등록해 버리면 send 와 accept
+        사이에 취소된 목표가 살아남는다: 취소 시점에는 아직 핸들이 없어
+        아무것도 못 거두고, 뒤늦게 도착한 수락이 그것을 되살린다.
+        """
+        with self._lock:
+            if generation != self._generation:
+                self._correlation_ids.pop(generation, None)
+                return False
+            self._live[generation] = handle
+            self._pending_generations.discard(generation)
+            self._transport_generation += 1
+            return True
+
+    def rejected(self, generation: int) -> bool:
+        with self._lock:
+            self._live.pop(generation, None)
+            self._pending_generations.discard(generation)
+            self._correlation_ids.pop(generation, None)
+            self._native_ids.pop(generation, None)
+            self._transport_generation += 1
+            return generation == self._generation
+
+    def finished(self, generation: int) -> bool:
+        """결과 도착. 현재 세대면 True, 선점된 목표의 뒤늦은 결과면 False."""
+        with self._lock:
+            self._live.pop(generation, None)
+            self._pending_generations.discard(generation)
+            self._correlation_ids.pop(generation, None)
+            self._native_ids.pop(generation, None)
+            self._transport_generation += 1
+            return generation == self._generation
+
+    def cancel_all(self) -> list[Any]:
+        """취소해야 할 핸들 전부. 세대를 올려 이후 도착하는 결과를 전부 stale 로 만든다.
+
+        핸들 하나만 들고 있으면 send 와 accept 사이의 목표를 놓친다 — 그
+        창에서 취소하면 아무것도 취소되지 않은 채 상태만 CANCELED 가 된다.
+        """
+        with self._lock:
+            handles = list(self._live.values())
+            self._pending_generations.update(self._live)
+            if len(self._pending_generations) > self.MAX_CANCELLED_CORRELATIONS:
+                self._unresolved_overflow = True
+            active_correlations = self._correlation_ids.items()
+            for gen, corr_id in active_correlations:
+                if corr_id is not None:
+                    self._cancelled_correlation_ids[gen] = corr_id
+            while (len(self._cancelled_correlation_ids)
+                   > self.MAX_CANCELLED_CORRELATIONS):
+                oldest = next(iter(self._cancelled_correlation_ids))
+                self._cancelled_correlation_ids.pop(oldest)
+            self._live.clear()
+            self._correlation_ids.clear()
+            # Late callback identity remains tied to its original generation.
+            while len(self._native_ids) > self.MAX_CANCELLED_CORRELATIONS:
+                self._native_ids.pop(next(iter(self._native_ids)))
+            self._generation += 1
+            self._transport_generation += 1
+            return handles
+
+
+def on_response(goals: GoalTracker, nav, future, generation: int, *,
+                attach_result) -> None:
+    """Send-goal future → 수락·거절, 그리고 지나간 세대의 수락 차단.
+
+    rclpy 없이 전부 확인할 수 있도록 핸들은 불투명 객체다. `attach_result`
+    (result future 를 이 세대에 묶는 일)만 브리지가 준다 — 그쪽이 ROS 다.
+    """
+    native_run_id = goals.native_run_id(generation)
+    try:
+        goal_handle = future.result()
+    except Exception:
+        if native_run_id is not None:
+            nav.on_backend_unknown(native_run_id)
+            return
+        raise
+    if goal_handle is None or not goal_handle.accepted:
+        correlation_id = goals.correlation_id(generation)
+        was_cancelled = goals.is_cancelled(generation)
+        if goals.rejected(generation):
+            if native_run_id is not None:
+                nav.on_result(False, "REJECTED", correlation_id=correlation_id,
+                              native_run_id=native_run_id)
+            elif correlation_id is None:
+                nav.on_result(False, "REJECTED")
+            else:
+                nav.on_result(False, "REJECTED", correlation_id=correlation_id)
+        elif correlation_id is not None and was_cancelled:
+            goals.was_cancelled(generation)
+            nav.on_correlated_result(False, error="REJECTED",
+                                     correlation_id=correlation_id)
+        return
+    if not goals.accepted(generation, goal_handle):
+        # 이미 지나간 목표의 수락이다(선점됐거나, 보내는 사이 취소됐다).
+        # 살려두면 아무도 거두지 않는 Nav2 목표가 남는다. 취소 뒤 결과까지
+        # 추적해야 pending generation 이 실제로 닫힌다 (CID 없는 goal 포함).
+        goal_handle.cancel_goal_async()
+        attach_result(goal_handle.get_result_async(), generation)
+        return
+    if native_run_id is None:
+        nav.on_goal_accepted()
+    else:
+        nav.on_goal_accepted(native_run_id=native_run_id)
+    attach_result(goal_handle.get_result_async(), generation)
+
+
+def on_result(goals: GoalTracker, nav, future, generation: int) -> None:
+    """Result future → `nav.on_result`. 선점된 목표의 뒤늦은 결과는 무시한다.
+
+    `result.status == 4` 는 `GoalStatus.STATUS_SUCCEEDED` 다 — rclpy 는
+    성공 여부가 아니라 상태 코드를 주므로 그 비교가 전부다.
+    """
+    correlation_id = goals.correlation_id(generation)
+    native_run_id = goals.native_run_id(generation)
+    result_error = None
+    try:
+        result = future.result()
+    except Exception as exc:
+        if native_run_id is not None:
+            nav.on_backend_unknown(native_run_id)
+            return  # keep the handle until explicit cancel; backend state is unknown
+        result_error = exc
+        result = None
+    if not goals.finished(generation):
+        if correlation_id is not None and goals.was_cancelled(generation):
+            if result is None:
+                return
+            error = {5: "CANCELED", 6: "ABORTED"}.get(
+                result.status, "UNKNOWN")
+            nav.on_correlated_result(result.status == 4,
+                                     error=error,
+                                     correlation_id=correlation_id)
+        # 선점된 목표의 뒤늦은 결과. moving goal 에서는 abort 로 끝나며,
+        # 이것을 현재 목표의 실패로 읽으면 nav_state 가 FAILED 로 떨어져
+        # 이어지는 HOLD 의 취소가 통째로 무시된다.
+        return
+    try:
+        if result is None:
+            raise result_error or RuntimeError("backend result unavailable")
+        if native_run_id is not None:
+            nav.on_result(result.status == 4, correlation_id=correlation_id,
+                          native_run_id=native_run_id)
+        elif correlation_id is None:
+            nav.on_result(result.status == 4)
+        else:
+            nav.on_result(result.status == 4, correlation_id=correlation_id)
+    except Exception as exc:
+        if native_run_id is not None:
+            nav.on_backend_unknown(native_run_id)
+        elif correlation_id is None:
+            nav.on_result(False, str(exc))
+        else:
+            nav.on_result(False, str(exc), correlation_id=correlation_id)

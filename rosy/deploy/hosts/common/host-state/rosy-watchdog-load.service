@@ -1,0 +1,13 @@
+[Unit]
+Description=Load a supported PC hardware watchdog (D-530)
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'test -c /dev/watchdog0 || /usr/sbin/modprobe iTCO_wdt; test -c /dev/watchdog0 || /usr/sbin/modprobe wdat_wdt; test -c /dev/watchdog0'
+
+[Install]
+WantedBy=sysinit.target

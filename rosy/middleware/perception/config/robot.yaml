@@ -1,0 +1,59 @@
+# Single source for every Pinky node. Load this file FIRST.
+#   ros2 launch ... parameters: [robot.yaml, <node>.yaml]
+#
+# /** applies the same numbers to safety, wander, lcd, calib.
+/**:
+  ros__parameters:
+    # A safety restart must not silently release a physical emergency stop.
+    start_estopped: true
+    calibration_required: true
+    calibration_round_trip: true
+    calibration_distance_m: 0.03
+    calibration_rotation: true
+    # Initial actuator ceilings; persisted measured values remain authoritative.
+    safety_max_linear: 0.014
+    safety_max_angular: 0.10
+    # Shared goal completion distance for planning, route following and arrival ACK.
+    reach_tol: 0.025
+    # Mesh-verified box, 10mm stand-off, straight <=14mm/s only; turn radius retained.
+    footprint_guard_enabled: true
+    # Installed Pinky BNO055 driver publishes raw /16 values in degrees/s.
+    imu_angular_velocity_unit: deg_s
+    # Maze echoes vary 15 cm while stationary. Keep US as obstacle guard;
+    # precise motion agreement uses lidar, wheel odometry and map TF.
+    calibration_require_us_agreement: false
+    # Installed ADC conversion saturates near .9698 m despite max_range=3.
+    calibration_us_max_range: 0.95
+    # D-424: safety stop/clear are derived from the URDF body strip and the D-422 gap at
+    # safety_max_linear (~0.081 / 0.111 m from the LiDAR); set stop_distance/clear_distance
+    # here only to raise them. stop_front is wander's own advisory band.
+    stop_front: 0.12
+    us_stop_distance: 0.020
+    us_clear_distance: 0.028
+    # Wander's close-wall bands remain advisory; safety's body envelope wins.
+    wall_front: 0.14
+    warn_front: 0.18
+    # +1 = wander forward is nose-first. Do not auto-flip.
+    cmd_linear_sign: 1.0
+    auto_linear_sign: false
+    # Scan 0 = back. URDF nominal (D-397, products/pinky_pro/profile/config/geometry.yaml
+    # lidar.forward_deg): rplidar_link yaw pi, nose at 180deg. Refined per robot by an
+    # accepted lidar_mount calibration record (D-47 addendum store; measured 181-182deg).
+    # The former 190deg sonar-matched value is retired.
+    lidar_yaw_offset: 3.14159265
+    scan_yaw_offset: 3.14159265
+    scan_pctl: 0.10
+    scan_ignore_m: 0.04
+    front_half_width_deg: 45.0
+    cliff_raw_max: 800
+    cliff_clear_raw: 1500
+    cliff_mode: low
+    # Circumradius from base_link (URDF rear caster 7.6cm). Calib yaml wins if set.
+    # D-424: in-place turns never use less than the URDF rotation radius 0.0826 (body.rotation_radius).
+    robot_radius: 0.076
+    # Narrow maze HUD / opening cap. Safety auto-cals from L+R.
+    auto_map: true
+    map_range: 0.28
+    map_range_min: 0.18
+    map_range_max: 0.40
+    open_max: 0.40

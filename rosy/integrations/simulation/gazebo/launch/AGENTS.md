@@ -1,0 +1,49 @@
+<!-- Parent: ../AGENTS.md -->
+<!-- Generated: 2026-09-02 | Updated: 2026-09-02 -->
+
+# launch
+
+**Parent context:** `../AGENTS.md`
+**Updated:** 2026-10-07
+
+## Purpose
+
+Gazebo multi-robot and single-sim launches.
+
+## Key Files
+
+| File | Description |
+|------|-------------|
+| `gz_multi.launch.py` | N robots `rosy_01..NN`; args `robots`, `mode` (nav/slam), `headless` |
+| `launch_sim.launch.xml` | Older single-sim XML |
+| `map_v2_fleet_multi_real.launch.py` | Two camera robots on map_v2_fleet for a runner-owned `run_spec` (D-676): gz_multi COREs, per robot camera bridge, line/road observers, IR floor rays + `sim_ir_floor.py` with `gz_multi_parts.SIM_IR_CALIBRATION`. `learned_lane_pointer` empty = denoise paint. Driven by `tools/sim/fleet_trips.py` |
+
+## Subdirectories
+
+None.
+
+## For AI Agents
+
+### Working In This Directory
+
+CI flake8 includes this Python launch (max line 120). Per-robot ros_gz bridge maps namespaced `cmd_vel`.
+
+### Testing Requirements
+
+Manual launch. flake8 in CI.
+
+### Common Patterns
+
+`OpaqueFunction` to stamp N groups; include `navigation` gz bringup.
+
+## Dependencies
+
+### Internal
+
+- `description`, `navigation`, `../worlds`, `../params/rosy_bridge.yaml`
+
+### External
+
+- ros_gz, Gazebo
+
+<!-- MANUAL: -->

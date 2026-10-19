@@ -1,0 +1,201 @@
+"""D-411 B: CORE announces Pinky's controls from adapter provides (or teleop)."""
+
+import dataclasses
+
+import pytest
+
+from core_common.domain.adapters import AdapterManifest, AdapterRegistry
+
+VIEWER = {"Authorization": "Bearer rosy-dev-viewer"}
+
+
+def _controls(client):
+    response = client.get("/api/v1/system/capabilities", headers=VIEWER)
+    assert response.status_code == 200
+    return response.json()["controls"]
+
+
+def _live_core(core_client):
+    # The default fixture is core mode: CAP-001 withholds teleop until
+    # odometry proves a base is attached (D-32), as test_api does.
+    client, svc = core_client()
+    svc.state.set_velocity(0.0, 0.0)
+    return client, svc
+
+
+def test_core_without_a_live_base_announces_nothing(core_client):
+    client, _ = core_client()
+    assert _controls(client) == {"schema": "rosy.controls/1", "items": []}
+
+
+def test_teleop_capable_core_announces_base_velocity(core_client):
+    client, svc = _live_core(core_client)
+    controls = _controls(client)
+    assert controls["schema"] == "rosy.controls/1"
+    (base,) = controls["items"]
+    assert base["kind"] == "base_velocity" and base["autonomy"] == ["line"]
+    assert base["max_linear"] == svc.safety.limits.manual_linear
+    assert base["max_angular"] == svc.safety.limits.manual_angular
+
+
+def test_zero_manual_limit_is_announced_not_a_server_error(core_client):
+    client, svc = _live_core(core_client)
+    svc.safety.limits.manual_linear = 0.0
+    (base,) = _controls(client)["items"]
+    assert base["max_linear"] == 0.0
+
+
+def test_autonomy_is_empty_without_a_line_follow_service(core_client):
+    client, svc = _live_core(core_client)
+    svc.line_follow = None
+    (base,) = _controls(client)["items"]
+    assert base["autonomy"] == []
+
+
+def test_manifest_without_drive_announces_nothing(core_client):
+    client, svc = _live_core(core_client)
+    svc.adapter_registry = AdapterRegistry([AdapterManifest(id="omx", provides=())])
+    assert _controls(client)["items"] == []
+
+
+def test_enabled_manifest_providing_drive_announces_base(core_client):
+    client, svc = _live_core(core_client)
+    svc.adapter_registry = AdapterRegistry([AdapterManifest(id="pinky", provides=("drive", "battery"))])
+    (base,) = _controls(client)["items"]
+    assert base["id"] == "base" and base["kind"] == "base_velocity"
+
+
+def test_manifest_drive_with_withheld_teleop_announces_nothing(core_client):
+    client, svc = core_client()  # no odometry: CAP-001 withholds teleop
+    svc.adapter_registry = AdapterRegistry([AdapterManifest(id="pinky", provides=("drive",))])
+    assert _controls(client)["items"] == []
+
+
+def test_withheld_teleop_drops_the_drive_control(core_client):
+    client, svc = _live_core(core_client)
+    svc.capability._data["teleop"] = False
+    assert _controls(client)["items"] == []
+
+
+def test_d491_trip_caps_follow_robot_package_services_and_limits(core_client):
+    from core_common.profile import DEFAULT_ROBOT
+
+    client, svc = _live_core(core_client)
+    (base,) = _controls(client)["items"]
+    assert base["robot_kind"] == (svc.config.get("robot") or {}).get("model", DEFAULT_ROBOT)
+    limits = svc.safety.limits
+    assert base["trip_max_linear"] == min(limits.max_linear, limits.fleet_linear,
+                                          svc.line_follow.config.max_linear)
+    assert base["junction_turn"] is False              # no live keep-mode evidence yet
+    assert base["junction_pivot"] is False             # D-507 2: no keep_debug junction_ahead_m yet
+    assert base["line_follow_authority"] is True       # D-517 4: the manager enforces an authority
+    assert base["line_follow_authority_required"] is False  # config line_follow.authority_required off
+    assert base["line_follow_authority_shrink"] is True  # D-760 3: shrink, seq and ttl_s up to 5 s
+    assert base["line_follow_authority_under_lease"] is True  # D-760 2: this CORE holds the trip lease
+    assert base["line_follow_advice"] is True          # D-525: advice stored and shown, display only
+    lf = svc.line_follow
+    lf._config = dataclasses.replace(lf._config, authority_required=True)
+    assert _controls(client)["items"][0]["line_follow_authority_required"] is True
+    lf._config = dataclasses.replace(lf._config, authority_required=False)
+    assert base["lane_bend"] is False                  # D-507 addendum: no basis a bend could use
+    assert base["lane_bend_map_entry"] is False        # D-759 2: with lane_bend
+    assert base["lane_bend_next_line"] is False        # D-754: with lane_bend
+    lf = svc.line_follow  # D-495: a fresh keep_debug frame with corner_turning on
+    lf.observe_junction("no_boundary", lf._clock(), corner_turning=True)
+    assert _controls(client)["items"][0]["junction_turn"] is False  # no enforce floor proof
+    lf.bind_return_motion(lambda now, v, w: True, proof_configured=lambda: True)
+    assert _controls(client)["items"][0]["junction_turn"] is True
+    assert _controls(client)["items"][0]["lane_bend"] is True  # enforce proof configured
+    assert _controls(client)["items"][0]["lane_bend_map_entry"] is False  # line_follow.bend_map_entry_enabled off
+    lf._config = dataclasses.replace(lf._config, bend_map_entry_enabled=True)
+    assert _controls(client)["items"][0]["lane_bend_map_entry"] is True
+    assert _controls(client)["items"][0]["lane_turn_map_entry"] is False  # line_follow.turn_map_entry_enabled off
+    lf._config = dataclasses.replace(lf._config, turn_map_entry_enabled=True)
+    assert _controls(client)["items"][0]["lane_turn_map_entry"] is True   # D-759 rev 1: with junction_turn
+    assert _controls(client)["items"][0]["lane_instruction_stamp"] is False  # line_follow.instruction_stamp_enabled off
+    lf._config = dataclasses.replace(lf._config, instruction_stamp_enabled=True)
+    assert _controls(client)["items"][0]["lane_instruction_stamp"] is True   # D-767 A
+    assert _controls(client)["items"][0]["lane_bend_next_line"] is True
+    lf.observe_junction("junction_transverse", lf._clock(), ahead_m=0.2)  # no marker
+    assert _controls(client)["items"][0]["junction_pivot"] is False
+    lf.observe_junction("no_boundary", lf._clock(), ahead_v=1)       # fresh marker
+    assert _controls(client)["items"][0]["junction_pivot"] is True
+    lf.observe_junction("no_boundary", lf._clock() - 3.0, ahead_v=1)  # older than 2 s
+    assert _controls(client)["items"][0]["junction_pivot"] is False
+    lf._config = dataclasses.replace(lf._config)  # a copy: the shared default config stays as it was
+    for cap, flag in (("lane_crosswalk_gate", "crosswalk_gate_enabled"),
+                      ("lane_junction_signal", "junction_signal_enabled")):  # D-763 10 (c)
+        assert _controls(client)["items"][0][cap] is getattr(lf._config, flag) is False
+        object.__setattr__(lf._config, flag, True)  # the flag alone; config validation is not under test
+        assert _controls(client)["items"][0][cap] is True
+    navigation = svc.capability._data.setdefault("navigation", {})
+    navigation["goal_navigation"] = False
+    assert _controls(client)["items"][0]["drive_modes"] == ["lane"]
+    svc.config.setdefault("robot", {})["model"] = "other_base"
+    svc.line_follow = None
+    (base,) = _controls(client)["items"]
+    assert base["robot_kind"] == "other_base" and base["drive_modes"] == []
+    assert base["junction_turn"] is False and base["junction_pivot"] is False
+    assert base["line_follow_authority"] is False
+    assert base["line_follow_authority_shrink"] is False
+    assert base["line_follow_authority_under_lease"] is False
+    assert base["line_follow_advice"] is False
+    assert base["line_follow_authority_required"] is False
+    assert base["lane_bend"] is False and base["lane_bend_map_entry"] is False and base["lane_bend_next_line"] is False
+    assert base["lane_turn_map_entry"] is False and base["lane_instruction_stamp"] is False
+    assert base["lane_crosswalk_gate"] is False and base["lane_junction_signal"] is False
+    assert base["trip_max_linear"] == min(limits.max_linear, limits.fleet_linear)
+
+
+def test_d491_free_mode_needs_live_goal_navigation(core_client, monkeypatch):
+    from core_api_web.api.v1 import system
+
+    client, svc = _live_core(core_client)
+    monkeypatch.setattr(system, "withhold_hardware_flags", lambda data, _reasons: data)
+    svc.capability._data.setdefault("navigation", {})["goal_navigation"] = True
+    assert _controls(client)["items"][0]["drive_modes"] == ["lane", "free"]
+    assert _controls(client)["items"][0]["goal_lease"] is True  # D-550 10: with goal navigation
+    svc.capability._data["navigation"]["goal_navigation"] = False
+    assert "goal_lease" not in _controls(client)["items"][0]
+
+
+@pytest.mark.parametrize("model", ["Pinky", "pinky-pro", "p" * 65, 7])
+def test_d491_unusable_robot_model_omits_robot_kind_not_a_500(core_client, model):
+    client, svc = _live_core(core_client)
+    svc.config.setdefault("robot", {})["model"] = model
+    (base,) = _controls(client)["items"]
+    assert "robot_kind" not in base and "lane" in base["drive_modes"]
+
+
+def test_d491_nan_odom_does_not_fail_the_state_api(core_client):
+    client, svc = core_client()
+    svc.state.set_odom_pose(0.5, 0.25, 0.0)
+    svc.state.set_odom_pose(float("nan"), 0.0, 0.0)
+    response = client.get("/api/v1/robot/state", headers=VIEWER)
+    assert response.status_code == 200
+    assert response.json()["odom_pose"]["x"] == 0.5
+
+
+def test_d604_line_camera_reports_the_front_preview_store(core_client):
+    import time
+
+    client, svc = _live_core(core_client)
+
+    def camera():
+        response = client.get("/api/v1/system/capabilities", headers=VIEWER)
+        return response.json()["line_follow"]["camera"]
+
+    assert camera() == {"available": False, "age_ms": None, "source": "NONE"}  # no frame yet
+    now = time.monotonic()
+    svc.vision.publish(b"\xff\xd8f\xff\xd9", captured_at=1.0, received_at=now,
+                       frame_id="front_camera_link", source="ROSY")
+    fresh = camera()
+    assert fresh["available"] is True and fresh["source"] == "DEVICE" and fresh["age_ms"] >= 0
+    assert fresh["available"] is svc.vision.status()["available"]  # one source with front/status
+    svc.vision.publish(b"\xff\xd8g\xff\xd9", captured_at=2.0, received_at=now - 60.0,
+                       frame_id="front_camera_link", source="GAZEBO")
+    stale = camera()
+    assert stale["available"] is False and stale["source"] == "GAZEBO" and stale["age_ms"] >= 59_000
+    assert (_controls(client)["items"][0]["drive_modes"][0] == "lane")  # drive_modes unchanged
+    svc.line_follow = None
+    assert "line_follow" not in client.get("/api/v1/system/capabilities", headers=VIEWER).json()

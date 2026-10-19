@@ -1,0 +1,205 @@
+## D-344 Pilot 의 자동 주행은 누르고 있는 동안만 진행하는 보조 자율이며, 스틱을 건드리면 즉시 수동이다
+
+**Status:** Accepted (2026-09-29, 설계 결정). 가제보 검증 전에는 실기에서 켜지 않는다.
+
+### Context
+
+- 로봇 CORE 에는 이미 차선 추종(`PUT /api/v1/line-follow/mode` `CAMERA_LINE`, D-143), 교통 정책
+  (정지선·횡단보도·신호), 내비게이션 목표·경유점 API 가 있다. 실물 카메라에도 도로 인식
+  오버레이(`semantic-road-v1`)가 돈다.
+- 2026-09-29 실물 rosy-pinky-8kcn 은 `runtime.navigation: absent`, `goal_navigation: false`,
+  지도 없음이다. 차선 추종은 `NAVIGATE` 능력을 요구하므로 지금은 409 로 거절된다.
+- 사용자는 도로·경로를 따라 자동으로 가는 모드를 원한다. 무인으로 멀리 보내는 것과 운전자가 보면서
+  맡기는 것은 안전 요구가 다르다.
+
+### Decision
+
+1. pilot 은 모드 셋을 둔다.
+
+   | 모드 | 무엇 | CORE 경로 | 켜지는 조건 |
+   |---|---|---|---|
+   | 수동 | 지금의 스틱·페달 | `POST /teleop` | teleop 능력 |
+   | 차선 따라가기 | 로봇이 조향·속도를 정하고 사람은 "진행"을 누르고 있음 | line-follow `CAMERA_LINE` | `NAVIGATE` 능력 + 차선 증거 신선 |
+   | 목표 지점 | 지도에서 탭한 곳으로 | `POST /navigation/goal` | 지도·로컬라이즈 준비 |
+
+2. **누르고 있는 동안만 진행(dead-man).** 자동 모드에서도 화면의 "진행" 버튼(또는 게임패드 트리거)을
+   누르고 있을 때만 자동 주행이 유지된다. 떼면 pilot 이 즉시 자동을 끄고(`mode OFF`·`navigation/cancel`)
+   정지를 확인한다. 운전자가 화면을 보고 있다는 증거가 곧 진행 허가다.
+3. **스틱·페달을 건드리면 즉시 수동으로 넘어간다**(자동 해제 → MANUAL → 입력 반영). 되돌리기는
+   명시적으로 다시 누를 때만 한다.
+4. **HUD 는 자동의 근거를 보인다**: 차선 신뢰도·오차, 교통 상태(정지선 거리·신호색), 거절 이유
+   (예: "내비게이션 능력 없음 — 차선 따라가기를 쓸 수 없습니다"). 켤 수 없는 모드는 이유와 함께 흐리게.
+5. **최종 명령은 CORE 가 소유**한다(D-2). pilot 은 모드를 고르고 진행 신호를 줄 뿐 조향을 계산하지 않는다.
+6. **검증 순서**: 가제보 차선 월드(map_v2 lane) → 실물(한도 L1 이상, D-342) 순서다. 실물은
+   `NAVIGATE` 능력이 켜지는 런타임 구성 결정이 따로 필요하다.
+
+### 보강 (2026-09-29, 실물 rosy-pinky-8kcn 조사)
+
+7. **차선 추종의 권한은 구동(`MOVE`)이다.** 지금까지 `PUT /line-follow/mode` 는 `NAVIGATE`
+   (`navigation.goal_navigation`)를 요구했는데, 실물 런타임 `motor` 는 Nav2 가 없어 이 권한을 늘 끈다
+   (`runtime_capability_data`). 카메라 차선 추종은 Nav2·지도가 필요 없다 — 필요한 것은 구동 준비와
+   신선한 차선 증거이고, 증거 검사(신선도·신뢰도·출처)는 이미 `LineFollowManager` 가 한다. 그래서
+   요구 권한을 `MOVE` 로 바꾼다. `navigation.goal_navigation` 은 목표 지점 모드에만 남는다.
+8. **운전자 확인 만료는 CORE 가 소유한다.** `PUT /line-follow/mode` 에 `hold_s`(0 < hold_s ≤ 2)를 주면
+   그 세션은 `POST /api/v1/line-follow/hold` 로 계속 갱신되어야 한다. 갱신이 `hold_s` 를 넘겨 끊기면
+   CORE 의 차선 추종 틱이 스스로 OFF 로 내리고(`driver_released`), 바퀴 명령은 0 이 된다. pilot 은
+   "진행"을 누르는 동안 100 ms 마다 갱신하고 `hold_s = 0.5` 를 쓴다(teleop 워치독과 같은 크기).
+   탭 이탈·네트워크 끊김·앱 종료 모두 같은 경로로 멈춘다. `hold_s` 없는 호출(기존 관제 화면)은
+   지금처럼 동작한다.
+9. **실물 로봇은 카메라 서비스에서 차선 관측(`line_observer_node`)도 띄운다.** 관측 전용 노드이고
+   바퀴 명령을 내지 않는다(D-2). 도로 관측(`road_observer_node`)과 같은 `camera/front` 를 구독한다.
+10. 실물 첫 자동 주행의 순항 속도는 설정 `line_follow.cruise_speed` 를 **0.04 m/s** 로 낮춰 시작하고,
+    D-342 과 같이 녹화 증거로 올린다.
+
+11. **앞 물체 정지는 차선 추종이 소유한다(LiDAR).** CORE 가 받은 스캔에서 로봇 정면 ±20° 부채꼴의
+    최소 거리를 구해, 0.20 m 보다 가까우면 `HOLD`(`obstacle_ahead`), 0.28 m 보다 멀어지면 다시 간다.
+    이 정지는 차선 상실이 아니라 LOST 로 굳지 않는다. 주행 중 LiDAR 가 0.5 s 넘게 끊기면
+    `obstacle_sensor_stale` 로 멈춘다(한 번도 안 온 벤치에서는 판정하지 않음). LiDAR 장착 방향은
+    `line_follow.lidar_forward_deg` 로 준다 — Pinky Pro 실물은 LiDAR 0° 가 로봇 뒤라 180 이다
+    (2026-09-29 실측: 정면 2.6 m·오른쪽 벽 0.14 m 가 카메라 화면과 일치). 상태에 `clearance_m` 을 싣고
+    pilot HUD 가 보인다. 이것은 "물체 인식"의 첫 단계(거리 기반)이고, 종류를 가리는 학습 검출기는
+    D-199 의 교체 가능한 백엔드로 뒤에 붙는다.
+12. **차선 경계는 두 겹으로 지킨다(카메라 + IR).** 2026-09-29 실물 녹화에서 로봇이 흰 경계선을 밟고
+    넘었다. 원인은 실물 `camera_lane_mode: line` 이 하단 밝은 화소 전체의 무게중심을 목표로 삼는
+    것이라, 경계선이 한쪽만 보이면 그 선 위가 목표가 된다. 지면 투영(homography)이 필요한
+    `lane`·`edge_left`·`centre` 는 실물에 교정이 없어 쓸 수 없다.
+    - **카메라(1차)**: 영상 공간에서 중앙 기준 좌·우 가장 가까운 경계를 찾아 그 사이 가운데를
+      목표로 하는 `camera_lane_mode: between` 을 둔다. 한쪽만 보이면 두 쪽이 보일 때 익힌 차로 폭만큼
+      안쪽을 목표로 한다. 관측 계약(`error/confidence/visible`)은 그대로다.
+    - **IR(최후 방어선)**: 바닥을 보는 좌·중·우 IR 은 이미 IR_LINE 관측으로 CORE 에 온다(D-143).
+      CAMERA_LINE 중 `line_follow.ir_guard_enabled` 이면 CORE 가 그 관측을 감시로 쓴다. 경계선이
+      옆 센서 밑(|error| ≥ `ir_guard_edge_error`)이면 카메라 조향을 덮어 반대로 `ir_guard_turn` 만큼
+      돌고 속도를 `ir_guard_speed_scale` 배로 줄인다(`lane_edge_left/right`). 가운데 센서 밑이면 선을
+      밟고 넘는 중이라 멈춘다(`lane_departure`). 셋 다 흰색(정지선·횡단보도)은 대비가 없어 관측이
+      비가시라 감시가 걸리지 않는다. 감시가 켜졌는데 IR 이 끊기거나 미교정·교정 해시 불일치면
+      멈춘다(`lane_guard_stale`). 어느 것도 LOST 로 굳지 않는다.
+    - IR 은 rosy-io 그래프(`motor`)에서 `bringup_robot.launch.py enable_ir:=true` 로 control
+      `ir_adc_node` 를 띄운다. 내비게이션 그래프는 line_follow 가 띄우므로 끄고, 두 유닛은
+      `Conflicts=` 로 동시에 돌지 않는다 — ir_sensor/range 발행자는 버스당 하나다.
+    - 켜는 순서: IR 발행 확인 → 카펫(검정 끝점)·흰 테이프(흰 끝점) 실측으로 `/etc/rosy/line_follow.yaml`
+      교정 → 교정 해시를 `line_follow.ir_calibration_revision` 에 → 좌·우 부호를 손으로 확인 →
+      `ir_guard_enabled: true`. 기본값은 꺼짐이다.
+    - 검증은 녹화 루프로 한다: 자동 주행 녹화 → 프레임 격자 → 경계 안에 있었는지 판정 → 조정 → 반복.
+
+### 보강 (2026-09-30, 실물 준비 — 로봇 부재 중 SOURCE 만)
+
+- **§11 보강 — 앞 물체 정지는 조향을 알 수 있다(`line_follow.obstacle_mode: path`, 선택).** 실물 L 모서리에서
+  둘레 벽이 로봇 앞 약 0.2 m 라, 정면 ±20° 부채꼴 판정(0.20 m)은 모든 모서리에서 로봇을 세운다
+  (가제보는 0.10/0.14 m 로 낮춰야 돌았다). 이제 CORE 는 스캔을 로봇 좌표 점으로 받아, 틱마다
+  **의도 조향**(지금 차선 관측이 시킬 선·각속도, IR 감시의 비킴 포함)의 짧은 호를 그리고 그 호 둘레
+  ±`obstacle_corridor_half_width_m`(0.09 = 발자국 반폭 0.06 + 여유 0.03) 띠 안 점까지의 호 길이를
+  여유 거리로 쓴다. 호는 `obstacle_path_horizon_m`(0.40, resume 이상)까지이되 회전각 창은
+  max(90°, resume/R) 이고 180° 를 넘지 않는다 — 급회전(작은 R)에서 90° 호는 정지 거리보다 짧다.
+  창 밖이라도 0..180° 띠 안이고 LiDAR 에서 `obstacle_stop_m` 안인 점은 그 직선 거리로 센다(near-field).
+  출력이 아니라 의도를 쓰는 까닭은, 멈춘 뒤 출력은 0 이라 직진 호가 되어 모서리 벽에 영영 막히기
+  때문이다. 쓸 관측이 없으면 마지막 의도를 쓴다. 지키는 것: 정지 0.20·재출발 0.28 떨림 방지, LiDAR
+  0.5 s 끊김이면 `obstacle_sensor_stale`, 경로 위 진짜 물체면 `obstacle_ahead`, LOST 로 굳지 않음.
+  직진일 때 띠는 부채꼴보다 좁지 않다(부채꼴 0.2 m 에서 ±0.068 m, 띠 ±0.09 m). 선속도 0 인 제자리
+  회전은 `obstacle_stop_m` 안 점을 0 거리로 본다 — C1 LiDAR `range_min`(약 0.15 m)이 띠 반폭보다
+  커서 몸 둘레 띠만으로는 늘 비어 보이기 때문이다(range_min 안은 어떤 판정도 못 본다).
+  의도 호가 틱마다 바뀌면 떨림 방지가 무력해지므로(모서리에서 10 Hz 로 서다 가다), path 의 막힘은
+  `obstacle_release_s`(0.2 s) 동안 계속 비어야 풀린다. 이 모드가 켜진 뒤 관측이 하나도 없으면 호를
+  재지 않고 WAITING 으로 둔다. 띠 반폭 안(R+hw 안)의 모서리 벽은 스스로 풀리지 않으므로,
+  `obstacle_ahead` 가 `obstacle_escalate_s`(5 s) 이어지면 `nav.line_obstacle_hold` 를 한 번 낸다.
+  **기본은 `sector`(옛 판정)다(사용자 결정 2026-09-30).** path 는 가제보 L 모서리 한 바퀴(정지 0.20 m
+  기본값)와 아래 실물 LiDAR 좌·우 확인이 통과한 뒤에 기본이 된다.
+  **실물 확인 필요:** path 는 좌·우를 가른다 — LiDAR 가 뒤집혀(거울) 달렸으면 왼쪽 회전에 오른쪽을
+  본다. 켜기 전에 로봇 왼쪽에 물체를 두고 점이 +y 에 오는지(스캔 +90° 가 180° 장착에서 로봇 오른쪽)
+  확인한다.
+- **§12 보강 — IR 교정 절차와 도구.** `src/runtime/sensing/tools/device/ir_line_calibrate.py`(읽기 전용,
+  `ir_sensor/range` 구독만) 가 카펫·왼쪽·가운데·오른쪽 테이프 네 자리 표본에서 채널별 중앙값으로
+  끝점을 내고, `min_span`·잡음 6 배 분리·채널 순서·되읽기 부호(왼쪽 ≤ −0.3, 오른쪽 ≥ +0.3)를
+  모두 통과할 때만 관측 노드 YAML 과 CORE `ir_calibration_revision` 을 찍는다. 절차는
+  `docs/deployment/pinky-pro-ir-line-calibration-runbook.md`. 실물 관측 노드는 `rosy-camera` 의
+  `camera_preview.launch.py` 에서 돌므로, IR 교정 전용 파일 `/etc/rosy/ir_calibration.yaml` 이 있으면 그
+  노드가 패키지 기본 뒤에 덧읽는다(없으면 IR 교정 꺼짐 = IR_LINE fail-closed, 이전과 같다). 파일은
+  관측 노드 블록과 IR 교정 키만 담아야 하고, launch 가 모양·실수형·끝점 분리를 먼저 검사해 어긋나면
+  건너뛰고 이유를 로그에 남긴다(관측 노드가 재시작 반복에 빠지지 않게). `/etc/rosy/line_follow.yaml` 은
+  내비게이션 그래프용 전체 설정으로 뜻이 다르므로 쓰지 않는다.
+- **§13 — 차선 추종 각속도는 수동 한도 계단을 따른다.** 실물 자동 주행이 0.66 rad/s 까지 돌았는데
+  수동은 D-342 L0 0.10 rad/s 다. 이제 차선 추종의 유효 각속도 상한은
+  `min(line_follow.max_angular, safety.manual_angular)` 이고(`max_angular_follows_manual: true`, 기본),
+  관리자 API 로 계단을 바꾸면 다음 틱부터 따른다. 상한이 조향을 자르면 선속도도 같은 비율로 줄여
+  **같은 호를 더 천천히** 돈다(자르기만 하면 굽이에서 차로 밖으로 밀린다). IR 감시의 비킴도 같은
+  상한을 넘지 않는다. 한도를 읽을 수 없거나 0 이면 조향 없이 직진하지 않도록 `angular_limit_zero`
+  로 멈춘다. `max_angular_follows_manual: false` 는 명시적 덮어쓰기(= `max_angular` 만)다. 선속도는
+  계단에 묶지 않았다 — 실물 순항은 §10 의 `cruise_speed` 가 따로 정한다.
+  **차선 자동은 L1 이상에서만(사용자 결정 2026-09-30).** 살아 있는 `safety.manual_angular` 가
+  `line_follow.lane_auto_min_manual_angular`(0.30 = L1) 보다 작으면 차선 추종 틱이 `limit_level_too_low`
+  로 멈춘다(모드는 켜진 채 HOLD, 계단을 올리면 다음 틱부터 간다). pilot 은 "수동 한도 L1 이상에서만
+  차선 자동" 으로 보인다. 이 문턱을 끄는 것은 `lane_auto_min_manual_angular: 0` 뿐이다 —
+  `max_angular_follows_manual: false`(각속도 상한 덮어쓰기)는 문턱을 우회하지 않는다. L1 이상에서는 위
+  상한이 그대로 걸린다.
+
+### 보강 (2026-10-03, 벤치 차선 설정이 업데이트마다 사라짐)
+
+- **§12 보강 — 관측 노드의 운영자 덮어쓰기 파일.** 실물 벤치 스크립트 `~/lane_switch.sh` 는
+  `line_observer_node` 를 keep/NOMINAL 로 돌리려고 릴리스 안의
+  `/opt/rosy/current/install/share/control/config/line_follow.yaml` 을 그 자리에서 고쳤다. 페이로드
+  릴리스는 `/opt/rosy/releases/<id>` 를 통째로 바꾸고 자동 업데이트(D-412)는 약 10 분마다 돌므로, 이
+  설정은 말없이 사라졌다. **릴리스 디렉터리 안의 수정은 업데이트에서 살아남지 못한다.**
+  - **파일:** `/etc/rosy/line_observer_overrides.yaml`(root 0644). `/etc/rosy/` 는 릴리스가 쓰지 않고
+    이미지 층 동기화(D-388)가 금지 경로로 거부한다. IR 교정 파일과 같은 길을 쓴다: `camera_preview.launch.py`
+    가 패키지 `line_follow.yaml` → `/etc/rosy/ir_calibration.yaml` → 이 파일 순으로 관측 노드에 넘기고
+    (ROS 파라미터 파일은 뒤가 이긴다), 없으면 지금과 같다.
+  - **허용 키(이 밖은 파일 전체를 건너뛴다):** `camera_lane_mode`(line·between·lane·edge_left·centre·keep —
+    route_* 는 차선 그래프·경로 키가 필요해 뺐다), `camera_ground_source`(PINKY·NOMINAL — 로봇에 GAZEBO 는
+    없다), `allow_nominal_ground`·`debug_overlay`(참/거짓), `nominal_camera_profile_path`(절대 경로 `.yaml`),
+    `camera_pitch_rad_override`(−0.2..0.6 rad)·`camera_height_m_override`(0.02..0.2 m). 마지막 둘은 D-397
+    운영자 층이고 범위는 `calibration_store.check_values` 의 `camera_profile` 범위와 같다. NOMINAL 바닥은
+    `allow_nominal_ground: true` 와 프로필 경로가 함께 있어야 한다(D-364 §3 의 두 번 켜기).
+  - **검사:** launch 가 모양·키·형·범위를 먼저 보고, 어긋나면 경고 로그를 남기고 파일을 건너뛴다(관측
+    노드가 재시작 반복에 빠지지 않게, IR 파일과 같다).
+  - **도구:** 파일은 손으로 고치지 않고 `control` 패키지의 콘솔 스크립트 `line_observer_overrides`
+    (`apply`/`clear`/`show`)로 쓴다. 도구는 launch 와 같은 검사를 통과한 파일만 원자적으로 쓰고
+    `rosy-camera` 만 다시 시작한다(CORE·모터는 건드리지 않는다). 기하는 URDF NOMINAL 이 기본이고
+    로봇별 승인 레코드가 다듬는다(D-397): `--pitch-deg`/`--height-m` 를 주지 않으면 레코드나 NOMINAL 이
+    쓰이고, 주면 운영자 덮어쓰기로 둘을 이긴다. 그래서 따로 만든 `/etc/rosy/camera_profile_bench.yaml`
+    프로필 사본은 더 필요 없다 — 프로필 경로는 릴리스의 `camera_nominal.yaml` 을 가리킨다.
+    sudo 는 PYTHONPATH 를 지우므로 root 셸 안에서 환경을 불러 `ros2 run` 으로 돌린다(되돌리기는 `apply …`
+    대신 `clear`, 확인은 `show`):
+    `sudo -n bash -c 'source /opt/ros/jazzy/setup.bash && source /opt/rosy/current/install/setup.bash && ros2 run control line_observer_overrides apply --profile /opt/rosy/current/install/share/pinky_pro/config/camera_nominal.yaml --pitch-deg <deg> --height-m <m>'`
+  - **바뀌지 않는 것:** 패키지 기본(`camera_lane_mode: line`, `PINKY`)과 CORE 설정. 관측 노드는 관측만
+    한다(D-2). 운영 차선 모드를 로봇에 켜는 것은 지금처럼 사용자 승인 뒤의 벤치 결정이다.
+  - **기각한 대안:** CORE 오버레이(`/var/lib/rosy/core/.rosy/rosy.yaml`)에 넣기 — CORE 는 관측 노드
+    파라미터를 소유하지 않는다. `/etc/rosy/ir_calibration.yaml` 허용 키 넓히기 — 그 파일은 교정 도구가
+    찍는 IR 전용 파일이라 뜻이 섞인다. 캘리브레이션 저장소 레코드 — 모드·디버그 같은 운영 선택은 측정이
+    아니다.
+
+### 보강 (2026-10-07, 횡단보도에서 IR 가드가 가짜 이탈을 냄)
+
+- **§12 보강 — 횡단보도는 "셋 다 흰색"이 아니다.** §12의 "셋 다 흰색(정지선·횡단보도)은 대비가 없어 관측이 비가시"는
+  260919 횡단보도에 맞지 않는다. 줄무늬는 차로와 나란히 폭 25 mm·피치 40 mm이고 IR 간격은 20 mm라, 차로 중심에서의
+  횡 오프셋에 따라 (좌·우 흰색, 가운데 바닥) / (셋 다 흰색) / (가운데만 흰색)이 번갈아 나온다. 첫째는 무게중심 0·신뢰도
+  0.96이라 가드가 `centre`(`lane_departure`)로 읽었다. `detect_ir_line`이 이 두 띠 패턴을 관측 없음으로 바꿨다
+  (`fix/ir-guard-crosswalk`). 셋째(오프셋 12.5–27.5 mm)는 경계선 하나가 가운데 밑에 있는 것과 IR로 구별되지 않아 가짜
+  `lane_departure`가 남고, 줄무늬 끝에서는 가짜 `lane_edge_*` 비킴도 생길 수 있다. 이 위상은 횡단보도 구간을 아는 쪽이
+  풀어야 하며 D-491(Accepted, 구현 전)이 정한다. 그때까지 가드를 횡단보도가 있는 지도에서 켜면 횡단보도에서 멈출 수 있다.
+
+### Alternatives
+
+- **자동 모드를 켜 두고 손을 떼도 계속 간다.** 거부. 원격 화면은 지연·끊김이 있고(D-368) 무인 주행의
+  안전 사례는 미션 계층(D-12)이 따로 소유한다.
+- **pilot 이 차선 오차로 조향을 계산해 teleop 으로 보낸다.** 거부. CORE 의 차선 추종 정책(신뢰도·신선도·
+  교통 게이트)을 우회한다.
+
+### Consequences
+
+- 운전자 한 명이 보면서 맡기는 보조 자율만 pilot 에 들어온다. 무인 미션은 Fleet 미션(D-12) 쪽이다.
+- 진행 버튼 신호가 끊기면(탭 이탈·네트워크) 자동이 꺼져야 하므로, CORE 쪽에도 진행 신호 만료가
+  필요하다 — line-follow 에 teleop 워치독 같은 "운전자 확인 만료"를 둘지 구현 회차에서 정한다.
+
+### Validation
+
+- SOURCE: 모드 전환 상태기계 시험(떼면 OFF, 스틱이면 수동, 거절 이유 표시).
+- ROS-SIM: 가제보 차선 월드에서 차선 따라가기 한 바퀴 + 진행 해제 시 정지 거리 녹화.
+- DEVICE: `NAVIGATE` 능력 구성 뒤 실물 녹화.
+
+- **§12 개정 (2026-10-10, 사용자 "제자리 도는 것도 생각해서 해야 해.").** 카메라 명령의 선속도가 `line_follow.ir_guard_min_linear`보다 작으면(제자리 회전·급회전, D-597 개정 2) 한쪽 IR 경계 비키기(`lane_edge_left|right`)를 하지 않고 카메라 회전을 그대로 둔다. 제자리 회전은 몸을 옆으로 옮기지 못하므로 비키기는 회전과 싸우기만 했다(9dfk가 고리 입구 과속방지턱 노란 칠 위에서 100 s 넘게 좌우로 떨었다, 녹화 20261009T235740Z_rosy_41). 같은 날 2차: 가운데 센서가 선을 보는 이탈 정지(`lane_departure`)도 카메라 명령이 제자리 회전일 때는 하지 않는다. 제자리 회전에서 IR 줄(x 0.0295 m)은 반지름 0.03 m 호만 쓸어 선을 넘지 못하는데, 회전하다 선이 가운데 밑에 오면 정지·뒤로 물러남·재시도를 되풀이했다(9dfk 20261010T005447Z_rosy_41, 8kcn 20261010T005448Z_rosy_40: lane_departure 93·35틱). 앞으로 움직이는 명령의 이탈 정지와 IR 끊김 정지는 그대로다. 기본값 0(끔)이고 Pinky Pro 로봇 패키지 설정은 0.01 m/s다.
+
+- **§12 개정 3 (2026-10-10, 사용자 "선이 넘어가는 문제 ... 로직적으로 우리가 해결을 할 수 있게. 녹화된 영상을 보고 판단해서 해결해 볼래.").** 개정 2의 면제가 선을 넘는 길을 열었다. 천장 카메라 기록(Fleet path, D-594)으로 본 9dfk 20261010T011623Z_rosy_41의 94–96 s: 제자리 회전 중 IR 가운데 정지가 면제되어 앞이 S자 선 위로 쓸려 넘어갔고, 그 뒤 선 너머 바닥이 drivable 길이 되었다. 이제 제자리 회전(카메라 선속도 < `ir_guard_min_linear`) 중 IR 줄 밑에 선이 있으면(왼쪽·오른쪽·가운데) 카메라 회전은 두고 `ir_guard_back_speed`(Pinky Pro 0.02 m/s)로 뒤로 물러나며 돈다. 앞이 선에서 멀어지는 쪽으로 돌기만 하고 넘지 않는다(사용자의 "앞으로 갔다 뒤로 갔다"). 뒤 띠가 신선한 LiDAR로 비었다고 보일 때만 물러나고, 아니면 제자리에서 돈다.
+
+**Related:** [D-2](D-2-cmd-vel.md), [D-12](D-12-mission-fleet.md), [D-143](D-143-ir-navigation-evidence.md),
+[D-323](D-323-rosy-pilot-teleop-app.md), [D-368](D-368-pilot-live-driver-video.md), [D-342](D-342-manual-limit-commissioning-ladder.md).
+
+- **순항 개정 (2026-10-10, 사용자 기본 속도 2-3배 요청).** Pinky Pro 순항과 선속도 상한은 0.10 m/s다(실물 오버레이 0.04의 2.5배). 조향 이득도 0.8에서 2.0으로 올려 경로 곡률을 유지한다. 각속도 상한에 걸리면 선속도도 같은 비율로 줄이는 §13은 유지한다. 현장 두 로봇의 cruise_speed/max_linear 오버레이는 0.10으로 맞추며, 8kcn의 옛 obstacle_stop_m 0.12 / obstacle_resume_m 0.17은 제거하여 D-591 몸 기준 제동 간격을 쓴다. 0.10 m/s에서 정지 몸 간격은 0.030 m, 재출발은 0.060 m다. 모든 지도에서 같은 CORE 경로를 사용하고 몸 치수·회전 반경·IR·e-stop 검사를 유지한다. 호스트 시험과 실물 수용은 별도 증거다.

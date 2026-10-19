@@ -1,0 +1,317 @@
+"""D-126: full module separation guards on the new src layout.
+
+Scope notes (honest holes, not oversights):
+- "Production code" = *.py outside any test/ directory. Operator tooling under
+  control/tools/ is excluded from guard 2: measuring the final topic is its job.
+- Guard 3 covers Python imports plus C++ #includes of workspace packages only;
+  third-party deps (rclpy, std_msgs, ...) are out of scope.
+"""
+
+import ast
+import re
+import runpy
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+sys.path.insert(0, str(ROOT / "tools" / "harness"))
+from colcon_roots import colcon_roots  # noqa: E402
+
+#: D-427: every colcon root, not only src/ (games, vision and cell moved to operations/).
+CODE_ROOTS = tuple(ROOT / root for root in colcon_roots())
+
+CORE = SRC / "gateway"
+CONTROL_PKG = ROOT / "middleware/perception"
+_control_layout = runpy.run_path(str(CONTROL_PKG / "control/_source_layout.py"))
+CONTROL_TREES = (CONTROL_PKG, *_control_layout["FLAT_ROOTS"],
+                 _control_layout["PACKAGE_DIRS"]["control.planning"])
+FLEET = SRC.parent / "operations" / "fleet"
+
+#: Other-domain tops that core production code must never import (S1).
+SLICE_TOPS = (
+    "control",
+    "fleet",
+    "bringup",
+    "navigation",
+    "emotion",
+    "omx_adapter",
+    "games",
+)
+
+#: Workspace ROS package name for every intra-tree import top we care about.
+TOP_TO_PACKAGE = {
+    "control": "control",
+    "core_common": "core_common",
+    "core_events": "core_events",
+    "core_features": "core_features",
+    "core_api_web": "core_api_web",
+    "core": "core",
+    "fleet": "fleet",
+    "bringup": "bringup",
+    "led": "led",
+    "interfaces": "interfaces",
+    "navigation": "navigation",
+    "emotion": "emotion",
+    "games": "games",
+    "omx_adapter": "omx_adapter",
+}
+
+FINAL_CMD_VEL = re.compile(r"""['"]cmd_vel['"]""")
+
+#: The single pinned legacy exception to guard 2: the legacy comparison
+#: graph's final publisher default (see test_os_control_graph.py, which pins
+#: safety_node as the legacy final publisher). Everything else in control
+#: must not name the final topic.
+LEGACY_FINAL_PUBLISHER = (
+    "middleware/drive/motion_limits/adapter/node.py",
+    "self.declare_parameter('cmd_out', 'cmd_vel')",
+)
+
+#: D-356 dataset harvesting: the session recorder ATTACHES the CORE final
+#: command to each recorded frame as passive side data (a subscription for
+#: training-input capture, never a publish). Pinned read-only exception -
+#: repoint or edit the line and this guard goes red until the pin moves.
+RECORDING_SIDE_TOPIC = (
+    "middleware/perception/nodes/recording.py",
+    'SIDE_TOPICS = ("cmd_vel", "line/observation", SHADOW_TOPIC, SCAN_TOPIC, ODOM_TOPIC,',
+)
+
+#: D-411 A: the Pilot recorder's rosbag2 topic list records the CORE final
+#: command as evidence (rosbag2 subscribes; nothing is published). Same pin rule.
+PILOT_RECORDING_TOPICS = (
+    "middleware/perception/nodes/pilot_recording.py",
+    'PILOT_TOPICS = (COMPRESSED_CAMERA_TOPIC, "cmd_vel", ODOM_TOPIC, SCAN_TOPIC, "line/observation",',
+)
+
+#: D-507 SIM r4b: keep mode judges "spin in place" on CORE's commanded twist, so the line
+#: observer SUBSCRIBES to the final command read-only (it publishes no Twist; pinned in
+#: test_line_observer_wiring). Same pin rule.
+LINE_OBSERVER_COMMAND_READ = (
+    "middleware/perception/sensors/line_observation/line_observer_node.py",
+    "self.create_subscription(Twist, 'cmd_vel', self._on_cmd_vel, 10)",
+)
+
+FINAL_TOPIC_EXCEPTIONS = (LEGACY_FINAL_PUBLISHER, RECORDING_SIDE_TOPIC, PILOT_RECORDING_TOPICS,
+                          LINE_OBSERVER_COMMAND_READ)
+
+
+def _prod_py_files(tree: Path):
+    return [
+        p
+        for p in tree.rglob("*.py")
+        if "test" not in p.parts and "/tools/" not in p.as_posix()
+    ]
+
+
+def _import_tops(path: Path):
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except SyntaxError:
+        return set()
+    tops = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            tops.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            tops.add(node.module.split(".")[0])
+    return tops
+
+
+def test_core_imports_no_slice_code():
+    """Guard 1 (S1): no slice imports in core production code.
+
+    ``control`` sits at ``middleware/perception`` and imports itself. That package
+    is not the core gateway importing a slice.
+    """
+    control_root = (SRC.parent / "middleware" / "perception").resolve()
+    violations = []
+    for path in _prod_py_files(CORE):
+        if control_root in path.resolve().parents:
+            continue
+        hits = _import_tops(path) & set(SLICE_TOPS)
+        if hits:
+            violations.append(f"{path.relative_to(ROOT)} imports {sorted(hits)}")
+    assert violations == [], violations
+
+
+def test_control_has_no_final_cmd_vel():
+    """Guard 2 (S2): control runtime never names the final topic.
+
+    'cmd_vel_raw' and '/cmd_vel_raw' are allowed; only the exact final
+    topic string is forbidden. The one exception is the pinned legacy
+    comparison-graph publisher default (LEGACY_FINAL_PUBLISHER).
+    """
+    forbidden_patterns = [
+        FINAL_CMD_VEL,
+        re.compile(r"['\"]/robot/state/.*?['\"]"),
+        re.compile(r"['\"]/robot/intent/.*?['\"]"),
+    ]
+    violations = []
+    for path in (file for tree in CONTROL_TREES for file in _prod_py_files(tree)):
+        rel = path.relative_to(ROOT).as_posix()
+        text = path.read_text(encoding="utf-8")
+        for i, line in enumerate(text.splitlines(), 1):
+            if any(p.search(line) for p in forbidden_patterns):
+                if any(rel == exc[0] and line.strip() == exc[1]
+                       for exc in FINAL_TOPIC_EXCEPTIONS):
+                    continue
+                violations.append(f"{rel}:{i}: {line.strip()[:100]}")
+    assert violations == [], violations
+
+
+def _package_declared_deps(package_xml: Path):
+    root = ET.parse(package_xml).getroot()
+    return {
+        (e.text or "").strip()
+        for e in root
+        if e.tag in ("depend", "exec_depend", "build_depend")
+        and (e.text or "").strip()
+    }
+
+
+def test_package_xml_covers_imports():
+    """Guard 3: every intra-tree import a package uses is declared.
+
+    Covers Python (all packages) and C++ #includes of workspace interface
+    packages (hardware C++ nodes).
+    """
+    violations = []
+    for package_xml in sorted(xml for base in CODE_ROOTS for xml in base.rglob("package.xml")):
+        pkg_dir = package_xml.parent
+        declared = _package_declared_deps(package_xml)
+        try:
+            own_name = ET.parse(package_xml).getroot().findtext("name")
+        except ET.ParseError:
+            continue
+        package_trees = CONTROL_TREES if own_name == "control" else (pkg_dir,)
+        for path in (file for tree in package_trees for file in _prod_py_files(tree)):
+            for top in _import_tops(path):
+                need = TOP_TO_PACKAGE.get(top)
+                if need and need != own_name and need not in declared:
+                    violations.append(
+                        f"{path.relative_to(ROOT)} imports {top} "
+                        f"but {own_name}/package.xml lacks it"
+                    )
+        for path in list(pkg_dir.rglob("*.cpp")) + list(pkg_dir.rglob("*.hpp")):
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for match in re.finditer(r"#include\s*[<\"](\w+)[/\"]", text):
+                need = TOP_TO_PACKAGE.get(match.group(1))
+                if need and need != own_name and need not in declared:
+                    violations.append(
+                        f"{path.relative_to(ROOT)} includes {match.group(1)} "
+                        f"but {own_name}/package.xml lacks it"
+                    )
+    assert violations == [], violations
+
+
+def _publisher_calls(text):
+    """Yield the full parenthesized text of each create_publisher(...) call."""
+    calls = []
+    for match in re.finditer(r"create_publisher\s*\(", text):
+        depth = 0
+        for i in range(match.end() - 1, len(text)):
+            if text[i] == "(":
+                depth += 1
+            elif text[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    calls.append(text[match.start() : i + 1])
+                    break
+    return calls
+
+
+def test_cmd_vel_single_publisher():
+    """Guard 4 (D-2): the final cmd_vel publisher lives in one place."""
+    publishers = []
+    for path in (path for base in CODE_ROOTS for path in _prod_py_files(base)):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for call in _publisher_calls(text):
+            if "Twist" in call and FINAL_CMD_VEL.search(call):
+                line = text[: text.index(call)].count("\n") + 1
+                publishers.append(f"{path.relative_to(ROOT).as_posix()}:{line}")
+    assert len(publishers) == 1, publishers
+    assert publishers[0].startswith("middleware/core/gateway/core/bridge/ros_bridge.py:"), publishers
+
+
+def test_fleet_prod_only_core_common():
+    """Guard 5 (S3): fleet production code touches core_common at most."""
+    violations = []
+    for path in _prod_py_files(FLEET):
+        for top in _import_tops(path):
+            if top.startswith("core_") and top != "core_common":
+                violations.append(f"{path.relative_to(ROOT)} imports {top}")
+    assert violations == [], violations
+
+def test_control_imports_no_core_code():
+    """Guard 4 (D-155): control runtime never imports core.
+
+    The control application is a plugin that is loaded by core. It must not
+    statically import core_features, core_api_web, core, etc.
+
+    D-155 refinement (2026-10-02): ``core_common`` is the contracts
+    foundation, not core runtime — control's package.xml declares it as an
+    exec_depend and the sensing-only slice ships it. Control may import the
+    contract surface only, mirroring the fleet rule (D-18):
+    ``core_common.protocol.*`` (shared contract types) and
+    ``core_common.calibration_store`` (calibration resolution shared with
+    bringup and core, D-397), ``core_common.robot_body`` (the one URDF body
+    every near/stop check shares with CORE and the calibration tools, D-424).
+    D-667/D-670 also permit the exact ``core_common.observation`` module:
+    immutable evidence references and pure validity checks.
+    Runtime packages stay banned outright.
+    """
+    runtime_tops = {"core", "core_features", "core_api_web", "core_events"}
+    allowed_contracts = ("core_common.protocol", "core_common.calibration_store",
+                         "core_common.robot_body")
+    violations = []
+    for path in (file for tree in CONTROL_TREES for file in _prod_py_files(tree)):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        modules = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules.update(a.name for a in node.names if a.name.startswith("core"))
+            elif isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[0] in (
+                    "core", "core_features", "core_api_web", "core_events", "core_common"):
+                modules.add(node.module)
+        for module in sorted(modules):
+            top = module.split(".")[0]
+            if top in runtime_tops:
+                rel = path.relative_to(ROOT).as_posix()
+                violations.append(f"{rel}: imported {module}")
+            elif top == "core_common" and not (module.startswith(allowed_contracts)
+                                               or module == "core_common.observation"):
+                rel = path.relative_to(ROOT).as_posix()
+                violations.append(f"{rel}: imported {module} (contract surface only, D-155 refinement)")
+    assert not violations, "control must not depend on core:\n" + "\n".join(violations)
+
+
+
+
+def test_games_imports_isolation():
+    """Guard 6 (D-160): games runtime never imports core, rclpy, httpx, cv2.
+
+    The games application must remain decoupled from the ROS graph (rclpy),
+    the robot core (core), the fleet server (fleet), and network/vision
+    hardware libraries (httpx, cv2) except where explicitly allowed (e.g. host).
+    """
+    violations = []
+    forbidden_tops = {"core", "fleet", "rclpy", "httpx", "cv2"}
+    games_src = ROOT / "operations" / "apps" / "games" / "games"
+    for path in _prod_py_files(games_src):
+        # Only field, game, policy are strictly pure
+        parts = path.relative_to(games_src).parts
+        if not parts:
+            continue
+        domain = parts[0]
+        if domain in ("field", "game", "policy"):
+            tops = _import_tops(path)
+            bad = tops & forbidden_tops
+            if bad:
+                rel = path.relative_to(ROOT).as_posix()
+                violations.append(f"{rel}: imported {', '.join(sorted(bad))}")
+    assert not violations, "games pure domains must not depend on forbidden libs:\n" + "\n".join(violations)

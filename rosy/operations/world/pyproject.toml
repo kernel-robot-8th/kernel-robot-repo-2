@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rosy-world"
+version = "0.1.1"
+description = "ROS-free ROSY observation references and current-state projections"
+requires-python = ">=3.12"
+dependencies = ["core_common>=0.0.1"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["rosy.world.*"]
+namespaces = true

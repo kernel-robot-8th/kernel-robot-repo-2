@@ -1,0 +1,36 @@
+"""colcon install 없이 pytest 를 돌린다 (Windows/CI).
+
+`fleet` 은 `core_common.protocol.schemas` 를 import 한다(D-18, D-126). 두 패키지 모두
+소스 트리에서 바로 찾도록 sys.path 를 잡는다 — 루트 `test/conftest.py` 가
+`deploy/robot/pinky_pro/release` 에 하는 것과 같은 방식이다.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+SRC = (Path(__file__).resolve().parents[3] / "src")
+
+# Each entry is the *outer* ROS-package dir, so the inner Python package
+# (which owns __init__.py) resolves: fleet, core_common (prod, D-126 S3),
+# core_features (cross-checks only: test_geometry.py follow_goal, D-60; test_trip_runner.py CORE's
+# junction manoeuvre states).
+for path in (
+    SRC.parent / "operations" / "fleet",
+    SRC.parent / "operations" / "decision" / "src",
+    SRC.parent / "operations" / "world" / "src",
+    SRC.parent / 'operations' / 'site_execution' / "src",
+    SRC.parent / "contracts" / "foundation",
+    SRC.parent / "middleware" / "core" / "services",
+    # Cell app tests import this production dependency before test_cell_compiler.
+    SRC.parent / "operations" / "processes" / "palletizing" / "src",
+):
+    entry = str(path)
+    if entry not in sys.path:
+        sys.path.insert(0, entry)
+
+# Browser tests here import test/browser_harness.py (opt-in flag, Chromium-safe ports).
+_HARNESS = str(Path(__file__).resolve().parents[3] / "test")
+if _HARNESS not in sys.path:
+    sys.path.append(_HARNESS)
