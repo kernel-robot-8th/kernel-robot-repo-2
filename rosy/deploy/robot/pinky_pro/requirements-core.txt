@@ -1,7 +1,0 @@
-cryptography==50.0.0
-joserfc==1.7.5
-fastapi==0.141.1
-pydantic==2.13.5
-PyYAML==6.0.1
-uvicorn==0.52.4
-websockets==17.1

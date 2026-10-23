@@ -1,4 +1,0 @@
-# Keep the POSIX wrapper runnable on Linux checkouts regardless of core.autocrlf.
-gradlew text eol=lf
-*.bat text eol=crlf
-*.jar binary

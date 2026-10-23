@@ -1,2 +1,0 @@
-rows=133 regimes=centre -> left -> right -> none
-VERDICT: PASS (0 problems)

@@ -1,3 +1,0 @@
-Type: std_msgs/msg/String
-Publisher count: 1
-Subscription count: 0

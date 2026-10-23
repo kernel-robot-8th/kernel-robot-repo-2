@@ -1,1 +1,0 @@
-"""ROSY gateway application compositions."""
