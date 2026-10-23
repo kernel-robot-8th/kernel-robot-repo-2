@@ -68,8 +68,8 @@ class RealFleetHttpTests(unittest.TestCase):
             sources = ('synthetic-business-observer',)
             ledger = BusinessLedger(path, evidence_sources=sources)
             key = 'harbor-business-' + uuid4().hex
-            ledger.prepare(key, 7, (self.binding,), target_id=self.binding.cargo_id,
-                           supply_slot=self.binding.destination)
+            ledger.prepare(key, 7, (self.binding,), outbound_id=self.binding.cargo_id,
+                           outbound_stand=self.binding.destination)
             mission = ledger.propose(key, self.client)
             ledger.refresh(key, self.client, now=datetime.now(timezone.utc))
             waiting = ledger.read(key)
@@ -108,7 +108,7 @@ class RealFleetHttpTests(unittest.TestCase):
                         replace(evidence, attempt_id='wrong-attempt'),
                         replace(evidence, cargo_id='wrong-cargo'),
                         replace(evidence, observed_at=now-timedelta(seconds=10)),
-                        replace(evidence, arms_clear=False)):
+                        replace(evidence, arms_retreated=False)):
                 with self.subTest(observation=bad), self.assertRaises(ValueError):
                     ledger.confirm(key, bad, now=now)
                 self.assertEqual(ledger.read(key)['state'], 'WAITING')
@@ -119,12 +119,12 @@ class RealFleetHttpTests(unittest.TestCase):
             now = datetime.now(timezone.utc)
             restarted.refresh(key, self.client, now=now)
             restarted.confirm(key, replace(evidence, observed_at=now), now=now)
-            self.assertEqual(restarted.read(key)['state'], 'AWAITING_UNLOAD')
+            self.assertEqual(restarted.read(key)['state'], 'AWAITING_FINAL_EVIDENCE')
             with self.assertRaises(ValueError):
                 restarted.finish(key, evidence, now=now)
-            unload = replace(evidence, evidence_id='synthetic-unload-' + uuid4().hex,
-                             observed_at=now, unloaded=True)
-            restarted.finish(key, unload, now=now)
+            placement = replace(evidence, evidence_id='synthetic-placement-' + uuid4().hex,
+                             observed_at=now, placed=True)
+            restarted.finish(key, placement, now=now)
             self.assertEqual(restarted.read(key)['state'], 'COMPLETED')
 
 

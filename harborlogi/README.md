@@ -2,7 +2,7 @@
 
 <img src="assets/brand/harbor-app-icon-20261023.png" alt="컨테이너로 구성한 Harbor H 아이콘" width="128" height="128">
 
-HarborLogi의 항만 업무 앱이다. 회수 순위가 바뀌었을 때 묻힌 컨테이너를 어떤 순서로 꺼내고 방해 화물을 어디에 둘지 제안하고, 그 작업이 실제로 끝났는지를 업무 장부에 대조한다. 로봇을 직접 움직이지 않는다. 실행은 ROSY Platform이 맡는다.
+HarborLogi의 항만 업무 앱이다. 선적 순서가 바뀌었을 때 묻힌 컨테이너를 꺼내는 재취급을 동반한 반출 순서와 재취급 화물을 둘 임시 장치 칸을 제안하고, 그 작업이 실제로 끝났는지를 업무 장부에 대조한다. 로봇을 직접 움직이지 않는다. 실행은 ROSY Platform이 맡는다.
 
 커버·배너·아이콘 원본과 사용 위치는 [브랜드 자산](assets/brand/README.md)에 있다.
 
@@ -16,29 +16,29 @@ python -m unittest discover -s tests -v
 python -m harbor
 ```
 
-`python -m harbor`는 합성 재고로 만든 회수 제안을 출력한다. 목표 화물 `target` 위의 `blocker`를 임시 위치로 옮기고, `target`을 공급 쪽으로 회수한 뒤 `blocker`를 원래 적층으로 돌리는 순서다.
+`python -m harbor`는 합성 재고로 만든 반출 제안을 출력한다. 반출 대상 화물 `outbound` 위의 재취급 화물 `rehandle`을 임시 장치 칸 `temp`로 옮기고, `outbound`를 반출대 `stand`에 내려놓은 뒤 `rehandle`을 원래 장치 칸으로 돌리는 순서다. 용어는 [CONTEXT.md](CONTEXT.md)를 따른다.
 
 ```json
 {
   "status": "READY",
   "reason": "PROPOSAL_REQUIRES_ADMISSION_AND_EVIDENCE",
   "moves": [
-    {"cargo_id": "blocker", "source": "yard", "destination": "temporary"},
-    {"cargo_id": "target", "source": "yard", "destination": "supply"},
-    {"cargo_id": "blocker", "source": "temporary", "destination": "yard"}
+    {"cargo_id": "rehandle", "source": "yard", "destination": "temp"},
+    {"cargo_id": "outbound", "source": "yard", "destination": "stand"},
+    {"cargo_id": "rehandle", "source": "temp", "destination": "yard"}
   ],
-  "required_completion": ["target_unloaded_by_supply", "blockers_restored", "arms_clear"]
+  "required_completion": ["outbound_placed_on_stand", "rehandles_restored", "arms_retreated"]
 }
 ```
 
-`READY`는 관측 기준으로 세운 업무 제안일 뿐 실행 허가가 아니다. 업무 완료는 `required_completion`의 세 가지(목표 하역, 방해 화물 정리, 팔 퇴피)에 실제 근거가 있을 때만 판정한다. 필요하면 `python -m pip install -e .`로 설치한다.
+`READY`는 관측 기준으로 세운 업무 제안일 뿐 실행 허가가 아니다. 업무 완료는 `required_completion`의 세 가지(반출 대상 화물을 반출대에 내려놓음, 재취급 화물 복귀, 관련 팔 퇴피)에 실제 근거가 있을 때만 판정한다. 필요하면 `python -m pip install -e .`로 설치한다.
 
 ## Harbor와 ROSY의 경계
 
 | Harbor가 하는 일 | ROSY가 하는 일 |
 |---|---|
-| 컨테이너·슬롯·적층 관계, 회수 순위와 변경 지시의 계획 버전 | 작업 접수(admission)와 자원 배정 |
-| 방해 화물 처리·회수·복구 순서 제안 | 실제 경로·팔 자세·공유 구역·장치 능력 확인 |
+| 컨테이너·장치 칸·단 관계, 반출 순서와 변경 지시의 계획 버전 | 작업 접수(admission)와 자원 배정 |
+| 재취급·반출·복귀 순서 제안 | 실제 경로·팔 자세·공유 구역·장치 능력 확인 |
 | 중복 요청 방지와 업무 장부(SQLite) | 장치 실행·정지와 실행 근거 |
 | 업무 완료 판정 (관측 근거와 대조) | 관측(World)과 작업 진행 기록 |
 
@@ -48,15 +48,15 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 
 | 모듈 | 책임 |
 |---|---|
-| `harbor/model.py` | 적층·관측 시각·물리 보유·계획 기준 버전의 불변 값 |
-| `harbor/retrieval.py` | 방해 화물 처리·회수·복구 순서의 결정적 제안 |
+| `harbor/model.py` | 장치 칸·관측 시각·물리 보유·계획 기준 버전의 불변 값 |
+| `harbor/outbound.py` | 재취급·반출·복귀 순서의 결정적 제안 |
 | `harbor/site.py` | 암 S 1대, A/B 2대, 운송 풀 3대, 충전 한 자리, 직렬 이동 제약 |
-| `harbor/availability.py` | 수동 충전·대기·적재·정비·불명 장치의 후보 제외 |
+| `harbor/availability.py` | 수동 충전·대기·적재·정비·불명 이송 차량의 후보 제외 |
 | `harbor/process.py` | 각 화물 이동을 설치된 공정 문서 ID·digest·compiler artifact에 연결 |
-| `harbor/rosy_http.py` | Fleet compile/proposal/job 조회와 운송 후보 요청의 HTTP 클라이언트 |
+| `harbor/rosy_http.py` | Fleet compile/proposal/job 조회와 이송 후보 요청의 HTTP 클라이언트 |
 | `harbor/workflow.py` | 중복 요청 방지·불명 접수 HOLD·현재 시도와 관측 대조의 업무 장부 |
 
-슬롯 목록은 아래층부터 위층 순서다. 적층의 하중·형상·충돌은 이 재고 모델의 범위가 아니다. `transfers`는 업무 계획에서 허용한 방향일 뿐 실행 능력을 만들지 않는다.
+장치 칸의 화물 목록은 아래 단부터 위 단 순서다. 장치의 하중·형상·충돌은 이 재고 모델의 범위가 아니다. `allowed_moves`는 업무 계획에서 허용한 칸 사이 이동 방향일 뿐 실행 능력을 만들지 않는다.
 
 [설치 예제](config/site.example.json)는 합성 ID와 개념 위치다. 특정 Pinky 번호에 입고·출고·충전 역할을 고정하지 않는다. 수동 `available`은 앱의 제외 조건을 푸는 것일 뿐 실제 가용성이나 자동 충전 확인이 아니다. 운영 상태는 호출할 때 명시적으로 전달하고, 누락된 차량은 제외한다.
 

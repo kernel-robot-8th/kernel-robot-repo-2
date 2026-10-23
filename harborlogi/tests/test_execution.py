@@ -9,12 +9,12 @@ from harbor.process import ProcessBinding, bind_plan
 from harbor.rosy_http import RosyClient
 from harbor.workflow import BusinessLedger, MoveEvidence
 from test_policy import NOW, yard, constraints
-from harbor.model import RetrievalRequest
-from harbor.retrieval import plan_retrieval
+from harbor.model import OutboundRequest
+from harbor.outbound import plan_outbound
 
 
 def bound_moves():
-    plan = plan_retrieval(yard(), RetrievalRequest("target", 3), constraints(), now=NOW)
+    plan = plan_outbound(yard(), OutboundRequest("outbound", 3), constraints(), now=NOW)
     bindings = tuple(ProcessBinding(m.cargo_id, m.source, m.destination, "recipe", "a" * 64,
                                    "cell", "b" * 64, "workcell", "installed", "c" * 64) for m in plan.moves)
     return bind_plan(plan, bindings)
@@ -48,8 +48,8 @@ class FakeFleet:
 class ProcessTests(unittest.TestCase):
     def test_every_move_is_bound_without_partial_fallback(self):
         moves = bound_moves()
-        self.assertEqual([m.cargo_id for m in moves], ["blocker", "target", "blocker"])
-        plan = plan_retrieval(yard(), RetrievalRequest("target", 3), constraints(), now=NOW)
+        self.assertEqual([m.cargo_id for m in moves], ["rehandle", "outbound", "rehandle"])
+        plan = plan_outbound(yard(), OutboundRequest("outbound", 3), constraints(), now=NOW)
         with self.assertRaises(ValueError):
             bind_plan(plan, (moves[0],))
 
@@ -69,9 +69,9 @@ class ProcessTests(unittest.TestCase):
 
     def test_candidate_request_uses_key_and_pool_without_platform_imports(self):
         fleet = FakeFleet()
-        RosyClient(transport=fleet).trip(("p2", "p3"), ({"to": "supply"},), request_key="trip-key")
+        RosyClient(transport=fleet).trip(("p2", "p3"), ({"to": "stand"},), request_key="trip-key")
         self.assertEqual(fleet.calls[-1][2], {"candidate_robot_ids": ["p2", "p3"],
-                                              "request_key": "trip-key", "steps": [{"to": "supply"}]})
+                                              "request_key": "trip-key", "steps": [{"to": "stand"}]})
 
 
 class WorkflowTests(unittest.TestCase):
@@ -85,7 +85,7 @@ class WorkflowTests(unittest.TestCase):
         self.prepare()
 
     def prepare(self, revision=3):
-        return self.ledger.prepare("request-1", revision, bound_moves(), target_id="target", supply_slot="supply")
+        return self.ledger.prepare("request-1", revision, bound_moves(), outbound_id="outbound", outbound_stand="stand")
 
     def evidence(self, **changes):
         move = bound_moves()[self.ledger.read("request-1")["step_index"]]
@@ -109,7 +109,7 @@ class WorkflowTests(unittest.TestCase):
     def test_wrong_attempt_revision_source_cargo_destination_or_time_never_advances(self):
         self.start()
         for changes in ({"attempt_id": "old"}, {"revision": 2}, {"source_id": "planner"},
-                        {"cargo_id": "wrong"}, {"destination": "wrong"}, {"arms_clear": False},
+                        {"cargo_id": "wrong"}, {"destination": "wrong"}, {"arms_retreated": False},
                         {"observed_at": NOW - timedelta(seconds=6)},
                         {"observed_at": NOW + timedelta(seconds=1)}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
@@ -187,18 +187,18 @@ class WorkflowTests(unittest.TestCase):
             self.ledger.propose("request-1", RosyClient(transport=transport))
         self.assertEqual(self.ledger.read("request-1")["state"], "HOLD")
 
-    def test_all_moves_still_require_supply_unload_before_business_completion(self):
+    def test_all_moves_still_require_outbound_placement_before_business_completion(self):
         for index in range(3):
             self.start()
             self.ledger.confirm("request-1", self.evidence(evidence_id=f"e{index}"), now=NOW)
-        self.assertEqual(self.ledger.read("request-1")["state"], "AWAITING_UNLOAD")
-        unload = MoveEvidence("unload", "mission-2", "attempt-1", 3, "installed-camera", NOW,
-                              "target", "supply", True, unloaded=True)
+        self.assertEqual(self.ledger.read("request-1")["state"], "AWAITING_FINAL_EVIDENCE")
+        placement = MoveEvidence("placement", "mission-2", "attempt-1", 3, "installed-camera", NOW,
+                              "outbound", "stand", True, placed=True)
         with self.assertRaises(ValueError):
-            self.ledger.finish("request-1", replace(unload, unloaded=False), now=NOW)
+            self.ledger.finish("request-1", replace(placement, placed=False), now=NOW)
         with self.assertRaises(ValueError):
-            self.ledger.finish("request-1", replace(unload, attempt_id="old"), now=NOW)
-        self.ledger.finish("request-1", unload, now=NOW)
+            self.ledger.finish("request-1", replace(placement, attempt_id="old"), now=NOW)
+        self.ledger.finish("request-1", placement, now=NOW)
         self.assertEqual(self.ledger.read("request-1")["state"], "COMPLETED")
 
     def test_race_late_refresh_cannot_overwrite_next_stage(self):
@@ -219,12 +219,12 @@ class WorkflowTests(unittest.TestCase):
             self.ledger.confirm("request-1", self.evidence(evidence_id=f"e{index}"), now=NOW)
         self.start()
         evidence = self.evidence(evidence_id="e2")
-        unload = MoveEvidence("unload", "mission-2", "attempt-1", 3, "installed-camera", NOW,
-                              "target", "supply", True, unloaded=True)
+        placement = MoveEvidence("placement", "mission-2", "attempt-1", 3, "installed-camera", NOW,
+                              "outbound", "stand", True, placed=True)
         def transport(method, path, body):
             result = self.fleet(method, path, body)
             self.ledger.confirm("request-1", evidence, now=NOW)
-            self.ledger.finish("request-1", unload, now=NOW)
+            self.ledger.finish("request-1", placement, now=NOW)
             return result
         with self.assertRaises(ValueError):
             self.ledger.refresh("request-1", RosyClient(transport=transport), now=NOW)

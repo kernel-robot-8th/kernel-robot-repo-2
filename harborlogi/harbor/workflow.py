@@ -13,6 +13,13 @@ def _json(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+def _payload(row):
+    payload = json.loads(row["payload"])
+    if "target_id" in payload or "supply_slot" in payload:
+        raise ValueError("Ledger row predates the ADR 0005 names; reconcile it and prepare a new request key")
+    return payload
+
+
 @dataclass(frozen=True)
 class MoveEvidence:
     evidence_id: str
@@ -23,8 +30,8 @@ class MoveEvidence:
     observed_at: datetime
     cargo_id: str
     destination: str
-    arms_clear: bool
-    unloaded: bool = False
+    arms_retreated: bool
+    placed: bool = False
 
     def __post_init__(self):
         for value in (self.evidence_id, self.mission_id, self.attempt_id, self.source_id,
@@ -32,7 +39,7 @@ class MoveEvidence:
             identifier(value)
         revision(self.revision)
         aware_time(self.observed_at)
-        if type(self.arms_clear) is not bool or type(self.unloaded) is not bool:
+        if type(self.arms_retreated) is not bool or type(self.placed) is not bool:
             raise ValueError("Physical facts must be explicit booleans")
 
 
@@ -50,14 +57,18 @@ class BusinessLedger:
                     state TEXT NOT NULL, step_index INTEGER NOT NULL DEFAULT 0,
                     row_version INTEGER NOT NULL DEFAULT 0,
                     mission_id TEXT, attempt_id TEXT, goal_confirmed INTEGER NOT NULL DEFAULT 0,
-                    target_mission_id TEXT, target_attempt_id TEXT);
+                    outbound_mission_id TEXT, outbound_attempt_id TEXT);
                 CREATE TABLE IF NOT EXISTS evidence (
                     source_id TEXT NOT NULL, evidence_id TEXT NOT NULL, payload TEXT NOT NULL,
                     PRIMARY KEY(source_id,evidence_id));
             """)
             c.execute("BEGIN IMMEDIATE")
-            if "row_version" not in {r[1] for r in c.execute("PRAGMA table_info(business)")}:
+            columns = {r[1] for r in c.execute("PRAGMA table_info(business)")}
+            if "row_version" not in columns:
                 c.execute("ALTER TABLE business ADD COLUMN row_version INTEGER NOT NULL DEFAULT 0")
+            for old in ("mission_id", "attempt_id"):  # ADR 0005 names; rows keep their values.
+                if "target_" + old in columns:
+                    c.execute(f"ALTER TABLE business RENAME COLUMN target_{old} TO outbound_{old}")
             c.execute("UPDATE business SET state='HOLD',row_version=row_version+1 WHERE state='SUBMITTING'")
 
     def _connect(self):
@@ -82,20 +93,20 @@ class BusinessLedger:
                 or current["step_index"] != original["step_index"] or current["digest"] != original["digest"]):
             raise ValueError("Business stage changed while the Fleet request was pending")
 
-    def prepare(self, key, plan_revision, moves, *, target_id, supply_slot):
+    def prepare(self, key, plan_revision, moves, *, outbound_id, outbound_stand):
         identifier(key)
         if len(key) > 128 or any(ord(c) < 32 for c in key):
             raise ValueError("Invalid business request key")
         revision(plan_revision)
-        identifier(target_id)
-        identifier(supply_slot)
+        identifier(outbound_id)
+        identifier(outbound_stand)
         if not isinstance(moves, tuple) or not moves or not all(isinstance(m, ProcessBinding) for m in moves):
             raise ValueError("Expected a nonempty immutable bound plan")
-        if sum(m.cargo_id == target_id for m in moves) != 1 or not any(
-                m.cargo_id == target_id and m.destination == supply_slot for m in moves):
-            raise ValueError("Expected exactly one target retrieval to supply")
+        if sum(m.cargo_id == outbound_id for m in moves) != 1 or not any(
+                m.cargo_id == outbound_id and m.destination == outbound_stand for m in moves):
+            raise ValueError("Expected exactly one outbound move to the outbound stand")
         payload = _json({"revision": plan_revision, "moves": [asdict(m) for m in moves],
-                         "target_id": target_id, "supply_slot": supply_slot})
+                         "outbound_id": outbound_id, "outbound_stand": outbound_stand})
         digest = hashlib.sha256(payload.encode()).hexdigest()
         with closing(self._connect()) as c, c:
             c.execute("BEGIN IMMEDIATE")
@@ -109,7 +120,7 @@ class BusinessLedger:
         row = self.read(key)
         if row["state"] != "PLANNED":
             raise ValueError("Current stage cannot submit a proposal")
-        payload = json.loads(row["payload"])
+        payload = _payload(row)
         binding = ProcessBinding(**payload["moves"][row["step_index"]])
         client.compile(binding)
         with closing(self._connect()) as c, c:
@@ -169,11 +180,11 @@ class BusinessLedger:
 
     def _validate(self, row, evidence, now, *, mission_id, attempt_id, cargo_id, destination):
         aware_time(now)
-        payload = json.loads(row["payload"])
+        payload = _payload(row)
         if (not isinstance(evidence, MoveEvidence) or evidence.source_id not in self.sources
                 or evidence.revision != payload["revision"] or evidence.mission_id != mission_id
                 or evidence.attempt_id != attempt_id or evidence.cargo_id != cargo_id
-                or evidence.destination != destination or not evidence.arms_clear
+                or evidence.destination != destination or not evidence.arms_retreated
                 or not timedelta(0) <= now - evidence.observed_at <= self.freshness):
             raise ValueError("Physical evidence does not match the current business execution")
 
@@ -192,7 +203,7 @@ class BusinessLedger:
         with closing(self._connect()) as c, c:
             c.execute("BEGIN IMMEDIATE")
             row = self._row(c, key)
-            payload = json.loads(row["payload"])
+            payload = _payload(row)
             if row["state"] != "WAITING" or not row["goal_confirmed"]:
                 raise ValueError("Fleet goal confirmation is required")
             read = self._reads.get(key)
@@ -204,11 +215,11 @@ class BusinessLedger:
             self._validate(row, evidence, now, mission_id=row["mission_id"], attempt_id=row["attempt_id"],
                            cargo_id=move["cargo_id"], destination=move["destination"])
             self._save_evidence(c, evidence)
-            if move["cargo_id"] == payload["target_id"]:
-                c.execute("UPDATE business SET target_mission_id=mission_id,target_attempt_id=attempt_id "
+            if move["cargo_id"] == payload["outbound_id"]:
+                c.execute("UPDATE business SET outbound_mission_id=mission_id,outbound_attempt_id=attempt_id "
                           "WHERE request_key=?", (key,))
             index = row["step_index"] + 1
-            state = "AWAITING_UNLOAD" if index == len(payload["moves"]) else "PLANNED"
+            state = "AWAITING_FINAL_EVIDENCE" if index == len(payload["moves"]) else "PLANNED"
             c.execute("UPDATE business SET state=?,step_index=?,mission_id=NULL,attempt_id=NULL,goal_confirmed=0,row_version=row_version+1 "
                       "WHERE request_key=?", (state, index, key))
         if self._reads.get(key) == read:
@@ -218,11 +229,11 @@ class BusinessLedger:
         with closing(self._connect()) as c, c:
             c.execute("BEGIN IMMEDIATE")
             row = self._row(c, key)
-            payload = json.loads(row["payload"])
-            if row["state"] != "AWAITING_UNLOAD" or not evidence.unloaded:
-                raise ValueError("Target unload and all restored moves are required")
-            self._validate(row, evidence, now, mission_id=row["target_mission_id"],
-                           attempt_id=row["target_attempt_id"], cargo_id=payload["target_id"],
-                           destination=payload["supply_slot"])
+            payload = _payload(row)
+            if row["state"] != "AWAITING_FINAL_EVIDENCE" or not evidence.placed:
+                raise ValueError("Outbound placement and all restored moves are required")
+            self._validate(row, evidence, now, mission_id=row["outbound_mission_id"],
+                           attempt_id=row["outbound_attempt_id"], cargo_id=payload["outbound_id"],
+                           destination=payload["outbound_stand"])
             self._save_evidence(c, evidence)
             c.execute("UPDATE business SET state='COMPLETED',row_version=row_version+1 WHERE request_key=?", (key,))

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import re
 
 from harbor.model import identifier
-from harbor.retrieval import RetrievalProposal
+from harbor.outbound import OutboundProposal
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,7 @@ class ProcessBinding:
                 "workcell_id": self.workcell_id, "instance_id": self.instance_id}
 
 
-def bind_plan(proposal: RetrievalProposal, bindings: tuple[ProcessBinding, ...]) -> tuple[ProcessBinding, ...]:
+def bind_plan(proposal: OutboundProposal, bindings: tuple[ProcessBinding, ...]) -> tuple[ProcessBinding, ...]:
     if proposal.status != "READY" or not proposal.moves:
         raise ValueError("Only a ready nonempty inventory proposal can be bound")
     if not isinstance(bindings, tuple) or not all(isinstance(b, ProcessBinding) for b in bindings):
