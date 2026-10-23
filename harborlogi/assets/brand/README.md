@@ -7,6 +7,7 @@
 | [Notion 커버](harborlogi-notion-cover-20261023.png) | 팀 프로젝트·프로젝트 소개 페이지 상단 커버 |
 | [GitHub 배너](harborlogi-github-banner-20261023.png) | 저장소 README 대표 이미지 |
 | [Harbor 아이콘](harbor-app-icon-20261023.png) | Notion 페이지 아이콘·Harbor 프로젝트 README |
+| [소형 실험 야드 컨셉](harborlogi-tabletop-concept-20261023.png) | Notion 프로젝트 소개 본문·발표 자료용 대안 이미지 |
 
 색상은 딥 네이비·청록·오렌지·아이보리를 공통으로 사용한다. 아이콘은 컨테이너로 만든 H와 들어 올린 화물을 표현한다.
 
