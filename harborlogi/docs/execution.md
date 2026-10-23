@@ -48,8 +48,8 @@ ledger = BusinessLedger(ledger_path, evidence_sources=("synthetic-observer",))
 python -m tools.integration.real_fleet_http --platform-root <플랫폼-root> --platform-sha <전체-40자리-SHA> --vault-root <Vault-root> --vault-sha <전체-40자리-SHA>
 ```
 
-도구는 기존 Vault의 시뮬레이션 서버를 loopback에 띄우고 임시 장부·합성 operator/viewer 자격으로 `tests/integration`을 별도 프로세스에서 실행한 뒤 서버를 종료한다. 서버 환경만 플랫폼·Vault 시험 코드를 import한다. Port 런타임 wheel에는 `tools`가 포함되지 않는다. 일반 운영 Fleet·실물 장치에 대한 도구가 아니다.
+도구는 기존 Vault의 시뮬레이션 서버를 loopback에 띄우고 임시 장부·합성 operator/viewer 자격으로 `tests/integration`을 별도 프로세스에서 실행한 뒤 서버를 종료한다. 서버 환경만 플랫폼·Vault 시험 코드를 import한다. Harbor 런타임 wheel에는 `tools`가 포함되지 않는다. 일반 운영 Fleet·실물 장치에 대한 도구가 아니다.
 
 독립 실행에서는 `ROSY_PORT_INTEGRATION=1`과 도구가 만든 임시 `ROSY_PORT_INTEGRATION_CONFIG`를 함께 공급한다. 명시 모드에서 설정 누락·연결 오류는 실패이며 skip을 성공 증거로 삼지 않는다. 전체 SHA 세 개와 exit code를 함께 기록한다. fixture의 합성 관측은 업무 완료의 운영 증거를 제공하지 않는다.
 
-업무 대조 시험에서는 별도 시험 actor가 Fleet의 기명 승인자로 승인한다. Port의 런타임 클라이언트에 승인 기능을 추가하지 않는다. 실제 `GOAL_CONFIRMED` 뒤에도 Port 장부가 WAITING에 남는지, 잘못된 관측을 거절하는지, 재시작 후 새 조회가 필요한지, 인계 뒤에도 별도 하역 관측 전에는 AWAITING_UNLOAD인지 확인한다. 관측 값은 시험에 명시한 합성 데이터이며 인증된 현장 관측을 읽는 어댑터가 아니다. [실행 결과와 제한](validation/2026-10-22-business-reconciliation.md)을 따른다.
+업무 대조 시험에서는 별도 시험 actor가 Fleet의 기명 승인자로 승인한다. Harbor의 런타임 클라이언트에 승인 기능을 추가하지 않는다. 실제 `GOAL_CONFIRMED` 뒤에도 Harbor 장부가 WAITING에 남는지, 잘못된 관측을 거절하는지, 재시작 후 새 조회가 필요한지, 인계 뒤에도 별도 하역 관측 전에는 AWAITING_UNLOAD인지 확인한다. 관측 값은 시험에 명시한 합성 데이터이며 인증된 현장 관측을 읽는 어댑터가 아니다. [실행 결과와 제한](validation/2026-10-22-business-reconciliation.md)을 따른다.
