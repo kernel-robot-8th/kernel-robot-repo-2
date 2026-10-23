@@ -1,1 +1,0 @@
-"""ROSY agent application compositions."""

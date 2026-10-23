@@ -1,6 +1,0 @@
-[Unit]
-Description=ROSY AI PC GPU availability check (offline evaluation)
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/nvidia-smi -L

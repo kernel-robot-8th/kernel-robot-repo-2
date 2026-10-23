@@ -1,5 +1,0 @@
-{
-  "adb_path": "/absolute/path/to/platform-tools/adb",
-  "expected_serial": "YOURPHONESERIAL",
-  "expected_model": "YOUR-PHONE-MODEL"
-}

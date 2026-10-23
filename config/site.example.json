@@ -1,0 +1,9 @@
+{
+  "arms": {"S": "demo-supply", "A": "demo-yard-a", "B": "demo-yard-b"},
+  "transport_ids": ["demo-mobile-1", "demo-mobile-2", "demo-mobile-3"],
+  "slots": ["yard", "temp", "supply", "wait"],
+  "waiting_slots": ["wait"],
+  "transfers": [["yard", "temp"], ["temp", "yard"], ["yard", "supply"]],
+  "charging_slots": 1,
+  "max_moving_robots": 1
+}

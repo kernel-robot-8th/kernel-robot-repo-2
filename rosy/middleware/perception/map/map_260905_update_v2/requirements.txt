@@ -1,6 +1,0 @@
-numpy
-Pillow
-shapely>=2
-scipy
-PyYAML
-cairosvg

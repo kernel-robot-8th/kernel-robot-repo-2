@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "harborlogi"
+version = "0.1.0"
+description = "HarborLogi port retrieval app (Harbor) above the ROSY platform"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+include = ["harbor*"]
