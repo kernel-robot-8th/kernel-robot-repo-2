@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+YARD_ARMS = ("A", "B")  # Platform-owner arms Harbor plans for; supply arm S is an external step.
+
 
 def identifier(value: str) -> None:
     if not isinstance(value, str) or not value or value != value.strip():
@@ -87,12 +89,25 @@ class PortConstraints:
     temporary_bays: tuple[str, ...]
     allowed_moves: frozenset[tuple[str, str]]
     max_observation_age: timedelta
+    conveyor: str
+    # (arm, cell location) pairs the installer verified. Empty means unverified, so planning HOLDs.
+    # shortcut: installer table, replace with platform compile pre-validation once D-856 P1 lands.
+    arm_reach: frozenset[tuple[str, str]] = frozenset()
 
     def __post_init__(self):
         identifier(self.outbound_stand)
+        identifier(self.conveyor)
         identifiers(self.temporary_bays)
-        if self.outbound_stand in self.temporary_bays:
-            raise ValueError("The outbound stand cannot be a temporary bay")
+        # Rehandles never go on the one-way conveyor or the outbound stand (ADR 0005 decision 8).
+        if self.outbound_stand in self.temporary_bays or self.conveyor in self.temporary_bays:
+            raise ValueError("The outbound stand and the conveyor cannot be temporary bays")
+        if self.conveyor == self.outbound_stand:
+            raise ValueError("The conveyor cannot be the outbound stand")
+        if not isinstance(self.arm_reach, frozenset) or not all(
+                isinstance(e, tuple) and len(e) == 2 and e[0] in YARD_ARMS for e in self.arm_reach):
+            raise ValueError("Expected immutable (A|B, location) reach pairs")
+        for _, location in self.arm_reach:
+            identifier(location)
         if not isinstance(self.allowed_moves, frozenset):
             raise ValueError("Expected immutable directed moves")
         for edge in self.allowed_moves:

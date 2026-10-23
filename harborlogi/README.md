@@ -23,15 +23,15 @@ python -m harbor
   "status": "READY",
   "reason": "PROPOSAL_REQUIRES_ADMISSION_AND_EVIDENCE",
   "moves": [
-    {"cargo_id": "rehandle", "source": "yard", "destination": "temp"},
-    {"cargo_id": "outbound", "source": "yard", "destination": "stand"},
-    {"cargo_id": "rehandle", "source": "temp", "destination": "yard"}
+    {"cargo_id": "rehandle", "source": "yard", "destination": "temp", "primary_arm": "A", "alternate_arms": []},
+    {"cargo_id": "outbound", "source": "yard", "destination": "stand", "primary_arm": "A", "alternate_arms": ["B"]},
+    {"cargo_id": "rehandle", "source": "temp", "destination": "yard", "primary_arm": "A", "alternate_arms": []}
   ],
   "required_completion": ["outbound_placed_on_stand", "rehandles_restored", "arms_retreated"]
 }
 ```
 
-`READY`는 관측 기준으로 세운 업무 제안일 뿐 실행 허가가 아니다. 업무 완료는 `required_completion`의 세 가지(반출 대상 화물을 반출대에 내려놓음, 재취급 화물 복귀, 관련 팔 퇴피)에 실제 근거가 있을 때만 판정한다. 필요하면 `python -m pip install -e .`로 설치한다.
+`READY`는 관측 기준으로 세운 업무 제안일 뿐 실행 허가가 아니다. 이동마다 적층암 A·B 중 주 팔(`primary_arm`)과 대체 팔(`alternate_arms`)을 붙인다. 팔 배정은 설치자가 준 도달 표(`PortConstraints.arm_reach`)로만 하고, 표가 없거나 닿는 팔이 없으면 `HOLD`다. 플랫폼 compile 사전 검증 조회 계약(D-856 P1)이 생기면 그 결과로 바꾼다. 실제 arm claim과 대체 팔 전환은 Fleet이 한다. 업무 완료는 `required_completion`의 세 가지(반출 대상 화물을 반출대에 내려놓음, 재취급 화물 복귀, 관련 팔 퇴피)에 실제 근거가 있을 때만 판정한다. 필요하면 `python -m pip install -e .`로 설치한다.
 
 ## Harbor와 ROSY의 경계
 
@@ -50,7 +50,7 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 |---|---|
 | `harbor/model.py` | 장치 칸·관측 시각·물리 보유·계획 기준 버전의 불변 값 |
 | `harbor/outbound.py` | 재취급·반출·복귀 순서의 결정적 제안 |
-| `harbor/site.py` | 암 S 1대, A/B 2대, 운송 풀 3대, 충전 한 자리, 직렬 이동 제약 |
+| `harbor/site.py` | 적층암 A/B 2대(공급암 S는 외부 단계로 관측만), 이송 차량 3대, 컨베이어(용량 1), 업무 위치·셀 위치 두 층, 충전 한 자리, 직렬 이동 제약 |
 | `harbor/availability.py` | 수동 충전·대기·적재·정비·불명 이송 차량의 후보 제외 |
 | `harbor/process.py` | 각 화물 이동을 설치된 공정 문서 ID·digest·compiler artifact에 연결 |
 | `harbor/rosy_http.py` | Fleet compile/proposal/job 조회와 이송 후보 요청의 HTTP 클라이언트 |
@@ -58,7 +58,7 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 
 장치 칸의 화물 목록은 아래 단부터 위 단 순서다. 장치의 하중·형상·충돌은 이 재고 모델의 범위가 아니다. `allowed_moves`는 업무 계획에서 허용한 칸 사이 이동 방향일 뿐 실행 능력을 만들지 않는다.
 
-[설치 예제](config/site.example.json)는 합성 ID와 개념 위치다. 특정 Pinky 번호에 입고·출고·충전 역할을 고정하지 않는다. 수동 `available`은 앱의 제외 조건을 푸는 것일 뿐 실제 가용성이나 자동 충전 확인이 아니다. 운영 상태는 호출할 때 명시적으로 전달하고, 누락된 차량은 제외한다.
+[설치 예제](config/site.example.json)는 합성 ID와 개념 위치다. 셀 위치는 공급 작업대·컨베이어·장치 칸·임시 장치 칸·반출대이고, 업무 위치(본선·야드·반출 지점)와 구분한다. 재취급 화물은 컨베이어나 반출대에 두지 않는다. ADR 0005 이전 키(`transport_ids`·`slots`·`waiting_slots`·`charging_slots`·`transfers`, `arms`의 `S`)를 쓰면 새 키 이름을 알려 주는 오류로 거절한다. 특정 Pinky 번호에 입고·출고·충전 역할을 고정하지 않는다. 수동 `available`은 앱의 제외 조건을 푸는 것일 뿐 실제 가용성이나 자동 충전 확인이 아니다. 운영 상태는 호출할 때 명시적으로 전달하고, 누락된 차량은 제외한다.
 
 ## ROSY와 실제로 연결할 때
 

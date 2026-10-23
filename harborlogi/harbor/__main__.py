@@ -15,7 +15,9 @@ def main():
     ))
     constraints = PortConstraints("stand", ("temp",), frozenset({
         ("yard", "temp"), ("temp", "yard"), ("yard", "stand"),
-    }), timedelta(seconds=5))
+    }), timedelta(seconds=5), "conveyor", frozenset({
+        ("A", "yard"), ("A", "temp"), ("A", "stand"), ("B", "yard"), ("B", "stand"),
+    }))
     proposal = plan_outbound(snapshot, OutboundRequest("outbound", 1), constraints, now=now)
     print(json.dumps(asdict(proposal), indent=2))
 

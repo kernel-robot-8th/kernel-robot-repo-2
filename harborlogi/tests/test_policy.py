@@ -21,10 +21,13 @@ def yard(stack=("outbound", "rehandle")):
     ))
 
 
+REACH = frozenset({("A", "yard"), ("A", "temp"), ("A", "stand"), ("B", "yard"), ("B", "stand")})
+
+
 def constraints():
     return PortConstraints("stand", ("temp",), frozenset({
         ("yard", "temp"), ("temp", "yard"), ("yard", "stand"),
-    }), timedelta(seconds=5))
+    }), timedelta(seconds=5), "conveyor", REACH)
 
 
 class OutboundTests(unittest.TestCase):
@@ -106,6 +109,33 @@ class OutboundTests(unittest.TestCase):
                                            Bay("stand", ("outbound",), 1)))
         self.assertEqual(self.plan(snapshot).reason, "OUTBOUND_ALREADY_ON_STAND_REQUIRES_EVIDENCE")
 
+    def test_each_step_names_primary_and_alternate_yard_arms(self):
+        proposal = self.plan()
+        self.assertEqual([(m.primary_arm, m.alternate_arms) for m in proposal.moves],
+                         [("A", ()), ("A", ("B",)), ("A", ())])
+        self.assertNotIn("S", {a for m in proposal.moves for a in (m.primary_arm, *m.alternate_arms)})
+
+    def test_missing_or_insufficient_reach_table_is_hold(self):
+        for reach, reason in [(frozenset(), "ARM_REACH_UNVERIFIED"),
+                              (REACH - {("A", "temp")}, "NO_ARM_REACHES_MOVE")]:
+            with self.subTest(reason=reason):
+                proposal = self.plan(rules=replace(constraints(), arm_reach=reach))
+                self.assertEqual((proposal.status, proposal.reason, proposal.moves), ("HOLD", reason, ()))
+
+    def test_supply_arm_s_cannot_be_in_the_reach_table(self):
+        with self.assertRaises(ValueError):
+            replace(constraints(), arm_reach=REACH | {("S", "yard")})
+
+    def test_conveyor_and_outbound_stand_are_never_temporary_bays(self):
+        for temporary in (("conveyor",), ("stand",), ("temp", "conveyor")):
+            with self.subTest(temporary=temporary), self.assertRaises(ValueError):
+                replace(constraints(), temporary_bays=temporary)
+
+    def test_outbound_cargo_on_the_conveyor_is_hold(self):
+        snapshot = replace(yard(()), bays=(Bay("conveyor", ("outbound",), 1), Bay("temp", (), 2),
+                                           Bay("stand", (), 1), Bay("yard", (), 3)))
+        self.assertEqual(self.plan(snapshot).reason, "OUTBOUND_NOT_IN_A_BAY")
+
     def test_unknown_bay_configuration_is_rejected(self):
         with self.assertRaises(ValueError):
             self.plan(rules=replace(constraints(), temporary_bays=("missing",)))
@@ -150,20 +180,61 @@ class SiteTests(unittest.TestCase):
         data = self.site_data()
         site = Site.from_dict(data)
         self.assertEqual(site.max_moving_robots, 1)
-        self.assertEqual(site.charging_slots, 1)
-        self.assertEqual(len(site.transport_ids), 3)
+        self.assertEqual(site.charging_positions, 1)
+        self.assertEqual(len(site.transfer_vehicle_ids), 3)
         data["arms"] = {role: "renamed-" + device for role, device in data["arms"].items()}
-        data["transport_ids"] = ["new-1", "new-2", "new-3"]
+        data["transfer_vehicle_ids"] = ["new-1", "new-2", "new-3"]
         changed = Site.from_dict(data)
-        self.assertEqual(changed.transfers, site.transfers)
-        self.assertEqual(set(changed.arms), {"S", "A", "B"})
+        self.assertEqual(changed.allowed_moves, site.allowed_moves)
+        self.assertEqual(set(changed.arms), {"A", "B"})
+
+    def test_supply_arm_s_is_an_external_step_not_a_commanded_arm(self):
+        site = Site.from_dict(self.site_data())
+        self.assertNotIn("S", site.arms)
+        self.assertEqual(site.external_supply_arm, "demo-supply")
+        data = self.site_data()
+        data["arms"]["S"] = data.pop("external_supply_arm")
+        with self.assertRaisesRegex(ValueError, "external step"):
+            Site.from_dict(data)
+
+    def test_two_location_layers(self):
+        cells = Site.from_dict(self.site_data()).cell_locations
+        self.assertEqual([cells.business_location(c) for c in ("yard", "temp", "stand", "conveyor", "supply-bench")],
+                         ["yard", "yard", "outbound_point", None, None])
+        with self.assertRaises(ValueError):
+            cells.business_location("wait")
+
+    def test_conveyor_is_capacity_one_with_sensor_or_camera_evidence(self):
+        for conveyor in ({"capacity": 2, "occupancy_evidence": "camera"},
+                         {"capacity": 1, "occupancy_evidence": "planner"}):
+            data = self.site_data()
+            data["conveyor"] = conveyor
+            with self.subTest(conveyor=conveyor), self.assertRaises(ValueError):
+                Site.from_dict(data)
+
+    def test_yard_arms_never_move_cargo_onto_the_conveyor_or_supply_bench(self):
+        for edge in (["yard", "conveyor"], ["yard", "supply-bench"], ["supply-bench", "yard"]):
+            data = self.site_data()
+            data["allowed_moves"].append(edge)
+            with self.subTest(edge=edge), self.assertRaises(ValueError):
+                Site.from_dict(data)
+
+    def test_pre_adr_0005_keys_are_explicit_errors(self):
+        for old, new in [("transport_ids", "transfer_vehicle_ids"), ("slots", "cell_locations.bays"),
+                         ("waiting_slots", "waiting_positions"), ("charging_slots", "charging_positions"),
+                         ("transfers", "allowed_moves")]:
+            data = self.site_data()
+            data[old] = []
+            with self.subTest(old=old), self.assertRaisesRegex(ValueError, f"renamed to '{new}'"):
+                Site.from_dict(data)
 
     def test_bad_site_configuration_rejected(self):
-        for field, value in [("charging_slots", 2), ("max_moving_robots", 2),
-                             ("transport_ids", ["p1", "p1", "p3"]),
-                             ("arms", {"S": "a", "A": "a", "B": "b"}),
-                             ("waiting_slots", ["missing"]),
-                             ("transfers", [["yard", "missing"]])]:
+        for field, value in [("charging_positions", 2), ("max_moving_robots", 2),
+                             ("transfer_vehicle_ids", ["p1", "p1", "p3"]),
+                             ("arms", {"A": "a", "B": "a"}),
+                             ("external_supply_arm", "demo-yard-a"),
+                             ("waiting_positions", ["yard"]),
+                             ("allowed_moves", [["yard", "missing"]])]:
             data = self.site_data()
             data[field] = value
             with self.subTest(field=field), self.assertRaises(ValueError):
