@@ -42,14 +42,14 @@ ledger = BusinessLedger(ledger_path, evidence_sources=("synthetic-observer",))
 
 ## 실제 Fleet 계약 시험
 
-`python -m unittest discover -s tests -v`의 통합 skip은 실제 서버 미검증을 뜻한다. 시험 PC에 깨끗한 고정 플랫폼과 Vault 소스를 준비하고, 해당 플랫폼의 기존 시험 의존성을 설치한 별도 환경에서 다음 개발 도구를 실행한다.
+`python -m unittest discover -s tests -v`의 통합 skip은 실제 서버 미검증을 뜻한다. 시험 PC에 깨끗한 고정 플랫폼 소스를 준비하고, 해당 플랫폼의 기존 시험 의존성을 설치한 별도 환경에서 다음 개발 도구를 실행한다.
 
 ```text
-python -m tools.integration.real_fleet_http --platform-root <플랫폼-root> --platform-sha <전체-40자리-SHA> --vault-root <Vault-root> --vault-sha <전체-40자리-SHA>
+python -m tools.integration.real_fleet_http --platform-root <플랫폼-root> --platform-sha <전체-40자리-SHA>
 ```
 
-도구는 기존 Vault의 시뮬레이션 서버를 loopback에 띄우고 임시 장부·합성 operator/viewer 자격으로 `tests/integration`을 별도 프로세스에서 실행한 뒤 서버를 종료한다. 서버 환경만 플랫폼·Vault 시험 코드를 import한다. Harbor 런타임 wheel에는 `tools`가 포함되지 않는다. 일반 운영 Fleet·실물 장치에 대한 도구가 아니다.
+도구는 Harbor의 시뮬레이션 하네스(`tools/integration/fleet_harness.py`, [ADR-0003](adr/0003-own-fleet-contract-harness.md))로 고정 플랫폼 Fleet을 loopback에 띄우고 임시 장부·합성 operator/viewer 자격으로 `tests/integration`을 별도 프로세스에서 실행한 뒤 서버를 종료한다. 서버 환경만 플랫폼 시험 코드를 import한다. Harbor 런타임 wheel에는 `tools`가 포함되지 않는다. 일반 운영 Fleet·실물 장치에 대한 도구가 아니다.
 
-독립 실행에서는 `HARBOR_INTEGRATION=1`과 도구가 만든 임시 `HARBOR_INTEGRATION_CONFIG`를 함께 공급한다. 명시 모드에서 설정 누락·연결 오류는 실패이며 skip을 성공 증거로 삼지 않는다. 전체 SHA 세 개와 exit code를 함께 기록한다. fixture의 합성 관측은 업무 완료의 운영 증거를 제공하지 않는다.
+독립 실행에서는 `HARBOR_INTEGRATION=1`과 도구가 만든 임시 `HARBOR_INTEGRATION_CONFIG`를 함께 공급한다. 명시 모드에서 설정 누락·연결 오류는 실패이며 skip을 성공 증거로 삼지 않는다. 플랫폼·Harbor 전체 SHA 두 개와 exit code를 함께 기록한다. fixture의 합성 관측은 업무 완료의 운영 증거를 제공하지 않는다.
 
 업무 대조 시험에서는 별도 시험 actor가 Fleet의 기명 승인자로 승인한다. Harbor의 런타임 클라이언트에 승인 기능을 추가하지 않는다. 실제 `GOAL_CONFIRMED` 뒤에도 Harbor 장부가 WAITING에 남는지, 잘못된 관측을 거절하는지, 재시작 후 새 조회가 필요한지, 인계 뒤에도 별도 하역 관측 전에는 AWAITING_UNLOAD인지 확인한다. 관측 값은 시험에 명시한 합성 데이터이며 인증된 현장 관측을 읽는 어댑터가 아니다. [실행 결과와 제한](validation/2026-10-22-business-reconciliation.md)을 따른다.

@@ -1,6 +1,6 @@
 # 0002 — 고정 소스의 실제 Fleet HTTP 계약 시험
 
-Status: Accepted for implementation, 2026-10-22. 사용자 구현 지시, 플랫폼 D-841의 앱 계약 검증 경계를 따른다. 실물·관측 producer·현장 수용은 아니다.
+Status: Accepted for implementation, 2026-10-22. 하네스 출처 부분은 [0003](0003-own-fleet-contract-harness.md)이 대체했다(2026-10-24): 지금은 Harbor의 `tools/integration/fleet_harness.py`를 쓰고 Vault 체크아웃이 필요 없다. 사용자 구현 지시, 플랫폼 D-841의 앱 계약 검증 경계를 따른다. 실물·관측 producer·현장 수용은 아니다.
 
 Harbor 런타임은 기존 `harbor.rosy_http.RosyClient`로 공개 HTTP만 소비한다. 새 서버 구현을 복사하는 대신 시험 도구만 고정 Vault의 기존 `tools/integration/real_fleet.py` 시뮬레이션 조립을 로드한다. 플랫폼·Vault는 전체 SHA와 깨끗한 소스를 확인하고 Harbor 앱 시험은 별도 프로세스에서 URL·임시 합성 자격만 받는다. Vault는 개발 시험 의존성이며 Harbor 배포 의존성이 아니다.
 
