@@ -29,6 +29,8 @@ python -m harbor
 
 자세한 설명은 [harborlogi/README.md](harborlogi/README.md)에 있다. CI는 push·PR마다 `harborlogi/`에서 Python 3.10·3.12 unittest를 실행한다.
 
+무엇을 Harbor와 ROSY 중 어디서 고치는지, 둘을 이어서 확인하는 단계, PR 절차는 [함께 작업하기](CONTRIBUTING.md)를 따른다.
+
 ## 진행 상태
 
 - 회수 제안 정책, 운송 후보 배정, 업무 장부, 공정 제안 HTTP 연결을 구현하고 단위 시험으로 확인했다.
