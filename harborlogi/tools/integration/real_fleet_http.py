@@ -1,6 +1,6 @@
-"""Run Port over HTTP against the existing pinned Vault simulation harness.
+"""Run Harbor over HTTP against the existing pinned Vault simulation harness.
 
-Only this development process imports the harness and platform. The child Port
+Only this development process imports the harness and platform. The child Harbor
 test process uses the public HTTP adapter and a temporary synthetic credential.
 """
 import argparse
@@ -68,7 +68,7 @@ def main(argv=None):
             path.chmod(0o600)
             env = dict(os.environ, ROSY_PORT_INTEGRATION='1', ROSY_PORT_INTEGRATION_CONFIG=str(path))
             env.pop('PYTHONPATH', None)
-            print(f'Platform {platform_sha}; Vault harness {vault_sha}; Port {app_sha}', flush=True)
+            print(f'Platform {platform_sha}; Vault harness {vault_sha}; Harbor {app_sha}', flush=True)
             return subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests/integration', '-v'],
                                   cwd=app_root, env=env, timeout=180).returncode
         finally:

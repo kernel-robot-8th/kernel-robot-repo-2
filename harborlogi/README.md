@@ -1,6 +1,10 @@
 # Harbor
 
-항만의 업무 판단을 소유하는 독립 Python 앱이다. ROSY Platform은 실행·자원 admission·관측·장치 권한을 소유한다. 회수 정책을 설치된 공정 문서에 연결하고, Fleet에 제안한 뒤 관측 근거를 대조하는 업무 장부를 제공한다. 자동 admit·rearm·직접 장치 명령은 없다.
+HarborLogi의 항만 업무 앱이다. 회수 순위가 바뀌었을 때 묻힌 컨테이너를 어떤 순서로 꺼내고 방해 화물을 어디에 둘지 제안하고, 그 작업이 실제로 끝났는지를 업무 장부에 대조한다. 로봇을 직접 움직이지 않는다. 실행은 ROSY Platform이 맡는다.
+
+## 빠른 시작
+
+Python 3.10 이상이면 되고, 런타임 외부 의존성은 없다.
 
 ```bash
 cd harborlogi
@@ -8,30 +12,70 @@ python -m unittest discover -s tests -v
 python -m harbor
 ```
 
-Python 3.10 이상, 런타임 외부 의존성 없음. 필요하면 `python -m pip install -e .`로 설치한다.
+`python -m harbor`는 합성 재고로 만든 회수 제안을 출력한다. 목표 화물 `target` 위의 `blocker`를 임시 위치로 옮기고, `target`을 공급 쪽으로 회수한 뒤 `blocker`를 원래 적층으로 돌리는 순서다.
 
-GitHub Actions는 push·PR·수동 실행 시 Ubuntu에서 Python 3.10·3.12로 위 unittest 전체를 실행한다. 플랫폼 checkout이나 운영 토큰·데이터를 요구하지 않는다. action은 커밋 SHA로 고정한다.
+```json
+{
+  "status": "READY",
+  "reason": "PROPOSAL_REQUIRES_ADMISSION_AND_EVIDENCE",
+  "moves": [
+    {"cargo_id": "blocker", "source": "yard", "destination": "temporary"},
+    {"cargo_id": "target", "source": "yard", "destination": "supply"},
+    {"cargo_id": "blocker", "source": "temporary", "destination": "yard"}
+  ],
+  "required_completion": ["target_unloaded_by_supply", "blockers_restored", "arms_clear"]
+}
+```
 
-운영 장부·원본 데이터·토큰·개인 자료는 소스 저장소 밖에 둔다. 이 저장소는 공개 저장소다. 라이선스는 저장소 루트의 [Apache-2.0](../LICENSE)이다. `.gitignore`는 흔한 로컬 상태와 설정 파일의 실수 추가를 줄이지만, 기존 추적 파일·Git 이력·임의 이름의 개인정보를 검사하지 않는다. 게시 전에 추가할 파일과 이력을 별도로 검토한다. 외부 장부 경로 예시는 [업무 흐름 사용법](docs/execution.md#장부-보관)을 따른다.
+`READY`는 관측 기준으로 세운 업무 제안일 뿐 실행 허가가 아니다. 업무 완료는 `required_completion`의 세 가지(목표 하역, 방해 화물 정리, 팔 퇴피)에 실제 근거가 있을 때만 판정한다. 필요하면 `python -m pip install -e .`로 설치한다.
 
-예제는 `target` 위의 `blocker`를 임시 위치로 옮기고, 목표를 공급 쪽으로 회수한 뒤 방해 화물을 원래 적층으로 돌리는 제안을 출력한다. `READY`는 관측 기준의 업무 제안이다. 실제 경로·팔 자세·공유 구역·장치 능력·승인·에너지 검증은 공정과 ROSY가 수행해야 한다. S 하역·방해 화물 정리·팔 퇴피의 실제 근거가 있어야 업무 완료를 판정할 수 있다.
+## Harbor와 ROSY의 경계
+
+| Harbor가 하는 일 | ROSY가 하는 일 |
+|---|---|
+| 컨테이너·슬롯·적층 관계, 회수 순위와 변경 지시의 계획 버전 | 작업 접수(admission)와 자원 배정 |
+| 방해 화물 처리·회수·복구 순서 제안 | 실제 경로·팔 자세·공유 구역·장치 능력 확인 |
+| 중복 요청 방지와 업무 장부(SQLite) | 장치 실행·정지와 실행 근거 |
+| 업무 완료 판정 (관측 근거와 대조) | 관측(World)과 작업 진행 기록 |
+
+Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만 한다. 자동 승인(admit)·재무장(rearm)·직접 장치 명령은 없다. 오래된 관측, 계획 버전 불일치, 보유 불명, 자리 부족이면 일부만 실행하는 안을 만들지 않고 보류(`HOLD`)한다. 현재 보유 중인 화물이 하나라도 있으면 재관측과 대조가 먼저다.
+
+## 구조
 
 | 모듈 | 책임 |
 |---|---|
 | `harbor/model.py` | 적층·관측 시각·물리 보유·계획 기준 버전의 불변 값 |
 | `harbor/retrieval.py` | 방해 화물 처리·회수·복구 순서의 결정적 제안 |
-| `harbor/site.py` | S 1대, A/B 2대, 운송 풀 3대, 충전 한 자리, 직렬 이동 제약 |
+| `harbor/site.py` | 암 S 1대, A/B 2대, 운송 풀 3대, 충전 한 자리, 직렬 이동 제약 |
 | `harbor/availability.py` | 수동 충전·대기·적재·정비·불명 장치의 후보 제외 |
 | `harbor/process.py` | 각 화물 이동을 설치된 공정 문서 ID·digest·compiler artifact에 연결 |
-| `harbor/rosy_http.py` | 기존 Fleet compile/proposal/job 조회 및 후보 운송 요청의 HTTP 소비 |
-| `harbor/workflow.py` | 중복 요청 방지·불명 접수 HOLD·현재 시도/관측 대조의 SQLite 업무 장부 |
+| `harbor/rosy_http.py` | Fleet compile/proposal/job 조회와 운송 후보 요청의 HTTP 클라이언트 |
+| `harbor/workflow.py` | 중복 요청 방지·불명 접수 HOLD·현재 시도와 관측 대조의 업무 장부 |
 
-슬롯 목록은 아래층부터 위층 순서다. 적층의 하중·형상·충돌은 이 재고 모델의 범위에 포함되지 않는다. `transfers`는 업무 계획에서 허용한 방향이며 실제 검증·실행 capability를 생성하지 않는다. 오래된 관측·버전 불일치·보유 불명·자리 부족은 부분 실행안 없이 HOLD가 된다. 현재 보유 중인 화물이 하나라도 있으면 재관측과 대조가 먼저다.
+슬롯 목록은 아래층부터 위층 순서다. 적층의 하중·형상·충돌은 이 재고 모델의 범위가 아니다. `transfers`는 업무 계획에서 허용한 방향일 뿐 실행 능력을 만들지 않는다.
 
-[설치 예제](config/site.example.json)는 합성 ID와 개념 위치다. 특정 Pinky 번호에 입고·출고·충전 역할을 고정하지 않는다. 수동 `available`은 앱의 제외 조건 해제일 뿐 실제 가용성·자동 충전 확인이 아니다. 운영 상태는 호출 시 명시적으로 전달하고 누락 차량은 제외한다.
+[설치 예제](config/site.example.json)는 합성 ID와 개념 위치다. 특정 Pinky 번호에 입고·출고·충전 역할을 고정하지 않는다. 수동 `available`은 앱의 제외 조건을 푸는 것일 뿐 실제 가용성이나 자동 충전 확인이 아니다. 운영 상태는 호출할 때 명시적으로 전달하고, 누락된 차량은 제외한다.
 
-[플랫폼 계약과 다음 작업](docs/platform-contract.md), [검증 기록](docs/validation/2026-10-21.md)을 따른다. 기존 Vault는 독립 앱으로 유지한다.
+## ROSY와 실제로 연결할 때
 
-실행 연결은 [구현 ADR](docs/adr/0001-process-binding-and-business-evidence.md)과 [업무 흐름 사용법](docs/execution.md)을 따른다. 동작 확인에는 설치자가 검증한 binding과 관측 출처, 지원 Fleet 버전이 필요하다. 기본 예제는 합성 재고 미리보기다.
+실행 연결에는 설치자가 검증한 공정 binding과 관측 출처, 지원되는 Fleet 버전이 필요하다. 절차는 [공정 제안과 업무 장부 사용법](docs/execution.md)을 따른다. 운영 장부는 저장소 밖 경로에 둔다([장부 보관](docs/execution.md#장부-보관)).
 
-추가 구현과 검토·시험 결과는 [실행 계약 검증 기록](docs/validation/2026-10-21-execution.md)에 기록한다.
+`tests/integration/`의 실제 Fleet HTTP 시험은 고정된 ROSY Platform 소스와 팀의 보관고 앱(Vault) 시뮬레이션 하네스가 있어야 돈다. Vault는 비공개 저장소라 외부에서는 이 시험이 건너뛰어진다(`skipped=1`). 기본 unittest와 CI는 이 시험 없이 통과한다.
+
+## 문서
+
+| 문서 | 내용 |
+|---|---|
+| [CONTEXT.md](CONTEXT.md) | 항만 업무 용어 |
+| [docs/platform-contract.md](docs/platform-contract.md) | 플랫폼 연결 기준과 다음 작업 |
+| [docs/execution.md](docs/execution.md) | 공정 제안과 업무 장부 사용법 |
+| [docs/observation-acceptance.md](docs/observation-acceptance.md) | 물리 관측 연동의 수용 조건 |
+| [docs/implementation-plan.md](docs/implementation-plan.md) | 실행 연결 계획 |
+| [docs/adr/](docs/adr/) | 설계 결정 기록 (0001 공정 binding과 완료 근거, 0002 고정 소스 Fleet 계약 시험) |
+| [docs/validation/](docs/validation/) | 날짜별 검증 기록 |
+
+2026-10-23 이전 기록에 나오는 `Port`와 `rosy-port`는 이 앱의 이전 작업명이다. 그 기록의 앱 커밋 번호는 공개되지 않은 이전 저장소의 것이라 이 저장소 이력에는 없다. 기록 내용은 당시 그대로 둔다.
+
+## 데이터와 라이선스
+
+운영 장부·원본 데이터·토큰·개인 자료는 저장소에 넣지 않는다. `.gitignore`가 흔한 로컬 상태 파일을 막지만 모든 개인정보를 검사하지는 않으니, 추가할 파일은 커밋 전에 확인한다. 라이선스는 저장소 루트의 [Apache-2.0](../LICENSE)이다.

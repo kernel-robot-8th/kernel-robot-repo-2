@@ -76,7 +76,7 @@ class RealFleetHttpTests(unittest.TestCase):
             self.assertEqual(waiting['state'], 'WAITING')
             self.assertFalse(waiting['goal_confirmed'])
 
-            # This separate test actor represents the console operator, outside Port.
+            # This separate test actor represents the console operator, outside Harbor.
             def supervisor(method, endpoint, body=None):
                 payload = None if body is None else json.dumps(body).encode()
                 request = Request(self.config['origin'] + endpoint, data=payload, method=method,
