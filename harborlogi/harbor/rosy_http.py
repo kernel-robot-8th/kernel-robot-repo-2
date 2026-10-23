@@ -67,3 +67,9 @@ class RosyClient:
         return self._request("POST", "/api/fleet/trip-jobs", {
             "candidate_robot_ids": list(candidates), "request_key": request_key, "steps": list(steps),
         })
+
+    def trip_job(self, mission_id):
+        return self._request("GET", "/api/fleet/trip-jobs/" + quote(mission_id, safe=""), None)
+
+    def trip_request(self, request_key):
+        return self._request("GET", "/api/fleet/trip-jobs?request_key=" + quote(request_key, safe=""), None)

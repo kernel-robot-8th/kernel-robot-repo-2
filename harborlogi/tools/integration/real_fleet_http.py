@@ -39,6 +39,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--platform-root', type=Path, required=True)
     parser.add_argument('--platform-sha', required=True)
+    parser.add_argument('--transport-only', action='store_true', help='Verify neutral TRIP without the Cell compiler')
     args = parser.parse_args(argv)
     app_root = Path(__file__).resolve().parents[2]
     app_sha = app_checkout(app_root)
@@ -50,16 +51,19 @@ def main(argv=None):
     spec.loader.exec_module(harness)
     # Windows keeps the in-process Fleet SQLite file open after stop; a leftover temp dir must not mask the result.
     with tempfile.TemporaryDirectory(prefix='harbor-http-integration-', ignore_cleanup_errors=True) as temporary:
-        fleet = harness.RealFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet')
+        fleet = harness.RealFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet',
+                                  transport_only=args.transport_only)
         try:
             fleet.start()
-            ref = next(iter(fleet.transfers.values()))
-            with fleet.client() as client:
-                response = client.post('/api/fleet/cell-app/compile', json=ref)
-                response.raise_for_status()
-                artifact = response.json()['process_artifact_digest']
+            ref, artifact = {}, None
+            if not args.transport_only:
+                ref = next(iter(fleet.transfers.values()))
+                with fleet.client() as client:
+                    response = client.post('/api/fleet/cell-app/compile', json=ref)
+                    response.raise_for_status()
+                    artifact = response.json()['process_artifact_digest']
             config = {
-                'schema': 'harbor.http-test/1', 'simulation': True,
+                'schema': 'harbor.transport-http-test/1' if args.transport_only else 'harbor.http-test/1', 'simulation': True,
                 'origin': fleet.url, 'operator': fleet.tokens['operator'], 'viewer': fleet.tokens['viewer'],
                 'approver': fleet.tokens['approver'],
                 'platform_sha': platform_sha, 'app_sha': app_sha,
@@ -75,7 +79,8 @@ def main(argv=None):
             env = dict(os.environ, HARBOR_INTEGRATION='1', HARBOR_INTEGRATION_CONFIG=str(path))
             env.pop('PYTHONPATH', None)
             print(f'Platform {platform_sha}; Harbor (with harness) {app_sha}', flush=True)
-            return subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests/integration', '-v'],
+            pattern = 'transport_http.py' if args.transport_only else 'test_real_fleet_http.py'
+            return subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests/integration', '-p', pattern, '-v'],
                                   cwd=app_root, env=env, timeout=180).returncode
         finally:
             fleet.stop()
