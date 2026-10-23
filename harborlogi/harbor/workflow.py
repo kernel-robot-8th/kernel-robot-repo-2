@@ -3,9 +3,10 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 import hashlib
 import json
+import math
 import sqlite3
 
-from harbor.model import aware_time, identifier, identifiers, revision
+from harbor.model import YARD_ARMS, aware_time, identifier, identifiers, revision
 from harbor.process import ProcessBinding
 
 
@@ -20,8 +21,16 @@ def _payload(row):
     return payload
 
 
+def _header(evidence):
+    for value in (evidence.evidence_id, evidence.mission_id, evidence.attempt_id, evidence.source_id):
+        identifier(value)
+    revision(evidence.revision)
+    aware_time(evidence.observed_at)
+
+
 @dataclass(frozen=True)
-class MoveEvidence:
+class PlacementEvidence:
+    """Camera observation that a cargo lies at a cell location (내려놓기), separate from action results."""
     evidence_id: str
     mission_id: str
     attempt_id: str
@@ -29,26 +38,72 @@ class MoveEvidence:
     source_id: str
     observed_at: datetime
     cargo_id: str
-    destination: str
-    arms_retreated: bool
-    placed: bool = False
+    location: str
 
     def __post_init__(self):
-        for value in (self.evidence_id, self.mission_id, self.attempt_id, self.source_id,
-                      self.cargo_id, self.destination):
-            identifier(value)
-        revision(self.revision)
-        aware_time(self.observed_at)
-        if type(self.arms_retreated) is not bool or type(self.placed) is not bool:
+        _header(self)
+        identifier(self.cargo_id)
+        identifier(self.location)
+
+
+@dataclass(frozen=True)
+class ArmRetreat:
+    """One yard arm's retreat facts (퇴피): Fleet zone-claim release and an owner-measured pose."""
+    arm: str
+    zone_id: str
+    claim_released: bool
+    joint_positions: tuple[float, ...]
+    pose_observed_at: datetime
+    pose_revision: int
+    outside_zone: bool  # The platform's FK verdict; Harbor does not compute kinematics.
+
+    def __post_init__(self):
+        if self.arm not in YARD_ARMS:
+            raise ValueError("Retreat evidence covers yard arms A/B only")
+        identifier(self.zone_id)
+        if type(self.claim_released) is not bool or type(self.outside_zone) is not bool:
             raise ValueError("Physical facts must be explicit booleans")
+        if (not isinstance(self.joint_positions, tuple) or not self.joint_positions
+                or not all(type(v) in (int, float) and math.isfinite(v) for v in self.joint_positions)):
+            raise ValueError("Expected measured finite joint positions")
+        aware_time(self.pose_observed_at)
+        revision(self.pose_revision)
+
+
+@dataclass(frozen=True)
+class RetreatEvidence:
+    """Platform-data retreat record for the arms a step may have used; no camera is involved."""
+    evidence_id: str
+    mission_id: str
+    attempt_id: str
+    revision: int
+    source_id: str
+    observed_at: datetime
+    arms: tuple[ArmRetreat, ...]
+
+    def __post_init__(self):
+        _header(self)
+        if not isinstance(self.arms, tuple) or not all(isinstance(a, ArmRetreat) for a in self.arms):
+            raise ValueError("Expected immutable arm retreat facts")
+        identifiers(tuple(a.arm for a in self.arms))
+
+
+@dataclass(frozen=True)
+class MoveEvidence:
+    """The two independent facts a step needs (ADR 0005 decision 6); each keeps its own source and time."""
+    placement: PlacementEvidence
+    retreat: RetreatEvidence
 
 
 class BusinessLedger:
-    def __init__(self, path, *, evidence_sources, freshness=timedelta(seconds=5)):
-        identifiers(evidence_sources)
-        if not evidence_sources or not isinstance(freshness, timedelta) or freshness <= timedelta(0):
-            raise ValueError("Configured observation sources and positive freshness are required")
-        self.path, self.sources, self.freshness = str(path), evidence_sources, freshness
+    def __init__(self, path, *, placement_sources, retreat_sources, freshness=timedelta(seconds=5)):
+        identifiers(placement_sources)
+        identifiers(retreat_sources)
+        if (not placement_sources or not retreat_sources or set(placement_sources) & set(retreat_sources)
+                or not isinstance(freshness, timedelta) or freshness <= timedelta(0)):
+            raise ValueError("Separate configured placement and retreat sources and positive freshness are required")
+        self.path, self.freshness = str(path), freshness
+        self.placement_sources, self.retreat_sources = placement_sources, retreat_sources
         self._reads = {}
         with closing(self._connect()) as c, c:
             c.executescript("""
@@ -93,7 +148,7 @@ class BusinessLedger:
                 or current["step_index"] != original["step_index"] or current["digest"] != original["digest"]):
             raise ValueError("Business stage changed while the Fleet request was pending")
 
-    def prepare(self, key, plan_revision, moves, *, outbound_id, outbound_stand):
+    def prepare(self, key, plan_revision, moves, *, outbound_id, outbound_stand, move_arms):
         identifier(key)
         if len(key) > 128 or any(ord(c) < 32 for c in key):
             raise ValueError("Invalid business request key")
@@ -105,8 +160,14 @@ class BusinessLedger:
         if sum(m.cargo_id == outbound_id for m in moves) != 1 or not any(
                 m.cargo_id == outbound_id and m.destination == outbound_stand for m in moves):
             raise ValueError("Expected exactly one outbound move to the outbound stand")
+        # Primary then alternates per step; every arm a step may use must later show retreat.
+        if (not isinstance(move_arms, tuple) or len(move_arms) != len(moves)
+                or not all(isinstance(a, tuple) and a and set(a) <= set(YARD_ARMS) and len(set(a)) == len(a)
+                           for a in move_arms)):
+            raise ValueError("Expected nonempty A/B arm roles for every move")
         payload = _json({"revision": plan_revision, "moves": [asdict(m) for m in moves],
-                         "outbound_id": outbound_id, "outbound_stand": outbound_stand})
+                         "outbound_id": outbound_id, "outbound_stand": outbound_stand,
+                         "move_arms": [list(a) for a in move_arms]})
         digest = hashlib.sha256(payload.encode()).hexdigest()
         with closing(self._connect()) as c, c:
             c.execute("BEGIN IMMEDIATE")
@@ -178,26 +239,41 @@ class BusinessLedger:
                       (attempt, int(confirmed), "HOLD" if job["status"] == "HOLD" else "WAITING", key))
         self._reads[key] = (row["mission_id"], attempt, now, row["row_version"] + 1)
 
-    def _validate(self, row, evidence, now, *, mission_id, attempt_id, cargo_id, destination):
+    def _validate(self, row, evidence, now, *, mission_id, attempt_id, cargo_id, location, arms):
         aware_time(now)
         payload = _payload(row)
-        if (not isinstance(evidence, MoveEvidence) or evidence.source_id not in self.sources
-                or evidence.revision != payload["revision"] or evidence.mission_id != mission_id
-                or evidence.attempt_id != attempt_id or evidence.cargo_id != cargo_id
-                or evidence.destination != destination or not evidence.arms_retreated
-                or not timedelta(0) <= now - evidence.observed_at <= self.freshness):
-            raise ValueError("Physical evidence does not match the current business execution")
+        if not isinstance(evidence, MoveEvidence):
+            raise ValueError("Placement and retreat evidence are both required")
+        placement, retreat = evidence.placement, evidence.retreat
+
+        def bound(e, kind, sources):
+            if (not isinstance(e, kind) or e.source_id not in sources
+                    or e.revision != payload["revision"] or e.mission_id != mission_id
+                    or e.attempt_id != attempt_id
+                    or not timedelta(0) <= now - e.observed_at <= self.freshness):
+                raise ValueError("Physical evidence does not match the current business execution")
+
+        bound(placement, PlacementEvidence, self.placement_sources)
+        if placement.cargo_id != cargo_id or placement.location != location:
+            raise ValueError("Placement evidence does not show the cargo at its destination")
+        bound(retreat, RetreatEvidence, self.retreat_sources)
+        by_arm = {a.arm: a for a in retreat.arms}
+        for arm in arms:
+            fact = by_arm.get(arm)
+            if (fact is None or not fact.claim_released or not fact.outside_zone
+                    or not timedelta(0) <= now - fact.pose_observed_at <= self.freshness):
+                raise ValueError("Retreat evidence does not show every related arm out of the space")
 
     @staticmethod
     def _save_evidence(c, evidence):
-        data = asdict(evidence)
-        data["observed_at"] = evidence.observed_at.isoformat()
-        payload = _json(data)
-        old = c.execute("SELECT payload FROM evidence WHERE source_id=? AND evidence_id=?",
-                        (evidence.source_id, evidence.evidence_id)).fetchone()
-        if old is not None:
-            raise ValueError("Observation identity was already consumed")
-        c.execute("INSERT INTO evidence VALUES(?,?,?)", (evidence.source_id, evidence.evidence_id, payload))
+        for part in (evidence.placement, evidence.retreat):
+            payload = json.dumps(asdict(part), sort_keys=True, separators=(",", ":"), allow_nan=False,
+                                 default=datetime.isoformat)
+            old = c.execute("SELECT payload FROM evidence WHERE source_id=? AND evidence_id=?",
+                            (part.source_id, part.evidence_id)).fetchone()
+            if old is not None:
+                raise ValueError("Observation identity was already consumed")
+            c.execute("INSERT INTO evidence VALUES(?,?,?)", (part.source_id, part.evidence_id, payload))
 
     def confirm(self, key, evidence, *, now):
         with closing(self._connect()) as c, c:
@@ -213,7 +289,8 @@ class BusinessLedger:
                 raise ValueError("Fresh Fleet reconciliation is required")
             move = payload["moves"][row["step_index"]]
             self._validate(row, evidence, now, mission_id=row["mission_id"], attempt_id=row["attempt_id"],
-                           cargo_id=move["cargo_id"], destination=move["destination"])
+                           cargo_id=move["cargo_id"], location=move["destination"],
+                           arms=payload["move_arms"][row["step_index"]])
             self._save_evidence(c, evidence)
             if move["cargo_id"] == payload["outbound_id"]:
                 c.execute("UPDATE business SET outbound_mission_id=mission_id,outbound_attempt_id=attempt_id "
@@ -230,10 +307,12 @@ class BusinessLedger:
             c.execute("BEGIN IMMEDIATE")
             row = self._row(c, key)
             payload = _payload(row)
-            if row["state"] != "AWAITING_FINAL_EVIDENCE" or not evidence.placed:
+            if row["state"] != "AWAITING_FINAL_EVIDENCE":
                 raise ValueError("Outbound placement and all restored moves are required")
+            # Related-arm retreat: every arm used by this outbound request (ADR 0005 decision 6).
+            related = tuple(sorted({a for arms in payload["move_arms"] for a in arms}))
             self._validate(row, evidence, now, mission_id=row["outbound_mission_id"],
                            attempt_id=row["outbound_attempt_id"], cargo_id=payload["outbound_id"],
-                           destination=payload["outbound_stand"])
+                           location=payload["outbound_stand"], arms=related)
             self._save_evidence(c, evidence)
             c.execute("UPDATE business SET state='COMPLETED',row_version=row_version+1 WHERE request_key=?", (key,))

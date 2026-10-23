@@ -10,8 +10,8 @@ import unittest
 from urllib.error import HTTPError
 
 from harbor.rosy_http import RosyClient
-from harbor.workflow import BusinessLedger, MoveEvidence
-from test_execution import FakeFleet, bound_moves
+from harbor.workflow import BusinessLedger
+from test_execution import SOURCES, FakeFleet, bound_moves, move_arms, synthetic_evidence
 from test_policy import NOW
 
 
@@ -60,16 +60,16 @@ class HttpTests(unittest.TestCase):
     def test_inventory_to_proposal_to_observed_business_completion_over_http(self):
         fleet = FakeFleet()
         with tempfile.TemporaryDirectory() as tmp, server(fleet) as origin:
-            ledger = BusinessLedger(Path(tmp) / "business.db", evidence_sources=("installed-camera",))
-            ledger.prepare("outbound-request", 3, bound_moves(), outbound_id="outbound", outbound_stand="stand")
+            ledger = BusinessLedger(Path(tmp) / "business.db", **SOURCES)
+            ledger.prepare("outbound-request", 3, bound_moves(), outbound_id="outbound", outbound_stand="stand",
+                           move_arms=move_arms())
             client = RosyClient(origin, "synthetic-operator")
             for index, move in enumerate(bound_moves()):
                 mission = ledger.propose("outbound-request", client)
                 ledger.refresh("outbound-request", client, now=NOW)
-                ledger.confirm("outbound-request", MoveEvidence(f"e{index}", mission, "attempt-1", 3,
-                               "installed-camera", NOW, move.cargo_id, move.destination, True), now=NOW)
-            ledger.finish("outbound-request", MoveEvidence("placement", "mission-2", "attempt-1", 3,
-                          "installed-camera", NOW, "outbound", "stand", True, placed=True), now=NOW)
+                ledger.confirm("outbound-request", synthetic_evidence(f"e{index}", mission, move.cargo_id,
+                               move.destination), now=NOW)
+            ledger.finish("outbound-request", synthetic_evidence("final", "mission-2", "outbound", "stand"), now=NOW)
             self.assertEqual(ledger.read("outbound-request")["state"], "COMPLETED")
         self.assertEqual(sum(path.endswith("/proposals") for _, path, _ in fleet.calls), 3)
 
@@ -88,8 +88,9 @@ class HttpTests(unittest.TestCase):
 
     def test_concurrent_submissions_have_one_durable_intent(self):
         with tempfile.TemporaryDirectory() as tmp:
-            ledger = BusinessLedger(Path(tmp) / "business.db", evidence_sources=("installed-camera",))
-            ledger.prepare("outbound-request", 3, bound_moves(), outbound_id="outbound", outbound_stand="stand")
+            ledger = BusinessLedger(Path(tmp) / "business.db", **SOURCES)
+            ledger.prepare("outbound-request", 3, bound_moves(), outbound_id="outbound", outbound_stand="stand",
+                           move_arms=move_arms())
             barrier = threading.Barrier(2)
             fleet = FakeFleet()
             def transport(method, path, body):
@@ -110,11 +111,12 @@ class HttpTests(unittest.TestCase):
     def test_restart_of_an_unanswered_durable_intent_holds(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "business.db"
-            ledger = BusinessLedger(path, evidence_sources=("installed-camera",))
-            ledger.prepare("outbound-request", 3, bound_moves(), outbound_id="outbound", outbound_stand="stand")
+            ledger = BusinessLedger(path, **SOURCES)
+            ledger.prepare("outbound-request", 3, bound_moves(), outbound_id="outbound", outbound_stand="stand",
+                           move_arms=move_arms())
             with closing(sqlite3.connect(path)) as c, c:
                 c.execute("UPDATE business SET state='SUBMITTING'")
-            recovered = BusinessLedger(path, evidence_sources=("installed-camera",))
+            recovered = BusinessLedger(path, **SOURCES)
             self.assertEqual(recovered.read("outbound-request")["state"], "HOLD")
 
     def test_legacy_business_rows_gain_a_version_without_losing_state(self):
@@ -127,7 +129,7 @@ class HttpTests(unittest.TestCase):
                     target_mission_id TEXT,target_attempt_id TEXT)""")
                 c.execute("INSERT INTO business VALUES('old','digest','{\"target_id\":\"t\",\"supply_slot\":\"s\"}',"
                           "'WAITING',0,'mission',NULL,0,'old-mission',NULL)")
-            recovered = BusinessLedger(path, evidence_sources=("installed-camera",))
+            recovered = BusinessLedger(path, **SOURCES)
             row = recovered.read("old")
             self.assertEqual((row["row_version"], row["state"], row["mission_id"]), (0, "WAITING", "mission"))
             self.assertEqual(row["outbound_mission_id"], "old-mission")

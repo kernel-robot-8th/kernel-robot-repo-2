@@ -7,10 +7,31 @@ import unittest
 
 from harbor.process import ProcessBinding, bind_plan
 from harbor.rosy_http import RosyClient
-from harbor.workflow import BusinessLedger, MoveEvidence
+from harbor.workflow import ArmRetreat, BusinessLedger, MoveEvidence, PlacementEvidence, RetreatEvidence
 from test_policy import NOW, yard, constraints
 from harbor.model import OutboundRequest
 from harbor.outbound import plan_outbound
+
+
+SOURCES = {"placement_sources": ("installed-camera",), "retreat_sources": ("fleet-retreat",)}
+
+
+def move_arms():
+    plan = plan_outbound(yard(), OutboundRequest("outbound", 3), constraints(), now=NOW)
+    return tuple((m.primary_arm, *m.alternate_arms) for m in plan.moves)
+
+
+def synthetic_evidence(evidence_id, mission, cargo, location, *, attempt="attempt-1", revision=3, when=NOW,
+                       arms=("A", "B"), placement=None, retreat=None, arm=None):
+    """Synthetic camera placement + platform retreat facts; no producer exists yet (D-856 P1)."""
+    facts = tuple(ArmRetreat(a, "zone-" + a, True, (0.0, 0.5), when, 4, True) for a in arms)
+    if arm:
+        facts = (replace(facts[0], **arm),) + facts[1:]
+    return MoveEvidence(
+        replace(PlacementEvidence(evidence_id + "-p", mission, attempt, revision, "installed-camera", when,
+                                  cargo, location), **(placement or {})),
+        replace(RetreatEvidence(evidence_id + "-r", mission, attempt, revision, "fleet-retreat", when, facts),
+                **(retreat or {})))
 
 
 def bound_moves():
@@ -79,19 +100,19 @@ class WorkflowTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / "business.sqlite"
-        self.ledger = BusinessLedger(self.path, evidence_sources=("installed-camera",))
+        self.ledger = BusinessLedger(self.path, **SOURCES)
         self.fleet = FakeFleet()
         self.client = RosyClient(transport=self.fleet)
         self.prepare()
 
     def prepare(self, revision=3):
-        return self.ledger.prepare("request-1", revision, bound_moves(), outbound_id="outbound", outbound_stand="stand")
+        return self.ledger.prepare("request-1", revision, bound_moves(), outbound_id="outbound", outbound_stand="stand",
+                                   move_arms=move_arms())
 
     def evidence(self, **changes):
         move = bound_moves()[self.ledger.read("request-1")["step_index"]]
-        value = MoveEvidence("evidence-1", self.ledger.read("request-1")["mission_id"], "attempt-1", 3, "installed-camera", NOW,
-                             move.cargo_id, move.destination, True)
-        return replace(value, **changes)
+        return synthetic_evidence(changes.pop("evidence_id", "evidence-1"), self.ledger.read("request-1")["mission_id"],
+                                  move.cargo_id, move.destination, **changes)
 
     def start(self):
         self.ledger.propose("request-1", self.client)
@@ -108,13 +129,49 @@ class WorkflowTests(unittest.TestCase):
 
     def test_wrong_attempt_revision_source_cargo_destination_or_time_never_advances(self):
         self.start()
-        for changes in ({"attempt_id": "old"}, {"revision": 2}, {"source_id": "planner"},
-                        {"cargo_id": "wrong"}, {"destination": "wrong"}, {"arms_retreated": False},
-                        {"observed_at": NOW - timedelta(seconds=6)},
-                        {"observed_at": NOW + timedelta(seconds=1)}):
+        for changes in ({"attempt": "old"}, {"revision": 2}, {"placement": {"source_id": "planner"}},
+                        {"placement": {"cargo_id": "wrong"}}, {"placement": {"location": "wrong"}},
+                        {"when": NOW - timedelta(seconds=6)}, {"when": NOW + timedelta(seconds=1)}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 self.ledger.confirm("request-1", self.evidence(**changes), now=NOW)
         self.assertEqual(self.ledger.read("request-1")["step_index"], 0)
+
+    def test_placement_and_retreat_are_separate_bound_facts(self):
+        self.start()
+        later = NOW + timedelta(seconds=1)
+        for changes in ({"placement": {"attempt_id": "old"}}, {"retreat": {"attempt_id": "old"}},
+                        {"retreat": {"mission_id": "other"}}, {"retreat": {"revision": 2}},
+                        # Each fact must come from its own kind of source.
+                        {"placement": {"source_id": "fleet-retreat"}}, {"retreat": {"source_id": "installed-camera"}},
+                        {"retreat": {"observed_at": NOW - timedelta(seconds=6)}},
+                        {"arm": {"claim_released": False}}, {"arm": {"outside_zone": False}},
+                        {"arm": {"pose_observed_at": NOW - timedelta(seconds=6)}},
+                        {"arm": {"pose_observed_at": later}},
+                        {"arms": ("B",)}, {"arms": ()}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.ledger.confirm("request-1", self.evidence(**changes), now=NOW)
+        with self.assertRaises(ValueError):
+            self.ledger.confirm("request-1", self.evidence().placement, now=NOW)
+        self.assertEqual(self.ledger.read("request-1")["step_index"], 0)
+        # Step 0 may only use arm A, so a retreat record for A alone suffices.
+        self.ledger.confirm("request-1", self.evidence(arms=("A",)), now=NOW)
+        self.assertEqual(self.ledger.read("request-1")["step_index"], 1)
+
+    def test_retreat_facts_reject_supply_arm_and_unmeasured_pose(self):
+        for changes in ({"arm": "S"}, {"joint_positions": ()}, {"joint_positions": (float("nan"),)},
+                        {"claim_released": 1}, {"pose_observed_at": NOW.replace(tzinfo=None)}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                replace(ArmRetreat("A", "zone-A", True, (0.0,), NOW, 4, True), **changes)
+        with self.assertRaises(ValueError):
+            BusinessLedger(self.path, placement_sources=("same",), retreat_sources=("same",))
+
+    def test_each_move_records_its_yard_arms(self):
+        with self.assertRaises(ValueError):
+            self.ledger.prepare("request-2", 3, bound_moves(), outbound_id="outbound", outbound_stand="stand",
+                                move_arms=(("A",), ("S",), ("A",)))
+        with self.assertRaises(ValueError):
+            self.ledger.prepare("request-2", 3, bound_moves(), outbound_id="outbound", outbound_stand="stand",
+                                move_arms=(("A",),))
 
     def test_one_stage_confirmation_allows_only_the_next_proposal(self):
         self.start()
@@ -137,14 +194,14 @@ class WorkflowTests(unittest.TestCase):
         self.fleet.fail_post = True
         with self.assertRaises(TimeoutError):
             self.ledger.propose("request-1", self.client)
-        restarted = BusinessLedger(self.path, evidence_sources=("installed-camera",))
+        restarted = BusinessLedger(self.path, **SOURCES)
         self.assertEqual(restarted.read("request-1")["state"], "HOLD")
         with self.assertRaises(ValueError):
             restarted.propose("request-1", self.client)
 
     def test_restart_requires_fresh_fleet_reconciliation(self):
         self.start()
-        restarted = BusinessLedger(self.path, evidence_sources=("installed-camera",))
+        restarted = BusinessLedger(self.path, **SOURCES)
         with self.assertRaises(ValueError):
             restarted.confirm("request-1", self.evidence(), now=NOW)
         restarted.refresh("request-1", self.client, now=NOW)
@@ -162,13 +219,13 @@ class WorkflowTests(unittest.TestCase):
         self.start()
         now = NOW + timedelta(seconds=6)
         with self.assertRaises(ValueError):
-            self.ledger.confirm("request-1", self.evidence(observed_at=now), now=now)
+            self.ledger.confirm("request-1", self.evidence(when=now), now=now)
 
     def test_late_post_response_does_not_undo_restart_hold(self):
         fleet = self.fleet
         def transport(method, path, body):
             if path.endswith("/proposals"):
-                BusinessLedger(self.path, evidence_sources=("installed-camera",))
+                BusinessLedger(self.path, **SOURCES)
             return fleet(method, path, body)
         with self.assertRaises(ValueError):
             self.ledger.propose("request-1", RosyClient(transport=transport))
@@ -192,12 +249,14 @@ class WorkflowTests(unittest.TestCase):
             self.start()
             self.ledger.confirm("request-1", self.evidence(evidence_id=f"e{index}"), now=NOW)
         self.assertEqual(self.ledger.read("request-1")["state"], "AWAITING_FINAL_EVIDENCE")
-        placement = MoveEvidence("placement", "mission-2", "attempt-1", 3, "installed-camera", NOW,
-                              "outbound", "stand", True, placed=True)
-        with self.assertRaises(ValueError):
-            self.ledger.finish("request-1", replace(placement, placed=False), now=NOW)
-        with self.assertRaises(ValueError):
-            self.ledger.finish("request-1", replace(placement, attempt_id="old"), now=NOW)
+        placement = synthetic_evidence("final", "mission-2", "outbound", "stand")
+        for wrong in (synthetic_evidence("final", "mission-2", "outbound", "temp"),
+                      synthetic_evidence("final", "mission-2", "outbound", "stand", attempt="old"),
+                      synthetic_evidence("final", "mission-3", "outbound", "stand"),
+                      # Every arm used across the request must have retreated, not only the last one.
+                      synthetic_evidence("final", "mission-2", "outbound", "stand", arms=("A",))):
+            with self.assertRaises(ValueError):
+                self.ledger.finish("request-1", wrong, now=NOW)
         self.ledger.finish("request-1", placement, now=NOW)
         self.assertEqual(self.ledger.read("request-1")["state"], "COMPLETED")
 
@@ -219,8 +278,7 @@ class WorkflowTests(unittest.TestCase):
             self.ledger.confirm("request-1", self.evidence(evidence_id=f"e{index}"), now=NOW)
         self.start()
         evidence = self.evidence(evidence_id="e2")
-        placement = MoveEvidence("placement", "mission-2", "attempt-1", 3, "installed-camera", NOW,
-                              "outbound", "stand", True, placed=True)
+        placement = synthetic_evidence("final", "mission-2", "outbound", "stand")
         def transport(method, path, body):
             result = self.fleet(method, path, body)
             self.ledger.confirm("request-1", evidence, now=NOW)
@@ -244,7 +302,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_race_old_refresh_cannot_replace_another_readers_new_attempt(self):
         self.start()
-        other = BusinessLedger(self.path, evidence_sources=("installed-camera",))
+        other = BusinessLedger(self.path, **SOURCES)
         def transport(method, path, body):
             result = self.fleet(method, path, body)
             self.fleet.attempt, self.fleet.status = "attempt-2", "RUNNING"
