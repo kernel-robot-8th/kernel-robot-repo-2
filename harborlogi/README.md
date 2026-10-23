@@ -64,7 +64,7 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 
 실행 연결에는 설치자가 검증한 공정 binding과 관측 출처, 지원되는 Fleet 버전이 필요하다. 절차는 [공정 제안과 업무 장부 사용법](docs/execution.md)을 따른다. 운영 장부는 저장소 밖 경로에 둔다([장부 보관](docs/execution.md#장부-보관)).
 
-`tests/integration/`의 실제 Fleet HTTP 시험은 고정된 ROSY Platform 소스와 팀의 보관고 앱(Vault) 시뮬레이션 하네스가 있어야 돈다. Vault는 비공개 저장소라 외부에서는 이 시험이 건너뛰어진다(`skipped=1`). 기본 unittest와 CI는 이 시험 없이 통과한다.
+`tests/integration/`의 실제 Fleet HTTP 시험은 고정된 ROSY Platform 소스와 그 시험 의존성이 있어야 돈다. 시뮬레이션 하네스는 Harbor 저장소 안의 `tools/integration/fleet_harness.py`다([ADR-0003](docs/adr/0003-own-fleet-contract-harness.md)). 플랫폼 소스가 없으면 이 시험은 건너뛰어진다(`skipped=1`). 기본 unittest와 CI는 이 시험 없이 통과한다.
 
 ## 문서
 
