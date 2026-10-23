@@ -67,10 +67,10 @@ Harbor에서 쓰고 싶은 API·필드·동작이 ROSY에 없으면:
 | 단계 | 무엇을 확인하나 | 어떻게 | 누가 할 수 있나 |
 |---|---|---|---|
 | 1. Harbor 단독 | 회수 제안·장부·HOLD 규칙 | `cd harborlogi && python -m unittest discover -s tests -v`, `python -m harbor` | 누구나 |
-| 2. Fleet 계약 시험 | 실제 Fleet HTTP와 업무 대조 (시뮬레이션 서버) | [실제 Fleet 계약 시험](harborlogi/docs/execution.md#실제-fleet-계약-시험)의 `tools.integration.real_fleet_http` | 팀 시험 PC (고정된 rosy-platform과 비공개 보관고 앱 소스 필요) |
+| 2. Fleet 계약 시험 | 실제 Fleet HTTP와 업무 대조 (시뮬레이션 서버) | [실제 Fleet 계약 시험](harborlogi/docs/execution.md#실제-fleet-계약-시험)의 `tools.integration.real_fleet_http` | 팀 시험 PC (고정된 rosy-platform 소스와 그 시험 의존성 필요) |
 | 3. 실물 | 실제 Pinky·OMX로 회수 흐름 | 아직 하지 않음. [물리 관측 수용 조건](harborlogi/docs/observation-acceptance.md)을 먼저 채운다 | 장치 담당과 함께 |
 
-2단계를 돌리면 플랫폼·보관고·Harbor의 전체 커밋 번호와 결과를 `harborlogi/docs/validation/<날짜>-<주제>.md`에 남긴다. 1단계의 `skipped=1`은 2단계를 하지 않았다는 뜻이지 통과가 아니다.
+2단계를 돌리면 플랫폼·Harbor의 전체 커밋 번호와 결과를 `harborlogi/docs/validation/<날짜>-<주제>.md`에 남긴다. 1단계의 `skipped=1`은 2단계를 하지 않았다는 뜻이지 통과가 아니다.
 
 실제 연결에서 Harbor는 작업을 **제안만** 한다. 승인은 운영자가 Fleet 화면에서 한다. Harbor가 로봇을 움직였다고 보지 않고, 관측 근거가 맞아야 다음 단계로 간다.
 
