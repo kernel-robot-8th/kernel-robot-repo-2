@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    working-directory: harborlogi
+
 jobs:
   unittest:
     runs-on: ubuntu-22.04

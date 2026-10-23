@@ -221,12 +221,12 @@ __marimo__/
 
 # Harbor: local state and operator settings stay outside shared source history.
 .worktrees/
-/runs/
-/state/
-/data/
-/private/
-/personal/
-/backups/
+/harborlogi/runs/
+/harborlogi/state/
+/harborlogi/data/
+/harborlogi/private/
+/harborlogi/personal/
+/harborlogi/backups/
 *.db
 *.db-*
 *.sqlite
