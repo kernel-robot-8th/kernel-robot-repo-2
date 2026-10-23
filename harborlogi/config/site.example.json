@@ -1,9 +1,17 @@
 {
-  "arms": {"S": "demo-supply", "A": "demo-yard-a", "B": "demo-yard-b"},
-  "transport_ids": ["demo-mobile-1", "demo-mobile-2", "demo-mobile-3"],
-  "slots": ["yard", "temp", "supply", "wait"],
-  "waiting_slots": ["wait"],
-  "transfers": [["yard", "temp"], ["temp", "yard"], ["yard", "supply"]],
-  "charging_slots": 1,
+  "arms": {"A": "demo-yard-a", "B": "demo-yard-b"},
+  "external_supply_arm": "demo-supply",
+  "transfer_vehicle_ids": ["demo-mobile-1", "demo-mobile-2", "demo-mobile-3"],
+  "cell_locations": {
+    "supply_bench": "supply-bench",
+    "conveyor": "conveyor",
+    "bays": ["yard"],
+    "temporary_bays": ["temp"],
+    "outbound_stand": "stand"
+  },
+  "conveyor": {"capacity": 1, "occupancy_evidence": "camera"},
+  "waiting_positions": ["wait"],
+  "allowed_moves": [["conveyor", "yard"], ["yard", "temp"], ["temp", "yard"], ["yard", "stand"]],
+  "charging_positions": 1,
   "max_moving_robots": 1
 }

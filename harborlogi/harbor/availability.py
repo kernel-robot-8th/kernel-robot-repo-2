@@ -4,21 +4,21 @@ from harbor.model import identifier, identifiers
 
 
 @dataclass(frozen=True)
-class TransportState:
+class TransferVehicleState:
     robot_id: str
     status: str
 
     def __post_init__(self):
         identifier(self.robot_id)
         if self.status not in {"available", "loaded", "charging", "waiting_charge", "maintenance", "unknown"}:
-            raise ValueError("Unknown manual transport status")
+            raise ValueError("Unknown manual transfer vehicle status")
 
 
-def transport_candidates(pool: tuple[str, ...], states: tuple[TransportState, ...]) -> tuple[str, ...]:
+def transfer_candidates(pool: tuple[str, ...], states: tuple[TransferVehicleState, ...]) -> tuple[str, ...]:
     """Operator exclusions only; Fleet still owns live admission and allocation."""
     identifiers(pool)
-    if not isinstance(states, tuple) or not all(isinstance(s, TransportState) for s in states):
-        raise ValueError("Expected immutable manual transport states")
+    if not isinstance(states, tuple) or not all(isinstance(s, TransferVehicleState) for s in states):
+        raise ValueError("Expected immutable manual transfer vehicle states")
     identifiers(tuple(s.robot_id for s in states))
     if not {s.robot_id for s in states} <= set(pool):
         raise ValueError("Manual state references a robot outside the pool")

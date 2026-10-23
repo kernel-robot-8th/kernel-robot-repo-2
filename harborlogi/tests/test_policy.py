@@ -6,28 +6,31 @@ import subprocess
 import sys
 import unittest
 
-from harbor.model import CargoHolding, PortConstraints, RetrievalRequest, Slot, YardSnapshot
-from harbor.retrieval import plan_retrieval
+from harbor.model import CargoHolding, PortConstraints, OutboundRequest, Bay, YardSnapshot
+from harbor.outbound import plan_outbound
 from harbor.site import Site
-from harbor.availability import TransportState, transport_candidates
+from harbor.availability import TransferVehicleState, transfer_candidates
 
 
 NOW = datetime(2026, 10, 21, tzinfo=timezone.utc)
 
 
-def yard(stack=("target", "blocker")):
+def yard(stack=("outbound", "rehandle")):
     return YardSnapshot(3, NOW, (
-        Slot("yard", stack, 3), Slot("temp", (), 2), Slot("supply", (), 1),
+        Bay("yard", stack, 3), Bay("temp", (), 2), Bay("stand", (), 1),
     ))
 
 
+REACH = frozenset({("A", "yard"), ("A", "temp"), ("A", "stand"), ("B", "yard"), ("B", "stand")})
+
+
 def constraints():
-    return PortConstraints("supply", ("temp",), frozenset({
-        ("yard", "temp"), ("temp", "yard"), ("yard", "supply"),
-    }), timedelta(seconds=5))
+    return PortConstraints("stand", ("temp",), frozenset({
+        ("yard", "temp"), ("temp", "yard"), ("yard", "stand"),
+    }), timedelta(seconds=5), "conveyor", REACH)
 
 
-class RetrievalTests(unittest.TestCase):
+class OutboundTests(unittest.TestCase):
     def test_preview_reports_proposal_and_required_evidence(self):
         result = subprocess.run([sys.executable, "-m", "harbor"], check=True, capture_output=True, text=True,
                                 cwd=Path(__file__).parents[1])
@@ -35,52 +38,52 @@ class RetrievalTests(unittest.TestCase):
         self.assertEqual(proposal["status"], "READY")
         self.assertEqual(len(proposal["moves"]), 3)
         self.assertEqual(proposal["required_completion"], [
-            "target_unloaded_by_supply", "blockers_restored", "arms_clear",
+            "outbound_placed_on_stand", "rehandles_restored", "arms_retreated",
         ])
 
     def plan(self, snapshot=None, rules=None, request=None, now=NOW):
-        return plan_retrieval(snapshot or yard(), request or RetrievalRequest("target", 3),
+        return plan_outbound(snapshot or yard(), request or OutboundRequest("outbound", 3),
                               rules or constraints(), now=now)
 
-    def test_top_target_only_needs_retrieval(self):
-        proposal = self.plan(yard(("target",)))
+    def test_top_outbound_cargo_only_needs_its_own_move(self):
+        proposal = self.plan(yard(("outbound",)))
         self.assertEqual(proposal.status, "READY")
         self.assertEqual([(m.cargo_id, m.source, m.destination) for m in proposal.moves],
-                         [("target", "yard", "supply")])
-        self.assertIn("target_unloaded_by_supply", proposal.required_completion)
-        self.assertIn("arms_clear", proposal.required_completion)
+                         [("outbound", "yard", "stand")])
+        self.assertIn("outbound_placed_on_stand", proposal.required_completion)
+        self.assertIn("arms_retreated", proposal.required_completion)
 
-    def test_blocker_is_restored_and_observation_is_unchanged(self):
+    def test_rehandle_is_restored_and_observation_is_unchanged(self):
         snapshot = yard()
         proposal = self.plan(snapshot)
         self.assertEqual(proposal.status, "READY")
         self.assertEqual([(m.cargo_id, m.source, m.destination) for m in proposal.moves], [
-            ("blocker", "yard", "temp"), ("target", "yard", "supply"),
-            ("blocker", "temp", "yard"),
+            ("rehandle", "yard", "temp"), ("outbound", "yard", "stand"),
+            ("rehandle", "temp", "yard"),
         ])
-        self.assertEqual(snapshot.slots[0].cargo, ("target", "blocker"))
+        self.assertEqual(snapshot.bays[0].cargo, ("outbound", "rehandle"))
         self.assertEqual(proposal.source_revision, 3)
         self.assertEqual(proposal, self.plan(snapshot))
 
-    def test_multiple_blockers_restore_original_order(self):
-        proposal = self.plan(yard(("target", "b1", "b2")))
-        self.assertEqual([m.cargo_id for m in proposal.moves], ["b2", "b1", "target", "b1", "b2"])
+    def test_multiple_rehandles_restore_original_order(self):
+        proposal = self.plan(yard(("outbound", "b1", "b2")))
+        self.assertEqual([m.cargo_id for m in proposal.moves], ["b2", "b1", "outbound", "b1", "b2"])
 
     def test_no_legal_temporary_capacity_is_hold_without_partial_plan(self):
-        snapshot = yard(("target", "b1", "b2"))
-        snapshot = replace(snapshot, slots=(snapshot.slots[0], Slot("temp", (), 1), snapshot.slots[2]))
+        snapshot = yard(("outbound", "b1", "b2"))
+        snapshot = replace(snapshot, bays=(snapshot.bays[0], Bay("temp", (), 1), snapshot.bays[2]))
         proposal = self.plan(snapshot)
         self.assertEqual(proposal.status, "HOLD")
-        self.assertEqual(proposal.reason, "NO_LEGAL_TEMPORARY_SLOT")
+        self.assertEqual(proposal.reason, "NO_LEGAL_TEMPORARY_BAY")
         self.assertEqual(proposal.moves, ())
 
     def test_missing_return_reachability_is_hold(self):
-        rules = replace(constraints(), transfers=frozenset({("yard", "temp"), ("yard", "supply")}))
+        rules = replace(constraints(), allowed_moves=frozenset({("yard", "temp"), ("yard", "stand")}))
         self.assertEqual(self.plan(rules=rules).status, "HOLD")
 
-    def test_unreachable_target_is_hold(self):
-        self.assertEqual(self.plan(rules=replace(constraints(), transfers=frozenset())).reason,
-                         "TARGET_TRANSFER_UNAVAILABLE")
+    def test_unreachable_outbound_cargo_is_hold(self):
+        self.assertEqual(self.plan(rules=replace(constraints(), allowed_moves=frozenset())).reason,
+                         "OUTBOUND_MOVE_UNAVAILABLE")
 
     def test_stale_and_future_observations_are_hold(self):
         for delta in (-1, 6):
@@ -88,58 +91,85 @@ class RetrievalTests(unittest.TestCase):
                 self.assertEqual(self.plan(now=NOW + timedelta(seconds=delta)).reason,
                                  "OBSERVATION_NOT_CURRENT")
 
-    def test_unknown_or_known_physical_holding_is_not_a_free_slot(self):
+    def test_unknown_or_known_physical_holding_is_not_a_free_bay(self):
         for holder in (None, "arm-a"):
             snapshot = replace(yard(), holdings=(CargoHolding("airborne", holder),))
             self.assertEqual(self.plan(snapshot).reason, "PHYSICAL_HOLDING_REQUIRES_RECONCILIATION")
 
-    def test_revision_missing_target_and_full_destination_do_not_produce_moves(self):
-        cases = [self.plan(request=RetrievalRequest("target", 2)),
-                 self.plan(request=RetrievalRequest("missing", 3)),
-                 self.plan(replace(yard(), slots=yard().slots[:2] + (Slot("supply", ("other",), 1),)))]
+    def test_revision_missing_outbound_and_full_destination_do_not_produce_moves(self):
+        cases = [self.plan(request=OutboundRequest("outbound", 2)),
+                 self.plan(request=OutboundRequest("missing", 3)),
+                 self.plan(replace(yard(), bays=yard().bays[:2] + (Bay("stand", ("other",), 1),)))]
         for proposal in cases:
             self.assertEqual(proposal.status, "HOLD")
             self.assertFalse(proposal.moves)
 
-    def test_target_at_output_is_not_reported_as_completed(self):
-        snapshot = replace(yard(()), slots=(Slot("yard", (), 3), Slot("temp", (), 2),
-                                           Slot("supply", ("target",), 1)))
-        self.assertEqual(self.plan(snapshot).reason, "TARGET_ALREADY_AT_SUPPLY_REQUIRES_EVIDENCE")
+    def test_outbound_on_stand_is_not_reported_as_completed(self):
+        snapshot = replace(yard(()), bays=(Bay("yard", (), 3), Bay("temp", (), 2),
+                                           Bay("stand", ("outbound",), 1)))
+        self.assertEqual(self.plan(snapshot).reason, "OUTBOUND_ALREADY_ON_STAND_REQUIRES_EVIDENCE")
 
-    def test_unknown_slot_configuration_is_rejected(self):
+    def test_each_step_names_primary_and_alternate_yard_arms(self):
+        proposal = self.plan()
+        self.assertEqual([(m.primary_arm, m.alternate_arms) for m in proposal.moves],
+                         [("A", ()), ("A", ("B",)), ("A", ())])
+        self.assertNotIn("S", {a for m in proposal.moves for a in (m.primary_arm, *m.alternate_arms)})
+
+    def test_missing_or_insufficient_reach_table_is_hold(self):
+        for reach, reason in [(frozenset(), "ARM_REACH_UNVERIFIED"),
+                              (REACH - {("A", "temp")}, "NO_ARM_REACHES_MOVE")]:
+            with self.subTest(reason=reason):
+                proposal = self.plan(rules=replace(constraints(), arm_reach=reach))
+                self.assertEqual((proposal.status, proposal.reason, proposal.moves), ("HOLD", reason, ()))
+
+    def test_supply_arm_s_cannot_be_in_the_reach_table(self):
         with self.assertRaises(ValueError):
-            self.plan(rules=replace(constraints(), temporary_slots=("missing",)))
+            replace(constraints(), arm_reach=REACH | {("S", "yard")})
+
+    def test_conveyor_and_outbound_stand_are_never_temporary_bays(self):
+        for temporary in (("conveyor",), ("stand",), ("temp", "conveyor")):
+            with self.subTest(temporary=temporary), self.assertRaises(ValueError):
+                replace(constraints(), temporary_bays=temporary)
+
+    def test_outbound_cargo_on_the_conveyor_is_hold(self):
+        snapshot = replace(yard(()), bays=(Bay("conveyor", ("outbound",), 1), Bay("temp", (), 2),
+                                           Bay("stand", (), 1), Bay("yard", (), 3)))
+        self.assertEqual(self.plan(snapshot).reason, "OUTBOUND_NOT_IN_A_BAY")
+
+    def test_unknown_bay_configuration_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.plan(rules=replace(constraints(), temporary_bays=("missing",)))
 
 
 class ModelTests(unittest.TestCase):
-    def test_duplicate_cargo_slots_and_overcapacity_rejected(self):
-        for slots in [(Slot("a", ("x",), 1), Slot("b", ("x",), 1)),
-                      (Slot("a", (), 1), Slot("a", (), 1))]:
-            with self.subTest(slots=slots), self.assertRaises(ValueError):
-                YardSnapshot(1, NOW, slots)
+    def test_duplicate_cargo_bays_and_overcapacity_rejected(self):
+        for bays in [(Bay("a", ("x",), 1), Bay("b", ("x",), 1)),
+                      (Bay("a", (), 1), Bay("a", (), 1))]:
+            with self.subTest(bays=bays), self.assertRaises(ValueError):
+                YardSnapshot(1, NOW, bays)
         with self.assertRaises(ValueError):
-            Slot("a", ("x", "y"), 1)
+            Bay("a", ("x", "y"), 1)
 
     def test_observed_and_held_cargo_cannot_overlap(self):
         with self.assertRaises(ValueError):
-            replace(yard(), holdings=(CargoHolding("target", "arm-a"),))
+            replace(yard(), holdings=(CargoHolding("outbound", "arm-a"),))
 
     def test_invalid_time_revision_and_identifiers_rejected(self):
         for changes in ({"revision": -1}, {"revision": True}, {"observed_at": NOW.replace(tzinfo=None)}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 replace(yard(), **changes)
         with self.assertRaises(ValueError):
-            RetrievalRequest("", 1)
+            OutboundRequest("", 1)
         with self.assertRaises(ValueError):
-            Slot("a", (), True)
+            Bay("a", (), True)
         with self.assertRaises(ValueError):
             replace(constraints(), max_observation_age=timedelta(0))
 
     def test_mutable_containers_rejected(self):
         with self.assertRaises(ValueError):
-            Slot("a", ["x"], 1)
+            Bay("a", ["x"], 1)
         with self.assertRaises(ValueError):
-            replace(constraints(), temporary_slots=["temp"])
+            replace(constraints(), temporary_bays=["temp"])
 
 
 class SiteTests(unittest.TestCase):
@@ -150,20 +180,61 @@ class SiteTests(unittest.TestCase):
         data = self.site_data()
         site = Site.from_dict(data)
         self.assertEqual(site.max_moving_robots, 1)
-        self.assertEqual(site.charging_slots, 1)
-        self.assertEqual(len(site.transport_ids), 3)
+        self.assertEqual(site.charging_positions, 1)
+        self.assertEqual(len(site.transfer_vehicle_ids), 3)
         data["arms"] = {role: "renamed-" + device for role, device in data["arms"].items()}
-        data["transport_ids"] = ["new-1", "new-2", "new-3"]
+        data["transfer_vehicle_ids"] = ["new-1", "new-2", "new-3"]
         changed = Site.from_dict(data)
-        self.assertEqual(changed.transfers, site.transfers)
-        self.assertEqual(set(changed.arms), {"S", "A", "B"})
+        self.assertEqual(changed.allowed_moves, site.allowed_moves)
+        self.assertEqual(set(changed.arms), {"A", "B"})
+
+    def test_supply_arm_s_is_an_external_step_not_a_commanded_arm(self):
+        site = Site.from_dict(self.site_data())
+        self.assertNotIn("S", site.arms)
+        self.assertEqual(site.external_supply_arm, "demo-supply")
+        data = self.site_data()
+        data["arms"]["S"] = data.pop("external_supply_arm")
+        with self.assertRaisesRegex(ValueError, "external step"):
+            Site.from_dict(data)
+
+    def test_two_location_layers(self):
+        cells = Site.from_dict(self.site_data()).cell_locations
+        self.assertEqual([cells.business_location(c) for c in ("yard", "temp", "stand", "conveyor", "supply-bench")],
+                         ["yard", "yard", "outbound_point", None, None])
+        with self.assertRaises(ValueError):
+            cells.business_location("wait")
+
+    def test_conveyor_is_capacity_one_with_sensor_or_camera_evidence(self):
+        for conveyor in ({"capacity": 2, "occupancy_evidence": "camera"},
+                         {"capacity": 1, "occupancy_evidence": "planner"}):
+            data = self.site_data()
+            data["conveyor"] = conveyor
+            with self.subTest(conveyor=conveyor), self.assertRaises(ValueError):
+                Site.from_dict(data)
+
+    def test_yard_arms_never_move_cargo_onto_the_conveyor_or_supply_bench(self):
+        for edge in (["yard", "conveyor"], ["yard", "supply-bench"], ["supply-bench", "yard"]):
+            data = self.site_data()
+            data["allowed_moves"].append(edge)
+            with self.subTest(edge=edge), self.assertRaises(ValueError):
+                Site.from_dict(data)
+
+    def test_pre_adr_0005_keys_are_explicit_errors(self):
+        for old, new in [("transport_ids", "transfer_vehicle_ids"), ("slots", "cell_locations.bays"),
+                         ("waiting_slots", "waiting_positions"), ("charging_slots", "charging_positions"),
+                         ("transfers", "allowed_moves")]:
+            data = self.site_data()
+            data[old] = []
+            with self.subTest(old=old), self.assertRaisesRegex(ValueError, f"renamed to '{new}'"):
+                Site.from_dict(data)
 
     def test_bad_site_configuration_rejected(self):
-        for field, value in [("charging_slots", 2), ("max_moving_robots", 2),
-                             ("transport_ids", ["p1", "p1", "p3"]),
-                             ("arms", {"S": "a", "A": "a", "B": "b"}),
-                             ("waiting_slots", ["missing"]),
-                             ("transfers", [["yard", "missing"]])]:
+        for field, value in [("charging_positions", 2), ("max_moving_robots", 2),
+                             ("transfer_vehicle_ids", ["p1", "p1", "p3"]),
+                             ("arms", {"A": "a", "B": "a"}),
+                             ("external_supply_arm", "demo-yard-a"),
+                             ("waiting_positions", ["yard"]),
+                             ("allowed_moves", [["yard", "missing"]])]:
             data = self.site_data()
             data[field] = value
             with self.subTest(field=field), self.assertRaises(ValueError):
@@ -174,18 +245,18 @@ class AvailabilityTests(unittest.TestCase):
     def test_manual_charging_loaded_unknown_and_maintenance_excluded(self):
         pool = ("p1", "p2", "p3")
         for status in ("charging", "loaded", "unknown", "maintenance"):
-            states = (TransportState("p1", status), TransportState("p2", "available"))
-            self.assertEqual(transport_candidates(pool, states), ("p2",))
+            states = (TransferVehicleState("p1", status), TransferVehicleState("p2", "available"))
+            self.assertEqual(transfer_candidates(pool, states), ("p2",))
 
     def test_charger_arrival_is_not_availability_or_charging_confirmation(self):
-        self.assertEqual(transport_candidates(("p1",), (TransportState("p1", "waiting_charge"),)), ())
+        self.assertEqual(transfer_candidates(("p1",), (TransferVehicleState("p1", "waiting_charge"),)), ())
 
     def test_duplicate_unknown_robot_and_double_charging_rejected(self):
-        for states in [(TransportState("p1", "available"), TransportState("p1", "loaded")),
-                       (TransportState("other", "available"),),
-                       (TransportState("p1", "charging"), TransportState("p2", "charging"))]:
+        for states in [(TransferVehicleState("p1", "available"), TransferVehicleState("p1", "loaded")),
+                       (TransferVehicleState("other", "available"),),
+                       (TransferVehicleState("p1", "charging"), TransferVehicleState("p2", "charging"))]:
             with self.subTest(states=states), self.assertRaises(ValueError):
-                transport_candidates(("p1", "p2", "p3"), states)
+                transfer_candidates(("p1", "p2", "p3"), states)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+YARD_ARMS = ("A", "B")  # Platform-owner arms Harbor plans for; supply arm S is an external step.
+
 
 def identifier(value: str) -> None:
     if not isinstance(value, str) or not value or value != value.strip():
@@ -27,13 +29,13 @@ def aware_time(value: datetime) -> None:
 
 
 @dataclass(frozen=True)
-class Slot:
-    slot_id: str
+class Bay:
+    bay_id: str
     cargo: tuple[str, ...]  # Bottom to top; no empty layers.
     capacity: int
 
     def __post_init__(self):
-        identifier(self.slot_id)
+        identifier(self.bay_id)
         identifiers(self.cargo)
         if type(self.capacity) is not int or self.capacity < 1 or len(self.cargo) > self.capacity:
             raise ValueError("Invalid stack capacity")
@@ -54,25 +56,25 @@ class CargoHolding:
 class YardSnapshot:
     revision: int
     observed_at: datetime
-    slots: tuple[Slot, ...]
+    bays: tuple[Bay, ...]
     holdings: tuple[CargoHolding, ...] = ()
 
     def __post_init__(self):
         revision(self.revision)
         aware_time(self.observed_at)
-        if (not isinstance(self.slots, tuple) or not self.slots
-                or not all(isinstance(s, Slot) for s in self.slots)
+        if (not isinstance(self.bays, tuple) or not self.bays
+                or not all(isinstance(s, Bay) for s in self.bays)
                 or not isinstance(self.holdings, tuple)
                 or not all(isinstance(h, CargoHolding) for h in self.holdings)):
-            raise ValueError("Expected immutable slot and holding observations")
-        identifiers(tuple(s.slot_id for s in self.slots))
-        identifiers(tuple(c for s in self.slots for c in s.cargo)
+            raise ValueError("Expected immutable bay and holding observations")
+        identifiers(tuple(s.bay_id for s in self.bays))
+        identifiers(tuple(c for s in self.bays for c in s.cargo)
                     + tuple(h.cargo_id for h in self.holdings))
         identifiers(tuple(h.holder_id for h in self.holdings if h.holder_id is not None))
 
 
 @dataclass(frozen=True)
-class RetrievalRequest:
+class OutboundRequest:
     cargo_id: str
     expected_revision: int
 
@@ -83,19 +85,32 @@ class RetrievalRequest:
 
 @dataclass(frozen=True)
 class PortConstraints:
-    supply_slot: str
-    temporary_slots: tuple[str, ...]
-    transfers: frozenset[tuple[str, str]]
+    outbound_stand: str
+    temporary_bays: tuple[str, ...]
+    allowed_moves: frozenset[tuple[str, str]]
     max_observation_age: timedelta
+    conveyor: str
+    # (arm, cell location) pairs the installer verified. Empty means unverified, so planning HOLDs.
+    # shortcut: installer table, replace with platform compile pre-validation once D-856 P1 lands.
+    arm_reach: frozenset[tuple[str, str]] = frozenset()
 
     def __post_init__(self):
-        identifier(self.supply_slot)
-        identifiers(self.temporary_slots)
-        if self.supply_slot in self.temporary_slots:
-            raise ValueError("Supply cannot be a temporary slot")
-        if not isinstance(self.transfers, frozenset):
-            raise ValueError("Expected immutable directed transfers")
-        for edge in self.transfers:
+        identifier(self.outbound_stand)
+        identifier(self.conveyor)
+        identifiers(self.temporary_bays)
+        # Rehandles never go on the one-way conveyor or the outbound stand (ADR 0005 decision 8).
+        if self.outbound_stand in self.temporary_bays or self.conveyor in self.temporary_bays:
+            raise ValueError("The outbound stand and the conveyor cannot be temporary bays")
+        if self.conveyor == self.outbound_stand:
+            raise ValueError("The conveyor cannot be the outbound stand")
+        if not isinstance(self.arm_reach, frozenset) or not all(
+                isinstance(e, tuple) and len(e) == 2 and e[0] in YARD_ARMS for e in self.arm_reach):
+            raise ValueError("Expected immutable (A|B, location) reach pairs")
+        for _, location in self.arm_reach:
+            identifier(location)
+        if not isinstance(self.allowed_moves, frozenset):
+            raise ValueError("Expected immutable directed moves")
+        for edge in self.allowed_moves:
             if not isinstance(edge, tuple) or len(edge) != 2:
                 raise ValueError("Expected source and destination")
             identifiers(edge)
