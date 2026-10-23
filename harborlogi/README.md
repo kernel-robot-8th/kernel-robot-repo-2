@@ -77,7 +77,8 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 | [docs/execution.md](docs/execution.md) | 공정 제안과 업무 장부 사용법 |
 | [docs/observation-acceptance.md](docs/observation-acceptance.md) | 물리 관측 연동의 수용 조건 |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | 실행 연결 계획 |
-| [docs/adr/](docs/adr/) | 설계 결정 기록 (0001 공정 binding과 완료 근거, 0002 고정 소스 Fleet 계약 시험, 0005 Harbor·ROSY 책임 지도) |
+| [docs/adr/](docs/adr/) | 설계 결정 기록 (0001 공정 binding과 완료 근거, 0002 고정 소스 Fleet 계약 시험, 0004 도메인 중립 ROSY 위의 항만 앱 경계(제안), 0005 Harbor·ROSY 책임 지도) |
+
 | [docs/validation/](docs/validation/) | 날짜별 검증 기록 |
 
 ## 데이터와 라이선스
