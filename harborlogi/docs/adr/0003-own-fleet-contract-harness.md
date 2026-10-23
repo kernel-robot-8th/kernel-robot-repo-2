@@ -8,6 +8,6 @@ Status: Accepted, 2026-10-24. 사용자 지시. [0002](0002-pinned-real-fleet-co
 
 함께 고친 결함: Harbor가 팀 저장소의 `harborlogi/` 폴더로 옮겨진 뒤 런처가 `harborlogi/`를 Git 최상위로 확인해서 항상 실패했다. 이제 감싸는 체크아웃 전체가 깨끗한지 확인한다(`app_checkout`).
 
-검증: `tests/test_integration_setup.py`가 하위 폴더 앱의 체크아웃 확인과, 하네스가 기본 시험에서 import되지 않는 것을 본다. 실제 Fleet 서버를 띄우는 2단계 시험은 이 변경으로 다시 실행하지 않았다. 플랫폼 시험 의존성이 있는 시험 PC에서 돌린 뒤 `docs/validation/`에 기록한다.
+검증: `tests/test_integration_setup.py`가 하위 폴더 앱의 체크아웃 확인과, 하네스가 기본 시험에서 import되지 않는 것을 본다. 고정 플랫폼 `584251615d`로 2단계 시험을 다시 돌려 3개 모두 통과했다([기록](../validation/2026-10-24-own-harness.md)). Windows에서 임시 SQLite 정리가 실패해 exit 1이 되던 문제도 함께 고쳤다.
 
 되돌릴 조건: 플랫폼이 같은 시뮬 조립을 공개 시험 도구로 제공하면 그것을 쓰고 이 하네스를 지운다.
