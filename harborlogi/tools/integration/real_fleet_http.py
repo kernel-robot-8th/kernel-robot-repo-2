@@ -48,7 +48,8 @@ def main(argv=None):
     spec = importlib.util.spec_from_file_location('harbor_fleet_harness', source)
     harness = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(harness)
-    with tempfile.TemporaryDirectory(prefix='harbor-http-integration-') as temporary:
+    # Windows keeps the in-process Fleet SQLite file open after stop; a leftover temp dir must not mask the result.
+    with tempfile.TemporaryDirectory(prefix='harbor-http-integration-', ignore_cleanup_errors=True) as temporary:
         fleet = harness.RealFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet')
         try:
             fleet.start()
