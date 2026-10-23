@@ -25,17 +25,17 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API만 쓴다. 그래서
 
 - Python 3.10 이상. Harbor만 다룰 때는 이것으로 충분하다.
 - ROSY까지 띄울 때는 Ubuntu 24.04 + ROS 2 Jazzy와 rosy-platform의 [개발 가이드](https://github.com/robotics-team-1213/rosy-platform/blob/main/docs/reference/developer-guide.md)를 따른다.
-- 두 저장소를 나란히 clone해 두면 편하다. 이 저장소는 개인 fork를 `origin`, 팀 저장소를 `upstream`으로 둔다.
+- 작업은 팀 조직의 fork [robotics-team-1213/harborlogi](https://github.com/robotics-team-1213/harborlogi)에서 한다. 팀원 모두 이 fork에 쓰기 권한이 있으므로 개인 fork를 만들지 않는다. 이 fork를 `origin`, 원본 저장소 kernel-robot-8th/kernel-robot-repo-2를 `upstream`으로 둔다.
 
 ```bash
-git clone https://github.com/<내-계정>/kernel-robot-repo-2.git
-cd kernel-robot-repo-2
+git clone https://github.com/robotics-team-1213/harborlogi.git
+cd harborlogi
 git remote add upstream https://github.com/kernel-robot-8th/kernel-robot-repo-2.git
 ```
 
 ## 3. Harbor를 고치는 흐름
 
-1. `upstream/main`에서 브랜치를 만든다. 이름은 `<type>/<주제>`이고 type은 `feat`·`fix`·`refactor`·`docs` 중 하나다. Jira 이슈가 있으면 `feat/kan-12-retrieval-hold`처럼 번호를 넣는다.
+1. 최신 `upstream/main`에서 브랜치를 만든다(`git fetch upstream` 후 `git switch -c <브랜치> upstream/main`). 이름은 `<type>/<주제>`이고 type은 `feat`·`fix`·`refactor`·`docs` 중 하나다. Jira 이슈가 있으면 `feat/kan-12-retrieval-hold`처럼 번호를 넣는다.
 2. `harborlogi/` 안에서 고치고, 바꾼 동작에는 시험을 함께 넣는다.
 3. `harborlogi/`에서 시험을 돌린다. 실패가 있으면 PR을 열지 않는다.
 
@@ -44,8 +44,9 @@ git remote add upstream https://github.com/kernel-robot-8th/kernel-robot-repo-2.
    python -m unittest discover -s tests -v
    ```
 
-4. fork에 push하고 팀 저장소 `main`으로 PR을 연다. PR에는 무엇을·왜 바꿨는지와 돌린 시험 결과를 적는다.
+4. 브랜치를 `origin`(팀 fork)에 push하고 원본 저장소 `main`으로 PR을 연다(`gh pr create -R kernel-robot-8th/kernel-robot-repo-2 --head robotics-team-1213:<브랜치>`). PR에는 무엇을·왜 바꿨는지와 돌린 시험 결과를 적는다. 같은 브랜치를 다른 팀원도 이어서 고칠 수 있다.
 5. CI(Python 3.10·3.12 unittest)가 통과하고 팀원 한 명 이상이 확인한 뒤 병합한다. 바꾼 사람이 아닌 사람이 확인하는 것을 기본으로 한다.
+6. 병합한 뒤 팀 fork의 `main`을 원본과 맞추고(`gh repo sync robotics-team-1213/harborlogi`) 작업 브랜치를 지운다. 팀 fork의 `main`에는 직접 커밋하지 않는다.
 
 GitHub Actions의 action은 커밋 SHA로 고정해서 쓴다. 이 과정 조직의 Actions 정책을 팀원은 볼 수 없어서, 버전 태그 대신 SHA를 쓰는 쪽이 안전하다.
 
