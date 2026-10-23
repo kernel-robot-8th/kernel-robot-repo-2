@@ -66,6 +66,7 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 
 | 문서 | 내용 |
 |---|---|
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | 함께 작업하기 — Harbor와 ROSY 중 어디서 고칠지, 연결 확인 단계, PR 절차 |
 | [CONTEXT.md](CONTEXT.md) | 항만 업무 용어 |
 | [docs/platform-contract.md](docs/platform-contract.md) | 플랫폼 연결 기준과 다음 작업 |
 | [docs/execution.md](docs/execution.md) | 공정 제안과 업무 장부 사용법 |
