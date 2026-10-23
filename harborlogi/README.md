@@ -1,6 +1,10 @@
 # Harbor
 
+<img src="assets/brand/harbor-app-icon-20261023.png" alt="컨테이너로 구성한 Harbor H 아이콘" width="128" height="128">
+
 HarborLogi의 항만 업무 앱이다. 회수 순위가 바뀌었을 때 묻힌 컨테이너를 어떤 순서로 꺼내고 방해 화물을 어디에 둘지 제안하고, 그 작업이 실제로 끝났는지를 업무 장부에 대조한다. 로봇을 직접 움직이지 않는다. 실행은 ROSY Platform이 맡는다.
+
+커버·배너·아이콘 원본과 사용 위치는 [브랜드 자산](assets/brand/README.md)에 있다.
 
 ## 빠른 시작
 

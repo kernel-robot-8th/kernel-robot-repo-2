@@ -1,5 +1,9 @@
 # HarborLogi
 
+![HarborLogi — Cooperative Container Robotics](harborlogi/assets/brand/harborlogi-github-banner-20261023.png)
+
+*프로젝트 컨셉 이미지이며 실제 장비·시연 사진이 아닙니다.*
+
 회수 순위가 바뀌어도 덜 파내는 소형 컨테이너 야드.
 
 커널아카데미 로보틱스 심화 캠프 주말 야간반 1기 2팀 프로젝트다.
