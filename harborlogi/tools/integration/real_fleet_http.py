@@ -43,7 +43,7 @@ def main(argv=None):
     spec = importlib.util.spec_from_file_location('port_test_fleet', source)
     harness = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(harness)
-    with tempfile.TemporaryDirectory(prefix='port-http-integration-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='harbor-http-integration-') as temporary:
         fleet = harness.RealFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet')
         try:
             fleet.start()
@@ -53,7 +53,7 @@ def main(argv=None):
                 response.raise_for_status()
                 artifact = response.json()['process_artifact_digest']
             config = {
-                'schema': 'rosy.port-http-test/1', 'simulation': True,
+                'schema': 'harbor.http-test/1', 'simulation': True,
                 'origin': fleet.url, 'operator': fleet.tokens['operator'], 'viewer': fleet.tokens['viewer'],
                 'approver': fleet.tokens['approver'],
                 'platform_sha': platform_sha, 'vault_sha': vault_sha, 'app_sha': app_sha,
@@ -66,7 +66,7 @@ def main(argv=None):
             path = Path(temporary) / 'http-test.json'
             path.write_text(json.dumps(config), encoding='utf-8')
             path.chmod(0o600)
-            env = dict(os.environ, ROSY_PORT_INTEGRATION='1', ROSY_PORT_INTEGRATION_CONFIG=str(path))
+            env = dict(os.environ, HARBOR_INTEGRATION='1', HARBOR_INTEGRATION_CONFIG=str(path))
             env.pop('PYTHONPATH', None)
             print(f'Platform {platform_sha}; Vault harness {vault_sha}; Harbor {app_sha}', flush=True)
             return subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests/integration', '-v'],
