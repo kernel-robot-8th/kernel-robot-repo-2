@@ -42,7 +42,7 @@ python -m harbor
 | 중복 요청 방지와 업무 장부(SQLite) | 장치 실행·정지와 실행 근거 |
 | 업무 완료 판정 (관측 근거와 대조) | 관측(World)과 작업 진행 기록 |
 
-Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만 한다. 자동 승인(admit)·재무장(rearm)·직접 장치 명령은 없다. 오래된 관측, 계획 버전 불일치, 보유 불명, 자리 부족이면 일부만 실행하는 안을 만들지 않고 보류(`HOLD`)한다. 현재 보유 중인 화물이 하나라도 있으면 재관측과 대조가 먼저다.
+Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만 한다. 자동 승인(admit)·재무장(rearm)·직접 장치 명령은 없다. 오래된 관측, 계획 버전 불일치, 보유 불명, 자리 부족이면 일부만 실행하는 안을 만들지 않고 보류(`HOLD`)한다. 현재 보유 중인 화물이 하나라도 있으면 재관측과 대조가 먼저다. 이송 차량의 출발은 공급암 S의 퇴피 확인(1차 사람이 확인, 이후 카메라)을 근거로만 허가하고, 실제 주행·정지는 Fleet과 CORE가 맡는다.
 
 ## 구조
 
@@ -55,6 +55,7 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 | `harbor/process.py` | 각 화물 이동을 설치된 공정 문서 ID·digest·compiler artifact에 연결 |
 | `harbor/rosy_http.py` | Fleet compile/proposal/job 조회와 이송 후보 요청의 HTTP 클라이언트 |
 | `harbor/workflow.py` | 중복 요청 방지·불명 접수 HOLD·현재 시도와 관측 대조의 업무 장부 |
+| `harbor/departure.py` | 공급암 S 퇴피 확인(1차 사람, 이후 카메라)의 근거 보존과 이송 차량 출발 허용 (ADR 0005 결정 6) |
 
 장치 칸의 화물 목록은 아래 단부터 위 단 순서다. 장치의 하중·형상·충돌은 이 재고 모델의 범위가 아니다. `allowed_moves`는 업무 계획에서 허용한 칸 사이 이동 방향일 뿐 실행 능력을 만들지 않는다.
 
