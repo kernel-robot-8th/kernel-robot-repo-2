@@ -39,24 +39,26 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--platform-root', type=Path, required=True)
     parser.add_argument('--platform-sha', required=True)
-    parser.add_argument('--transport-only', action='store_true', help='Verify neutral TRIP without the Cell compiler')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--transport-only', action='store_true', help='Verify neutral TRIP without the Cell compiler')
+    mode.add_argument('--arm-only', action='store_true', help='Verify neutral ARM with an independent observer and real UDS')
     args = parser.parse_args(argv)
     app_root = Path(__file__).resolve().parents[2]
     app_sha = app_checkout(app_root)
     platform_sha = verify_checkout(args.platform_root, args.platform_sha)
     # Loaded by path only here: the harness needs the platform's test dependencies.
-    source = Path(__file__).resolve().parent / 'fleet_harness.py'
+    source = Path(__file__).resolve().parent / ('arm_fleet_harness.py' if args.arm_only else 'fleet_harness.py')
     spec = importlib.util.spec_from_file_location('harbor_fleet_harness', source)
     harness = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(harness)
     # Windows keeps the in-process Fleet SQLite file open after stop; a leftover temp dir must not mask the result.
     with tempfile.TemporaryDirectory(prefix='harbor-http-integration-', ignore_cleanup_errors=True) as temporary:
-        fleet = harness.RealFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet',
-                                  transport_only=args.transport_only)
+        fleet = (harness.ArmFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet') if args.arm_only else
+                 harness.RealFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet', transport_only=args.transport_only))
         try:
             fleet.start()
             ref, artifact = {}, None
-            if not args.transport_only:
+            if not args.transport_only and not args.arm_only:
                 ref = next(iter(fleet.transfers.values()))
                 with fleet.client() as client:
                     response = client.post('/api/fleet/cell-app/compile', json=ref)
@@ -73,13 +75,20 @@ def main(argv=None):
                 'candidates': [harness.ROBOT], 'steps': [{'to': 'inbound'}],
                 'alternate_steps': [{'to': 'outbound'}],
             }
+            if args.arm_only:
+                config = {'schema': 'harbor.arm-http-test/1', 'simulation': True, 'origin': fleet.url,
+                    'operator': fleet.tokens['operator'], 'viewer': fleet.tokens['viewer'],
+                    'platform_sha': platform_sha, 'app_sha': app_sha,
+                    'binding': {'cargo_id': 'synthetic-outbound', 'source': 'yard', 'destination': 'stand',
+                        'workcell_id': harness.WORKCELL, 'instance_id': harness.INSTANCE, 'object_ref': 'object-1',
+                        'source_ref': 'source', 'target_ref': 'target'}}
             path = Path(temporary) / 'http-test.json'
             path.write_text(json.dumps(config), encoding='utf-8')
             path.chmod(0o600)
             env = dict(os.environ, HARBOR_INTEGRATION='1', HARBOR_INTEGRATION_CONFIG=str(path))
             env.pop('PYTHONPATH', None)
             print(f'Platform {platform_sha}; Harbor (with harness) {app_sha}', flush=True)
-            pattern = 'transport_http.py' if args.transport_only else 'test_real_fleet_http.py'
+            pattern = 'arm_http.py' if args.arm_only else 'transport_http.py' if args.transport_only else 'test_real_fleet_http.py'
             return subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests/integration', '-p', pattern, '-v'],
                                   cwd=app_root, env=env, timeout=180).returncode
         finally:
