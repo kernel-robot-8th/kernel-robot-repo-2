@@ -1,6 +1,6 @@
 # Harbor 제품 웹 실행과 운영 경계
 
-상태: 구현·최종 검증 진행. 기존 조회 preview와 달리 계정/역할과 영속 업무 입력을 가진 앱이다. [ADR0007](adr/0007-authenticated-harbor-web.md), [화면·동작 계약](design/13-product-web-surface.md), [완성 계획](design/12-web-product-completion.md)을 따른다. 실물 장치 수용/외부 게시를 의미하지 않는다.
+상태: 지원된 웹 범위 구현·검증 완료. 운영 계약·실물 수용 게이트는 별도다. 기존 조회 preview와 달리 계정/역할과 영속 업무 입력을 가진 앱이다. [ADR0007](adr/0007-authenticated-harbor-web.md), [화면·동작 계약](design/13-product-web-surface.md), [완성 계획](design/12-web-product-completion.md)을 따른다. 실물 장치 수용/외부 게시를 의미하지 않는다.
 
 ## 로컬 화면 검토
 
