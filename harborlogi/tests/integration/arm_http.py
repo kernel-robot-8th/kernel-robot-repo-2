@@ -7,6 +7,8 @@ import tempfile
 import sys
 import time
 import unittest
+from threading import Thread
+from wsgiref.simple_server import make_server
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from urllib.parse import urlsplit
@@ -14,6 +16,7 @@ from urllib.parse import urlsplit
 from harbor.process import ArmTransferBinding
 from harbor.rosy_http import RosyClient
 from harbor.workflow import BusinessLedger
+from harbor.web import Application, QuietHandler, ReadOnlyLedger, Workbench
 from datetime import datetime, timezone
 
 
@@ -57,6 +60,25 @@ class ArmHttpTests(unittest.TestCase):
                 receipt = json.load(response)["receipt"]
             self.assertEqual(receipt["physical_status"], "AT_TARGET_AND_CLEAR")
             self.assertEqual(receipt["attempt_id"], row["attempt_id"])
+            # Browser-facing HTTP projection reads the same real Fleet contract,
+            # without recovering/refreshing the Harbor ledger or receiving approver credentials.
+            web = Application(Workbench(ReadOnlyLedger(ledger.path), client))
+            with make_server('127.0.0.1', 0, web, handler_class=QuietHandler) as server:
+                thread = Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    before = ledger.read('neutral-arm-http')
+                    with urlopen(f'http://127.0.0.1:{server.server_port}/api/work?key=neutral-arm-http', timeout=10) as response:
+                        display = json.load(response)
+                    self.assertEqual(display['mode'], 'live')
+                    self.assertEqual(display['fleet']['status'], 'GOAL_CONFIRMED')
+                    self.assertEqual(display['receipt']['status'], 'VERIFIED')
+                    self.assertEqual(display['receipt']['attempt_id'], row['attempt_id'])
+                    self.assertEqual(display['business']['state'], 'WAITING')
+                    self.assertEqual(ledger.read('neutral-arm-http'), before)
+                finally:
+                    server.shutdown()
+                    thread.join()
             other = RosyClient(config["origin"], config["viewer"])
             with self.assertRaises(HTTPError) as denied:
                 other.physical_receipt(mission)

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-25T00:00:00+09:00",
+  "title": "Design System: Harbor",
+  "extensions": {
+    "colorMeta": {
+      "navy": {"role":"primary","displayName":"Harbor Navy","tonalRamp":["oklch(15% .03 240)","oklch(26% .03 240)","oklch(37% .03 240)","oklch(49% .03 240)","oklch(60% .03 240)","oklch(72% .03 240)","oklch(84% .03 240)","oklch(95% .03 240)"]},
+      "ink": {"role":"neutral","displayName":"Ink","tonalRamp":["oklch(15% .02 240)","oklch(26% .02 240)","oklch(37% .02 240)","oklch(49% .02 240)","oklch(60% .02 240)","oklch(72% .02 240)","oklch(84% .02 240)","oklch(95% .02 240)"]},
+      "muted": {"role":"neutral","displayName":"Muted Slate","tonalRamp":["oklch(15% .02 235)","oklch(26% .02 235)","oklch(37% .02 235)","oklch(49% .02 235)","oklch(60% .02 235)","oklch(72% .02 235)","oklch(84% .02 235)","oklch(95% .02 235)"]},
+      "teal": {"role":"primary","displayName":"Harbor Teal","tonalRamp":["oklch(15% .05 207)","oklch(26% .05 207)","oklch(37% .05 207)","oklch(49% .05 207)","oklch(60% .05 207)","oklch(72% .05 207)","oklch(84% .05 207)","oklch(95% .05 207)"]},
+      "teal-soft": {"role":"primary","displayName":"Soft Teal","tonalRamp":["oklch(15% .01 180)","oklch(26% .01 180)","oklch(37% .01 180)","oklch(49% .01 180)","oklch(60% .01 180)","oklch(72% .01 180)","oklch(84% .01 180)","oklch(95% .01 180)"]},
+      "orange": {"role":"secondary","displayName":"Brand Orange","tonalRamp":["oklch(15% .08 40)","oklch(26% .08 40)","oklch(37% .08 40)","oklch(49% .08 40)","oklch(60% .08 40)","oklch(72% .08 40)","oklch(84% .08 40)","oklch(95% .08 40)"]},
+      "orange-soft": {"role":"secondary","displayName":"Soft Orange","tonalRamp":["oklch(15% .02 65)","oklch(26% .02 65)","oklch(37% .02 65)","oklch(49% .02 65)","oklch(60% .02 65)","oklch(72% .02 65)","oklch(84% .02 65)","oklch(95% .02 65)"]},
+      "paper": {"role":"neutral","displayName":"Ivory Paper","tonalRamp":["oklch(15% .01 85)","oklch(26% .01 85)","oklch(37% .01 85)","oklch(49% .01 85)","oklch(60% .01 85)","oklch(72% .01 85)","oklch(84% .01 85)","oklch(95% .01 85)"]},
+      "white": {"role":"neutral","displayName":"White Surface","tonalRamp":["oklch(15% 0 0)","oklch(26% 0 0)","oklch(37% 0 0)","oklch(49% 0 0)","oklch(60% 0 0)","oklch(72% 0 0)","oklch(84% 0 0)","oklch(95% 0 0)"]},
+      "line": {"role":"neutral","displayName":"Cool Divider","tonalRamp":["oklch(15% .005 170)","oklch(26% .005 170)","oklch(37% .005 170)","oklch(49% .005 170)","oklch(60% .005 170)","oklch(72% .005 170)","oklch(84% .005 170)","oklch(95% .005 170)"]},
+      "focus": {"role":"secondary","displayName":"Warm Focus","tonalRamp":["oklch(15% .08 40)","oklch(26% .08 40)","oklch(37% .08 40)","oklch(49% .08 40)","oklch(60% .08 40)","oklch(72% .08 40)","oklch(84% .08 40)","oklch(95% .08 40)"]}
+    },
+    "typographyMeta": {
+      "headline":{"displayName":"Work headline","purpose":"Work ID and welcome heading; 26px at the mobile breakpoint."},
+      "title":{"displayName":"Section title","purpose":"Plan, execution, evidence and next-check headings."},
+      "body":{"displayName":"Korean system body","purpose":"Operation text without a downloaded font."},
+      "label":{"displayName":"Status label","purpose":"Compact text badges."}
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": [{"name":"mobile-max","value":"700px"},{"name":"compact-max","value":"1100px"},{"name":"wide-min","value":"1600px"}]
+  },
+  "components": [
+    {"name":"Primary read button","kind":"button","refersTo":"button-primary","description":"Manual ROSY status read.","html":"<button class=\"ds-primary\" type=\"button\">ROSY 상태 다시 조회</button>","css":".ds-primary{font:600 15px/1.65 'Segoe UI','Malgun Gothic',sans-serif;min-height:44px;padding:9px 15px;border:1px solid var(--teal,#116974);border-radius:6px;color:var(--white,#fff);background:var(--teal,#116974);cursor:pointer}.ds-primary:hover{background:var(--navy,#102e40);border-color:var(--navy,#102e40)}.ds-primary:focus-visible{outline:3px solid var(--focus,#a53709);outline-offset:3px}.ds-primary:disabled{cursor:wait;opacity:.55}"},
+    {"name":"Quiet copy button","kind":"button","refersTo":"button-quiet","description":"Copies the original mission ID locally.","html":"<button class=\"ds-quiet\" type=\"button\">mission ID 복사</button>","css":".ds-quiet{font:600 15px/1.65 'Segoe UI','Malgun Gothic',sans-serif;min-height:44px;padding:9px 15px;border:1px solid var(--line,#d6dedc);border-radius:6px;color:var(--teal,#116974);background:transparent;cursor:pointer}.ds-quiet:hover{background:var(--teal-soft,#e2efed);border-color:var(--navy,#102e40)}.ds-quiet:focus-visible{outline:3px solid var(--focus,#a53709);outline-offset:3px}.ds-quiet:disabled{cursor:wait;opacity:.55}"},
+    {"name":"Work search","kind":"input","refersTo":"input-search","description":"Labeled local task filter.","html":"<label class=\"ds-label\" for=\"ds-search\">업무 ID · 화물 검색</label><input class=\"ds-search\" id=\"ds-search\" type=\"search\" placeholder=\"업무 또는 화물 ID\">","css":".ds-label{display:block;margin-bottom:7px;font:13px/1.65 'Segoe UI','Malgun Gothic',sans-serif;color:var(--ink,#183748)}.ds-search{font:15px/1.65 'Segoe UI','Malgun Gothic',sans-serif;width:100%;min-height:44px;padding:9px 12px;border:1px solid #83959c;border-radius:5px;color:var(--ink,#183748);background:var(--white,#fff);caret-color:var(--teal,#116974)}.ds-search::placeholder{color:var(--muted,#526775)}.ds-search:focus-visible{outline:3px solid var(--focus,#a53709);outline-offset:3px}"},
+    {"name":"Current task navigation","kind":"nav","refersTo":"task-current","description":"Current selection in the task rail.","html":"<nav aria-label=\"업무 목록\"><button class=\"ds-task\" type=\"button\" aria-current=\"true\"><strong>WORK-001</strong><span>화물 C-001 · 계획 검토</span></button></nav>","css":".ds-task{display:block;width:100%;min-height:44px;text-align:left;font:400 15px/1.65 'Segoe UI','Malgun Gothic',sans-serif;padding:18px 12px;color:var(--ink,#183748);background:transparent;border:1px solid transparent;border-radius:4px;cursor:pointer}.ds-task strong{display:block;margin-bottom:6px;overflow-wrap:anywhere}.ds-task span{font-size:12px}.ds-task:hover,.ds-task[aria-current=true]{background:var(--teal-soft,#e2efed);border-color:var(--teal,#116974)}.ds-task:focus-visible{outline:3px solid var(--focus,#a53709);outline-offset:3px}"},
+    {"name":"Hold badge","kind":"chip","refersTo":"badge-hold","description":"Noninteractive business hold label.","html":"<span class=\"ds-hold\">보류</span>","css":".ds-hold{display:inline-block;padding:3px 9px;border-radius:4px;font:600 12px/1.65 'Segoe UI','Malgun Gothic',sans-serif;color:#81320f;background:var(--orange-soft,#fff0e4)}"},
+    {"name":"Next check panel","kind":"card","refersTo":"next-action","description":"Tonal section for the next human check.","html":"<section class=\"ds-next\" aria-labelledby=\"ds-next-title\"><h3 id=\"ds-next-title\">다음 확인</h3><p>ROSY 실행 상태와 Harbor 업무 근거를 각각 확인하세요.</p></section>","css":".ds-next{padding:20px 24px;border-radius:8px;color:var(--ink,#183748);background:var(--teal-soft,#e2efed);font:15px/1.65 'Segoe UI','Malgun Gothic',sans-serif}.ds-next h3{margin:0;font-size:18px;line-height:1.5}.ds-next p{margin:6px 0 0;font-size:14px;max-width:72ch}"}
+  ],
+  "narrative": {
+    "northStar": "HarborLogi 작업 관제",
+    "overview": "The implemented workbench carries the existing HarborLogi navy, teal, orange and ivory identity into a Korean operation interface. Dense task facts sit on quiet surfaces; the current task and next check receive the clearest emphasis.\n\nThe local read-only interface separates Harbor business state, ROSY execution and physical receipt evidence. Demo data is visibly identified. This document records the implementation, not production authentication, field usability acceptance or physical device acceptance.",
+    "keyCharacteristics": ["Persistent brand header and adjacent task list.","Separate business, execution and evidence sections.","Text labels accompany state colors."],
+    "rules": [],
+    "dos": ["Do keep business state, ROSY execution and receipt evidence separately labeled.","Do pair status color with readable text and preserve keyboard focus.","Do reuse the existing Harbor name, container H icon and concept banner."],
+    "donts": ["Don't present demo data or concept artwork as device evidence.","Don't imply that a read, an Action success or a receipt authorizes execution or completes all business checks.","Don't present this local workbench as production login, RBAC or physical acceptance."]
+  }
+}

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Harbor · 작업 관제</title>
+  <link rel="icon" href="/assets/icon.png" type="image/png">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">작업 내용으로 이동</a>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Harbor 업무 목록"><img src="/assets/icon.png" alt="" width="42" height="42"><span>Harbor<span class="brand-sub">HarborLogi 작업 관제</span></span></a>
+    <div class="environment"><span id="mode">연결 확인 중</span><span>조회 전용</span></div>
+  </header>
+  <div id="mode-note" class="mode-note" role="status">업무 장부와 ROSY 실행 상태를 따로 확인합니다.</div>
+  <div class="workspace">
+    <aside class="worklist" aria-label="업무 목록">
+      <div class="list-heading"><h1>업무</h1><button id="reload" class="quiet" type="button">목록 새로고침</button></div>
+      <label class="search-label" for="search">업무 ID · 화물 검색</label>
+      <input id="search" type="search" placeholder="업무 또는 화물 ID" autocomplete="off">
+      <div class="filters" role="group" aria-label="업무 상태 필터">
+        <button type="button" data-filter="ALL" aria-pressed="true">전체</button>
+        <button type="button" data-filter="HOLD" aria-pressed="false">보류</button>
+        <button type="button" data-filter="PLANNED" aria-pressed="false">계획</button>
+      </div>
+      <p id="list-count" class="muted"></p>
+      <ul id="tasks" class="tasks"></ul>
+      <p id="list-error" class="error" role="alert" hidden></p>
+      <div class="scope-note"><strong>업무에서 실행까지</strong><p>Harbor는 계획과 업무 근거를 관리합니다. 로봇 실행 승인과 정지는 ROSY Fleet에서 다룹니다.</p></div>
+    </aside>
+    <main id="main" tabindex="-1">
+      <section id="welcome" class="welcome">
+        <h2>지금 확인할 업무를 선택하세요.</h2>
+        <p>현재 단계, ROSY 실행 상태, 완료 근거를 한곳에서 대조합니다.</p>
+        <figure><img src="/assets/banner.png" alt="컨테이너와 협력 로봇으로 구성한 HarborLogi 컨셉 이미지" width="1774" height="887"><figcaption>HarborLogi 컨셉 이미지 · 실제 장치와 실행 상태를 나타내지 않습니다.</figcaption></figure>
+      </section>
+      <div id="detail-error" class="error" role="alert" hidden></div>
+      <article id="detail" hidden aria-busy="false">
+        <div class="detail-heading">
+          <div><p id="cargo" class="cargo"></p><h2 id="work-title" tabindex="-1"></h2><p id="plan-meta" class="muted"></p></div>
+          <button id="refresh" type="button">ROSY 상태 다시 조회</button>
+        </div>
+        <div class="status-line"><span id="business-status" class="badge"></span><span id="step-label"></span></div>
+        <section class="next-action" aria-labelledby="next-title"><h3 id="next-title">다음 확인</h3><p id="next-message"></p></section>
+        <div class="detail-columns">
+          <section class="plan" aria-labelledby="plan-title"><h3 id="plan-title">작업 순서</h3><p class="muted">계획에 기록된 순서입니다. 실제 실행과 업무 완료는 각각 확인합니다.</p><ol id="moves" class="moves"></ol></section>
+          <section class="execution" aria-labelledby="fleet-title"><div class="section-heading"><h3 id="fleet-title">ROSY 실행</h3><span class="source">Fleet HTTP</span></div>
+            <p id="fleet-status" class="fleet-status"></p><p id="fleet-message" class="muted"></p>
+            <dl id="fleet-fields" class="facts"></dl>
+            <div class="handoff"><button id="copy" class="quiet" type="button">mission ID 복사</button><a id="console" class="button" target="_blank" rel="noopener noreferrer" hidden>Fleet 콘솔 열기</a></div>
+            <p id="handoff-note" class="muted"></p><p id="copy-status" role="status"></p>
+          </section>
+        </div>
+        <section class="evidence" aria-labelledby="evidence-title"><h3 id="evidence-title">완료 근거</h3><div class="evidence-grid">
+          <div><h4>ROSY 물리 receipt</h4><p id="receipt-status"></p><dl id="receipt-fields" class="facts"></dl></div>
+          <div><h4>Harbor 업무 장부</h4><p id="business-evidence"></p><p class="muted">내려놓기·재취급 화물 복귀·관련 팔 퇴피의 업무 대조 결과는 물리 receipt와 별도로 관리합니다.</p></div>
+        </div></section>
+        <footer class="read-note"><p id="read-time"></p><p>원본 관측의 최신성은 이 화면 조회 시각으로 보증되지 않습니다. 강제 완료·자동 승인 기능은 제공하지 않습니다.</p></footer>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

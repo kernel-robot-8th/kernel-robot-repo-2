@@ -33,6 +33,10 @@ python -m harbor
 
 `READY`는 관측 기준으로 세운 업무 제안일 뿐 실행 허가가 아니다. 이동마다 적층암 A·B 중 주 팔(`primary_arm`)과 대체 팔(`alternate_arms`)을 붙인다. 팔 배정은 설치자가 준 도달 표(`PortConstraints.arm_reach`)로만 하고, 표가 없거나 닿는 팔이 없으면 `HOLD`다. 플랫폼 compile 사전 검증 조회 계약(D-856 P1)이 생기면 그 결과로 바꾼다. 실제 arm claim과 대체 팔 전환은 Fleet이 한다. 업무 완료는 `required_completion`의 세 가지(반출 대상 화물을 반출대에 내려놓음, 재취급 화물 복귀, 관련 팔 퇴피)에 실제 근거가 있을 때만 판정한다. 필요하면 `python -m pip install -e .`로 설치한다.
 
+## 웹 작업 관제
+
+`python -m harbor.web --demo` 후 같은 PC의 `http://127.0.0.1:8040`을 연다. 기존 이미지·네이비/청록 테마의 작업 목록·상세를 확인한다. 실제 장부와 ROSY ARM job·receipt 연결은 [웹 실행 안내](docs/web-workbench.md)를 따른다. 현재는 로컬 조회 단계이며 로그인·업무 쓰기·현장 태블릿 배포는 후속이다.
+
 ## Harbor와 ROSY의 경계
 
 | Harbor가 하는 일 | ROSY가 하는 일 |

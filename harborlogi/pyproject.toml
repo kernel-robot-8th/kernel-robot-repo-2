@@ -11,3 +11,9 @@ license = { text = "Apache-2.0" }
 
 [tool.setuptools.packages.find]
 include = ["harbor*"]
+
+[tool.setuptools.package-data]
+harbor = ["web_assets/*.html", "web_assets/*.css", "web_assets/*.js"]
+
+[tool.setuptools.data-files]
+"share/harborlogi/brand" = ["assets/brand/harbor-app-icon-20261023.png", "assets/brand/harborlogi-github-banner-20261023.png"]

@@ -8,7 +8,7 @@
 
 web
 
-사용자 확인(2026-10-25): 관제 PC 중심 + 현장 태블릿 보조, 브라우저 웹앱. 구체 framework·로그인 방식은 다음 설계 결정으로 남긴다. 현재 웹 UI가 구현됐다는 뜻은 아니다.
+사용자 확인(2026-10-25): 관제 PC 중심 + 현장 태블릿 보조, 브라우저 웹앱. 첫 구현은 Python 표준 WSGI + HTML/CSS/JavaScript의 로컬 조회 앱이다. [실행 안내](docs/web-workbench.md). 운영 framework·배포·로그인과 LAN 태블릿 연결은 미확정이다.
 
 ## Users
 
