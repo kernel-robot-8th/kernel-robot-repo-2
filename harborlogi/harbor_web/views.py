@@ -8,7 +8,7 @@ from django.views.decorators.http import require_http_methods
 
 from harbor_web import forms, services
 from harbor_web.auth import has_role, require_roles
-from harbor_web.models import Audit, Cargo, Condition, FieldEpisode, Observation, Order, Plan
+from harbor_web.models import Audit, Cargo, Command, Condition, FieldEpisode, Observation, Order, Plan
 
 
 def page(request, template, **context):
@@ -46,13 +46,29 @@ def form_page(request, *, form_type, title, section, save, destination, descript
 def overview(request):
     if not has_role(request.user, 'viewer', 'operator', 'admin'):
         return redirect('/field/')
-    requests = Order.objects.select_related('cargo').order_by('priority_group', 'sequence', 'id')[:12]
+    issues = list(Command.objects.filter(state__in=['UNKNOWN', 'DISPATCHING', 'CANCEL_PENDING', 'BLOCKED']).select_related('plan__order__cargo').order_by('created_at')[:12])
+    issue_ids = [command.plan.order_id for command in issues]
+    requests = [command.plan.order for command in issues]
+    requests += list(Order.objects.exclude(pk__in=issue_ids).select_related('cargo').order_by('priority_group', 'sequence', 'id')[:12 - len(requests)])
+    executions = {command.plan.order_id: command for command in Command.objects.filter(plan__order_id__in=[order.pk for order in requests]).select_related('plan')}
     plans = {p.order_id: p for p in Plan.objects.filter(order_id__in=[o.pk for o in requests]).order_by('id')}
     rows = []
     for order in requests:
         plan = plans.get(order.pk)
         action = '계획 확인' if plan else ('입고 인계 조건 확인' if order.kind == 'INBOUND' else '관측 선택·계획 검토')
-        rows.append(dict(order=order, plan=plan, action=action, reason=reason_text(plan.result['reason']) if plan else ('입고 실행 인계 조건을 확인하세요.' if order.kind == 'INBOUND' else '관측 원본과 반출 순서를 검토하세요.')))
+        row = dict(order=order, plan=plan, action=action, reason=reason_text(plan.result['reason']) if plan else ('입고 실행 인계 조건을 확인하세요.' if order.kind == 'INBOUND' else '관측 원본과 반출 순서를 검토하세요.'), status=plan.result['status'] if plan else '', status_label=plan.result['status'] if plan else '계획 전', href=f'/plans/{plan.pk}/' if plan else f'/requests/{order.pk}/')
+        command = executions.get(order.pk)
+        if command:
+            row.update(status=command.state, status_label={'UNKNOWN': '결과 불명', 'DISPATCHING': '제출 대조 필요', 'CANCEL_PENDING': '취소 대조 필요', 'BLOCKED': '인계 보류', 'PREPARED': '제안 검토 대기', 'RECONCILED': '원본 대조됨'}.get(command.state, command.state), action='원래 작업 대조', href=f'/work/{command.pk}/')
+            row['reason'] = {
+                'UNKNOWN': '제출 결과가 불명입니다. 새 계획으로 재제출하지 말고 원래 요청을 대조하세요.',
+                'DISPATCHING': '제출 중이거나 응답을 확인하지 못했습니다. 원래 요청을 대조하세요.',
+                'CANCEL_PENDING': '취소 결과와 실제 정지를 대조해야 합니다. 후속 업무는 보류합니다.',
+                'BLOCKED': '실행 인계가 보류되었습니다. 원래 작업의 설치·관측·복구 조건을 확인하세요.',
+                'PREPARED': '실행 인계 요청이 준비되었습니다. 원래 계획으로 현재 단계 제안을 검토하세요.',
+                'RECONCILED': '실행 원본을 대조했습니다. 실제 수행과 전체 업무 완료 근거를 확인하세요.',
+            }.get(command.state, '원래 작업의 상태와 근거를 확인하세요.')
+        rows.append(row)
     return page(request, 'overview.html', section='overview', rows=rows,
                 observation=Observation.objects.order_by('-id').first(), condition=Condition.objects.order_by('-id').first(),
                 field_pending=FieldEpisode.objects.filter(state='OPEN').count())

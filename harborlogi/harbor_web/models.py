@@ -127,12 +127,21 @@ class Plan(Immutable):
 
 
 class Audit(models.Model):
+    objects = ImmutableQuerySet.as_manager()
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT)
     action = models.CharField(max_length=80)
     object_type = models.CharField(max_length=48)
     object_id = models.CharField(max_length=96)
     detail = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if not self._state.adding or force_update or update_fields is not None:
+            raise ValidationError('Historical records cannot be edited.')
+        return super().save(force_insert=True, using=using)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Historical records cannot be deleted.')
 
 
 class FieldEpisode(Authored):

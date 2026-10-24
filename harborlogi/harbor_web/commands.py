@@ -20,8 +20,9 @@ from harbor.process import ArmTransferBinding, bind_plan
 from harbor.outbound import CargoMove, OutboundProposal
 from harbor.rosy_http import RosyClient
 from harbor.workflow import BusinessLedger
-from harbor_web.models import Plan, Command, CommandFact, Audit
+from harbor_web.models import Plan, Command, CommandFact, Audit, Observation
 from harbor_web.services import _role, Conflict, queue_digest, constraints
+from harbor_web.coordination import serialized
 
 _registry = None
 _guard = threading.RLock()
@@ -56,9 +57,12 @@ def _bound(plan, config):
     return bind_plan(proposal, bindings)
 
 
+@serialized
 def capability(plan):
     reason, origin = '', None
     try:
+        if Command.objects.filter(order_id=plan.order_id).exclude(plan=plan).exists():
+            raise ValidationError('EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION')
         from harbor_web.runtime import execution_block_reason
         blocked = execution_block_reason()
         if blocked:
@@ -69,6 +73,8 @@ def capability(plan):
             raise ValidationError('PLAN_NOT_READY')
         if plan.order.version != plan.order_version or plan.queue_digest != queue_digest():
             raise ValidationError('PLAN_QUEUE_CHANGED')
+        if Observation.objects.filter(source_id=plan.observation.source_id, condition=plan.condition, pk__gt=plan.observation_id).exists():
+            raise ValidationError('OBSERVATION_REVISION_CHANGED')
         age = timezone.now() - plan.observation.observed_at
         if not timezone.timedelta(0) <= age <= constraints(plan.condition.payload).max_observation_age:
             raise ValidationError('OBSERVATION_NOT_FRESH')
@@ -82,9 +88,9 @@ def capability(plan):
             raise ValidationError('AUTHENTICATED_OBSERVATION_AND_EVIDENCE_PRODUCER_REQUIRED')
         _bound(plan, config)
     except ValidationError as error:
-        safe = {'RESTORE_RECONCILIATION_REQUIRED', 'DEPLOYMENT_PROFILE_REQUIRED',
+        safe = {'EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION', 'RESTORE_RECONCILIATION_REQUIRED', 'DEPLOYMENT_PROFILE_REQUIRED',
                 'EXECUTION_CONFIGURATION_REQUIRED', 'INVALID_FLEET_PRINCIPAL', 'PLAN_NOT_READY', 'PLAN_QUEUE_CHANGED',
-                'OBSERVATION_NOT_FRESH', 'AUTHENTICATED_OBSERVATION_AND_EVIDENCE_PRODUCER_REQUIRED'}
+                'OBSERVATION_NOT_FRESH', 'OBSERVATION_REVISION_CHANGED', 'AUTHENTICATED_OBSERVATION_AND_EVIDENCE_PRODUCER_REQUIRED'}
         reason = error.messages[0] if error.messages and error.messages[0] in safe else 'EXECUTION_INPUTS_UNAVAILABLE'
     except (ValueError, KeyError, TypeError, OSError):
         reason = 'EXECUTION_INPUTS_UNAVAILABLE'
@@ -147,22 +153,27 @@ def _key(command):
 
 def _validate(command, config):
     from harbor_web.runtime import ledger_identity_matches
-    if (not ledger_identity_matches(command.ledger_identity, _identity(config)) or command.fleet_origin != config['origin']
+    if (command.order_id != command.plan.order_id or not ledger_identity_matches(command.ledger_identity, _identity(config)) or command.fleet_origin != config['origin']
             or command.fleet_principal != config['principal'] or command.body_digest != _digest(command.binding)):
         raise Conflict('Saved command identity differs from configured execution owner.')
 
 
+@serialized
 def prepare_command(actor, *, plan_id, expected_version):
     _role(actor, 'operator')
     registry = acquire_registry()
     with registry.lock('plan:' + str(plan_id)):
         plan = Plan.objects.select_related('order', 'order__cargo', 'observation', 'condition').get(pk=plan_id)
-        if plan.order_version != expected_version or plan.order.version != expected_version:
-            raise Conflict('Plan version changed.')
-        existing = Command.objects.filter(plan=plan).first()
+        existing = Command.objects.filter(order=plan.order).first()
         if existing:
             _validate(existing, registry.config)
+            if existing.plan_id != plan.pk:
+                raise Conflict('Existing order execution requires reconciliation.')
+            if existing.plan_version != expected_version:
+                raise Conflict('Plan version changed.')
             return existing
+        if plan.order_version != expected_version or plan.order.version != expected_version:
+            raise Conflict('Plan version changed.')
         if not capability(plan)['enabled']:
             Audit.objects.create(actor=actor, action='command.blocked', object_type='Plan', object_id=str(plan.pk))
             raise ValidationError('Execution inputs unavailable.')
@@ -171,7 +182,7 @@ def prepare_command(actor, *, plan_id, expected_version):
                     outbound_id=plan.order.cargo.code, outbound_stand=constraints(plan.condition.payload).outbound_stand,
                     move_arms=[[m['primary_arm'], *m.get('alternate_arms', [])] for m in plan.result['moves']])
         with transaction.atomic():
-            command = Command.objects.create(plan=plan, actor=actor, plan_version=expected_version,
+            command = Command.objects.create(plan=plan, order=plan.order, actor=actor, plan_version=expected_version,
                 ledger_identity=_identity(registry.config), fleet_origin=registry.config['origin'],
                 fleet_principal=registry.config['principal'], binding=body, body_digest=_digest(body))
             Audit.objects.create(actor=actor, action='command.prepare', object_type='Command', object_id=str(command.pk))
@@ -223,6 +234,7 @@ def _record_fact(command, job, receipt):
         receipt={k: receipt[k] for k in receipt_fields if k in receipt} if receipt else None, read_at=timezone.now())
 
 
+@serialized
 def _operation(actor, command_id, expected_version, action, reason=''):
     registry = acquire_registry()
     with registry.lock(command_id):

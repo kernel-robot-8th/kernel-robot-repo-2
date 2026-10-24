@@ -121,7 +121,8 @@ class ProductWebHttpTests(unittest.TestCase):
                         self.assertLess(time.monotonic(), deadline, 'No validated physical receipt before deadline')
                         time.sleep(.1)
                     self.assertEqual(fact.receipt['physical_status'], 'AT_TARGET_AND_CLEAR')
-                    self.assertEqual(fact.receipt['request_digest'], fact.job['request_digest'])
+                    # ADR0006: the receipt hashes the full dispatch grant; the job hashes the transfer body.
+                    self.assertNotEqual(fact.receipt['request_digest'], fact.job['request_digest'])
                     self.assertEqual(fact.job['request_key'], 'harbor:' + str(key) + ':0')
                     registry = commands.acquire_registry()
                     before = registry.ledger.read('harbor:' + str(key))

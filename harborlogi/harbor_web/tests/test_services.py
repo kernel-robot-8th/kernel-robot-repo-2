@@ -10,6 +10,35 @@ from harbor_web.models import Cargo, Condition, Observation, Audit, DepartureInt
 
 
 class ServicesTests(TestCase):
+    def test_request_history_preserves_original_and_changed_snapshots(self):
+        order = self.order(note='Original instruction')
+        observation = self.observation()
+        plan = services.make_plan(self.operator, order_id=order.pk, expected_version=1, observation_id=observation.pk)
+        services.update_order(self.operator, order_id=order.pk, expected_version=1,
+            priority_group=2, sequence=3, tie_policy='ANY', note='Revised instruction')
+        created = Audit.objects.get(action='order.create', object_id=str(order.pk)).detail
+        edited = Audit.objects.get(action='order.update', object_id=str(order.pk)).detail
+        self.assertEqual(created['after']['note'], 'Original instruction')
+        self.assertIsNone(created['before'])
+        self.assertEqual(edited['before'], created['after'])
+        self.assertEqual(edited['after']['note'], 'Revised instruction')
+        self.assertEqual(edited['after']['version'], 2)
+        plan.refresh_from_db()
+        self.assertEqual(plan.result['request_snapshot'], created['after'])
+        self.assertEqual(plan.result['queue_snapshot'], [created['after']])
+
+    def test_audit_history_cannot_be_overwritten(self):
+        from django.db import transaction
+        self.order()
+        record = Audit.objects.get(action='order.create')
+        with self.assertRaises(ValidationError):
+            Audit.objects.filter(pk=record.pk).update(detail={})
+        record.detail = {}
+        with self.assertRaises(ValidationError):
+            record.save()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Audit(pk=record.pk, actor=self.operator, action='replacement', object_type='Order', object_id='1').save()
+
     def setUp(self):
         self.operator = User.objects.create_user('operator')
         self.operator.groups.add(Group.objects.get_or_create(name='operator')[0])

@@ -18,12 +18,14 @@ class CommandForm(forms.Form):
 
 def gate_text(code):
     return {
+        'EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION': '이 요청에는 이미 실행 인계가 있습니다. 새로 제출하지 말고 원래 작업을 대조하세요.',
         'RESTORE_RECONCILIATION_REQUIRED': '복원한 자료입니다. 원래 실행과 복구 검토가 끝나기 전 새 제출을 보류합니다.',
         'DEPLOYMENT_PROFILE_REQUIRED': '배포 환경과 데이터베이스 기준을 먼저 확인해야 합니다.',
         'EXECUTION_CONFIGURATION_REQUIRED': 'ROSY 연동 설정과 설치된 이동 대응이 필요합니다.',
         'PLAN_NOT_READY': '계획의 보류 사유를 먼저 해결해야 합니다.',
         'PLAN_QUEUE_CHANGED': '요청 또는 우선순위가 변경되었습니다. 최신 지시로 다시 검토하세요.',
         'OBSERVATION_NOT_FRESH': '검토한 관측이 오래되었습니다. 최신 원본으로 계획을 다시 만드세요.',
+        'OBSERVATION_REVISION_CHANGED': '같은 출처의 새 관측이 있습니다. 최신 원본으로 계획을 다시 검토하세요.',
         'AUTHENTICATED_OBSERVATION_AND_EVIDENCE_PRODUCER_REQUIRED': '인증된 관측·업무 근거 연결이 필요합니다. 수동 자료는 운영 실행 근거가 아닙니다.',
         'EXECUTION_INPUTS_UNAVAILABLE': '연결 기준을 읽을 수 없습니다. 설치 담당자와 원본을 확인하세요.',
         'BUSINESS_HOLD': '원래 실행을 찾았지만 업무 보류는 유지됩니다. 완료 근거를 확인하세요.',
@@ -54,7 +56,7 @@ def plan_detail(request, pk):
     moves = plan.result['moves']
     outbound = next((i for i, move in enumerate(moves) if move['cargo_id'] == plan.order.cargo.code), -1)
     display_moves = [dict(move, phase_label='재취급' if i < outbound else '반출' if i == outbound else '복귀') for i, move in enumerate(moves)]
-    return page(request, 'plan.html', section='inventory', plan=plan, display_moves=display_moves, gate=gate, gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']), command=Command.objects.filter(plan=plan).first())
+    return page(request, 'plan.html', section='inventory', plan=plan, display_moves=display_moves, gate=gate, gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']), command=Command.objects.filter(plan__order=plan.order).first())
 
 
 @require_roles('viewer', 'operator', 'admin')

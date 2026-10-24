@@ -37,11 +37,15 @@ def main():
     from harbor_web.models import Cargo, Plan, Observation, Order, FieldEpisode, FieldConfirmation, DepartureIntent, Measurement, Command
     from playwright.sync_api import sync_playwright
     call_command('migrate', verbosity=0)
+    call_command('bootstrap_roles', verbosity=0)
     password = secrets.token_urlsafe(30)
     users = {}
     for name, role in [('operator', 'operator'), ('viewer', 'viewer'), ('admin', 'admin'), ('field1', 'field'), ('field2', 'field')]:
         users[name] = User.objects.create_user(name, password=password)
         users[name].groups.add(Group.objects.get_or_create(name=role)[0])
+        if role == 'admin':
+            users[name].is_staff = True
+            users[name].save()
     op, admin = users['operator'], users['admin']
     for code in ['C1', 'C2'] + [f'PAG-{i:02}' for i in range(27)]:
         services.register_cargo(op, code=code, name='Browser synthetic cargo', weight_kg='1', volume_m3='1', destination='yard')
@@ -139,8 +143,8 @@ def main():
             assert not Command.objects.exists()
             assert page.locator('main form[data-command]').count() == 0
             assert page.locator('.comparison section').count() == 2
-            assert page.locator('main tbody tr').count() == 3
-            assert all(page.locator('main tbody tr').nth(i).locator('td').last.inner_text().strip() for i in range(3))
+            assert page.locator('.move-table tbody tr').count() == 3
+            assert all(page.locator('.move-table tbody tr').nth(i).locator('td').last.inner_text().strip() for i in range(3))
             result['checks'].append('UI cargo registration, query-preserving pagination, OUTBOUND registration, READY three moves, arm labels, observed/projected separation, execution closed')
             visit(page, '/field/new/')
             submit(page, dict(order=inbound.pk, vehicle_id='browser-vehicle', assigned_to=users['field1'].pk))
@@ -225,7 +229,7 @@ def main():
                 visit(viewport, f'/plans/{plan.pk}/')
                 capture(viewport, name + '-plan.png')
                 viewport.reload()
-                assert viewport.locator('main tbody tr').count() == 3
+                assert viewport.locator('.move-table tbody tr').count() == 3
                 visit(viewport, '/requests/')
                 viewport.go_back()
                 assert f'/plans/{plan.pk}/' in viewport.url
@@ -248,8 +252,28 @@ def main():
                 assert viewport.goto(origin + '/requests/').url.startswith(origin + '/accounts/login/')
                 viewport.close()
             admin_page = browser.new_page()
+            admin_errors = []
+            admin_page.on('pageerror', lambda error: admin_errors.append(str(error)))
+            admin_page.on('console', lambda message: admin_errors.append(message.text) if message.type == 'error' else None)
+            admin_page.on('requestfailed', lambda request: admin_errors.append(request.url + ': ' + str(request.failure)))
             login(admin_page, 'admin')
             visit(admin_page, '/settings/')
+            visit(admin_page, '/admin/auth/user/add/')
+            admin_page.locator('#id_username').fill('browser-added-user')
+            admin_page.locator('#id_password1').fill(password)
+            admin_page.locator('#id_password2').fill(password)
+            admin_page.locator('input[name="_save"]').click()
+            admin_page.wait_for_load_state('networkidle')
+            added = User.objects.get(username='browser-added-user')
+            visit(admin_page, f'/admin/auth/user/{added.pk}/change/')
+            admin_page.locator('#id_groups_from').select_option(str(Group.objects.get(name='viewer').pk))
+            admin_page.locator('#id_groups_add').click()
+            admin_page.locator('input[name="_save"]').click()
+            admin_page.wait_for_load_state('networkidle')
+            assert added.groups.filter(name='viewer').exists()
+            assert not added.groups.filter(name='operator').exists()
+            assert not admin_errors, admin_errors
+            result['checks'].append('Staff plus explicit admin creates a team account and assigns viewer via real admin UI; no implicit operator; no admin CSP/console errors')
             assert page.request.get(origin + '/settings/').status == 403
             result['checks'].append('Four viewports, nav/Escape/focus, styles, labels, direct/reload/back, invalid retention, images/favicon, server role checks and POST logout')
             browser.close()

@@ -37,4 +37,14 @@ Django 선택 웹 계층에 명시적 역할, 화물/요청/관측 원본/불변
 
 운영 인증 관측/배치·관련 팔 전체의 업무 근거 producer, 모든 이동의 설치 binding, 입고 planner, Fleet 위임/교차 신원 TRIP 계약, 현장 장치·LAN/TLS 수용은 남은 게이트다. 실제 단일 ARM HTTP simulation이 통과해도 이 전체를 수용한 것은 아니다. 복원된 새 제출은 보호된 상태로 남으며 외부 대조·운영 복구 절차 전 자동 개방하지 않는다.
 
+## 전체 검토 뒤 보강
+
+`b12589a` 전체 검토에서 같은 요청을 재계획해 불명 실행을 새 key로 우회하는 결손과 과거 지시 내용 소실을 발견했다. 한 요청에 하나의 실행 원본을 DB 제약으로 묶고, 중복된 기존 자료는 삭제하지 않고 migration을 거절한다. 변경 전후·계획 당시 요청/큐 snapshot을 불변으로 저장한다. 요청/관측 변경과 제출 판단의 공유 잠금, 새 관측 revision의 이전 계획 차단도 회귀 시험으로 검증했다. 수정 후 전체 Django **72개 수행·통과**, 독립 검토의 관련53개 및 추가 revision 검사1개도 통과했다.
+
+첫 실제 test-PC의 `b12589a` 실행은 실제 Fleet/독립 승인·관측/합성 UDS owner를 통해 정확히 한 SubmitAction과 GetAction, PRE_DISPATCH/POST_ACTION 근거를 만들었으나 **하네스에 남아 있던 잘못된 두 digest 동일성 검사로 실패**했다. 이 결과를 통합 통과로 세지 않는다. 기존 ADR0006에 맞게 시험을 고치고 새 commit에서 다시 실행한다. 앱은 receipt까지 도달했으며 업무 완료는 여전히 WAITING이었다.
+
+마지막 browser run은 `runs/product-browser-release/run-9dc55b164bb841ee915f60651419cc5e`에서 **PASSED**다. 기존 네 viewport 동작에 추가해 active staff+명시적 admin이 실제 관리 UI로 계정을 만들고 viewer만 배정했으며 operator는 자동 부여되지 않았다. admin CSP/console 오류도0이다. 계정 UI의 많은 자산 요청을 받도록 개발/시험도 운영과 같은 Waitress 한 프로세스를 사용하고, 기본 favicon 경로를 제공한다. GUI를 임의로 클릭해 통과한 것으로 세지 않고 저장한 실제 계정/권한을 대조했다.
+
+독립 finish review의 fix verdict는 네 지적 모두 해결, **ship(해당 수정 범위)**이다. 이후 업무 원본/이력 보강은 별도 전체 코드 검토와 위72개 시험, 마지막 browser run을 따른다. 개발 preview 초기화도 writer lease 안에서만 수행하며 실행 중 두 번째 초기화가 장부를 쓰기 전에 거절되는 것을 확인했다.
+
 CE: 해당 없음 — 새로 발견한 소프트웨어 경계/Windows 동작의 이유와 회귀는 최종 코드·시험·본 검증 기록에 보존된다. 실물 장치나 운영 장애를 해결한 사실로 기록하지 않는다.

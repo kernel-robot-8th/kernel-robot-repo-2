@@ -12,6 +12,7 @@ from django.utils import timezone
 from harbor.model import Bay, CargoHolding, YardSnapshot, PortConstraints, OutboundRequest, aware_time
 from harbor.outbound import plan_outbound, OutboundProposal
 from harbor_web.auth import has_role
+from harbor_web.coordination import serialized
 from harbor_web.models import (clean_text, Cargo, Condition, Observation, Order, Plan, Audit,
                                FieldEpisode, FieldConfirmation, DepartureIntent, Measurement)
 
@@ -114,6 +115,7 @@ def register_condition(actor, *, name, calibration_ref, payload):
     return _save(actor, Condition(created_by=actor, name=name, calibration_ref=calibration_ref, payload=payload), 'condition.register')
 
 
+@serialized
 @transaction.atomic
 def record_observation(actor, *, source_id, source_revision, observed_at, provenance, payload, condition):
     _role(actor, 'admin')
@@ -139,21 +141,38 @@ def _queue_policy(order):
         raise ValidationError('Fixed group sequence must be unique.')
 
 
+def request_snapshot(order):
+    return dict(id=order.pk, cargo_id=order.cargo_id, cargo_code=order.cargo.code, kind=order.kind,
+        priority_group=order.priority_group, sequence=order.sequence, tie_policy=order.tie_policy,
+        note=order.note, version=order.version)
+
+
+def queue_snapshot():
+    return [request_snapshot(order) for order in Order.objects.select_related('cargo').order_by('pk')]
+
+
+@serialized
 @transaction.atomic
 def create_order(actor, *, cargo, kind, priority_group, sequence, tie_policy, note=''):
     _role(actor, 'operator')
     obj = Order(created_by=actor, cargo=cargo, kind=kind, priority_group=priority_group,
                 sequence=sequence, tie_policy=tie_policy, note=note)
     _queue_policy(obj)
-    return _save(actor, obj, 'order.create')
+    obj.full_clean()
+    obj.save()
+    Audit.objects.create(actor=actor, action='order.create', object_type='Order', object_id=str(obj.pk),
+                         detail={'before': None, 'after': request_snapshot(obj)})
+    return obj
 
 
+@serialized
 @transaction.atomic
 def update_order(actor, *, order_id, expected_version, priority_group, sequence, tie_policy, note=''):
     _role(actor, 'operator')
     obj = Order.objects.get(pk=order_id)
     if obj.version != expected_version:
         raise Conflict('Order changed; reload before editing.')
+    before = request_snapshot(obj)
     for key, value in dict(priority_group=priority_group, sequence=sequence, tie_policy=tie_policy, note=note).items():
         setattr(obj, key, value)
     obj.version += 1
@@ -164,7 +183,8 @@ def update_order(actor, *, order_id, expected_version, priority_group, sequence,
         note=obj.note, version=obj.version, updated_at=timezone.now())
     if not updated:
         raise Conflict('Order changed; reload before editing.')
-    Audit.objects.create(actor=actor, action='order.update', object_type='Order', object_id=str(obj.pk), detail={'version': obj.version})
+    Audit.objects.create(actor=actor, action='order.update', object_type='Order', object_id=str(obj.pk),
+                         detail={'before': before, 'after': request_snapshot(obj)})
     obj.refresh_from_db()
     return obj
 
@@ -174,6 +194,7 @@ def queue_digest():
     return hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
+@serialized
 @transaction.atomic
 def make_plan(actor, *, order_id, expected_version, observation_id, now=None):
     _role(actor, 'operator')
@@ -194,6 +215,8 @@ def make_plan(actor, *, order_id, expected_version, observation_id, now=None):
     result = asdict(proposal)
     # Serialize tuples as JSON lists before returning the same representation as persisted reads.
     result = json.loads(json.dumps(result))
+    result['request_snapshot'] = request_snapshot(order)
+    result['queue_snapshot'] = queue_snapshot()
     projected = {bay.bay_id: list(bay.cargo) for bay in yard.bays}
     for move in proposal.moves:
         projected[move.source].remove(move.cargo_id)

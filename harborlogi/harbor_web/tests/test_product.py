@@ -3,7 +3,7 @@ from django.contrib.auth.models import Group
 from django.test import Client, TestCase
 from django.utils import timezone
 
-from harbor_web.models import Cargo, Order, Plan
+from harbor_web.models import Cargo, Order, Plan, Command
 from harbor_web import services
 
 
@@ -21,6 +21,7 @@ class ProductPagesTests(TestCase):
         from django.contrib.staticfiles import finders
         self.assertIsNotNone(finders.find('tokens.css'))
         self.assertIsNotNone(finders.find('harbor-app-icon-20261023.png'))
+        self.assertRedirects(self.client.get('/favicon.ico'), '/static/harbor-app-icon-20261023.png', status_code=301, fetch_redirect_response=False)
 
     @classmethod
     def setUpTestData(cls):
@@ -76,6 +77,12 @@ class ProductPagesTests(TestCase):
         self.assertContains(response, '관측한 배치')
         self.assertContains(response, '계획 후 예상 배치')
         self.assertNotContains(response, '현재 계획의 인계 요청 준비')
+        command = Command.objects.create(order=order, plan=plan, actor=self.operator, plan_version=1,
+            ledger_identity='test-ledger', fleet_origin='http://127.0.0.1:9999', fleet_principal='test-principal',
+            body_digest='a' * 64, binding={}, state='UNKNOWN')
+        home = self.client.get('/')
+        self.assertContains(home, '제출 결과가 불명입니다')
+        self.assertContains(home, f'/work/{command.pk}/')
         self.assertEqual(self.client.get('/inventory/').status_code, 200)
         self.assertEqual(self.client.get('/settings/').status_code, 403)
         self.client.force_login(self.admin)

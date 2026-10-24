@@ -27,13 +27,8 @@ def main():
     try:
         if configured:
             acquire_registry()
-        if settings.MODE == 'live':
-            from waitress import serve
-            serve(application, host='127.0.0.1', port=args.port)
-        else:
-            from wsgiref.simple_server import make_server
-            with make_server('127.0.0.1', args.port, application) as server:
-                server.serve_forever()
+        from waitress import serve
+        serve(application, host='127.0.0.1', port=args.port, threads=4)
     finally:
         registry_close()
         lease.__exit__()

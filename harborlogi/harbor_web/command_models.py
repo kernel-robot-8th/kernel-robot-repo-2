@@ -18,6 +18,7 @@ class Command(models.Model):
     objects = CommandQuerySet.as_manager()
     key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     plan = models.OneToOneField('Plan', on_delete=models.PROTECT)
+    order = models.OneToOneField('Order', on_delete=models.PROTECT)
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     plan_version = models.PositiveIntegerField()
     ledger_identity = models.CharField(max_length=256)
@@ -38,7 +39,7 @@ class Command(models.Model):
             kwargs['force_insert'] = True
         else:
             old = type(self).objects.get(pk=self.pk)
-            immutable = ('key', 'plan_id', 'actor_id', 'plan_version', 'ledger_identity', 'fleet_origin',
+            immutable = ('key', 'plan_id', 'order_id', 'actor_id', 'plan_version', 'ledger_identity', 'fleet_origin',
                          'fleet_principal', 'body_digest', 'binding')
             if any(getattr(old, name) != getattr(self, name) for name in immutable):
                 raise ValidationError('Prepared command identity is immutable.')
