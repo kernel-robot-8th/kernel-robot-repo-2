@@ -75,13 +75,24 @@ class RosyClient:
         return self._request("GET", "/api/fleet/trip-jobs?request_key=" + quote(request_key, safe=""), None)
 
     def propose_arm(self, binding, *, request_key):
-        return self._request("POST", "/api/fleet/arm-transfers/jobs", binding.proposal_request(request_key))
+        return self._arm_response(self._request("POST", "/api/fleet/arm-transfers/jobs", binding.proposal_request(request_key)))
+
+    def _arm_response(self, result):
+        principal = getattr(self, 'expected_principal', None)
+        if principal is not None and result.get('job', {}).get('proposal_principal_id') != principal:
+            raise ValueError('Fleet proposal principal differs')
+        return result
 
     def arm_job(self, mission_id):
-        return self._request("GET", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe=""), None)
+        return self._arm_response(self._request("GET", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe=""), None))
 
     def arm_request(self, request_key):
-        return self._request("GET", "/api/fleet/arm-transfers/jobs?request_key=" + quote(request_key, safe=""), None)
+        return self._arm_response(self._request("GET", "/api/fleet/arm-transfers/jobs?request_key=" + quote(request_key, safe=""), None))
 
     def physical_receipt(self, mission_id):
         return self._request("GET", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/physical-receipt", None)
+
+    def cancel_arm(self, mission_id, *, reason):
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 192 or any(ord(c) < 32 for c in reason):
+            raise ValueError('Expected a short cancellation reason')
+        return self._request('POST', '/api/fleet/arm-transfers/jobs/' + quote(mission_id, safe='') + '/cancel', {'reason': reason})

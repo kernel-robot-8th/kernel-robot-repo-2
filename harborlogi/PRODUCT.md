@@ -8,7 +8,7 @@
 
 web
 
-사용자 확인(2026-10-25): 관제 PC 중심 + 현장 태블릿 보조, 브라우저 웹앱. 첫 구현은 Python 표준 WSGI + HTML/CSS/JavaScript의 로컬 조회 앱이다. [실행 안내](docs/web-workbench.md). 운영 framework·배포·로그인과 LAN 태블릿 연결은 미확정이다.
+사용자 확인(2026-10-25): 관제 PC 중심 + 현장 태블릿 보조 브라우저 웹앱, 팀 자체 계정과 역할 권한. 새 제품 웹은 Django 기반 서버 템플릿과 영속 업무 데이터로 구현한다. [제품 웹 실행 안내](docs/product-web.md). 기존 표준 WSGI 조회 preview는 별도로 유지한다. 실제 LAN/TLS 설치와 현장 수용은 후속이다.
 
 ## Users
 
@@ -26,8 +26,8 @@ HarborLogi 프로젝트의 업무 앱 Harbor는 양하 이후 장치와 재취�
 
 ## Capabilities and Constraints
 
-- Python CLI·계획 로직·SQLite 업무 장부·표준 HTTP 클라이언트와 로컬 조회 웹 서버/UI가 구현돼 있다. 운영 로그인·RBAC·업무 쓰기·현장 태블릿 배포는 아직 없다.
-- 합성 재고·반출 계획 페이지는 기존 `plan_outbound`로 재취급/반출/복귀와 공간/관측 HOLD를 계산한다. 실제 재고 source와 출고 순위 정책은 미연동이며 단일 목표 preview를 전체 순위 집행이나 해법 비교의 수용으로 표시하지 않는다.
+- Python domain·계획·기존 SQLite 업무 장부·Fleet HTTP client를 유지하고 Django 계정/명시적 역할·화물/요청·관측 원본·불변 계획·실행 intent·현장 회차·감사/비교를 구현한다. 최종 수용은 실제 검증 기록과 남은 계약 게이트를 따른다.
+- 저장한 요청 우선순위 그룹/허용 순서와 관측 revision으로 기존 `plan_outbound`를 호출한다. 실제 인증 재고/업무 근거 producer·입고 planner와 모든 단계의 설치 binding은 남은 운영 게이트다. fixture 비교를 현장 성능 수용으로 표시하지 않는다.
 - 계획은 실행 허가가 아니며, Action 성공과 물리 receipt도 업무 완료 전체를 뜻하지 않는다.
 - 업무 완료는 반출대 내려놓기, 재취급 화물의 유효 위치 복귀, 관련 팔 퇴피를 모두 대조한다.
 - 공급암 S 퇴피 확인은 Pinky의 출발 업무 조건이다. 사람이 확인하는 초기 방식과 로봇의 실행·안전 허가는 구별한다.
@@ -36,13 +36,13 @@ HarborLogi 프로젝트의 업무 앱 Harbor는 양하 이후 장치와 재취�
 
 ## Brand Commitments
 
-Harbor/HarborLogi 이름과 컨테이너 H 아이콘을 유지한다. 기존 브랜드 자산은 네이비·청록·오렌지·아이보리를 사용한다. 상세 색상·서체·화면 디자인 시스템은 아직 확정하지 않았다. 컨셉 이미지를 실제 장비 사진이나 실측 배치로 표시하지 않는다.
+Harbor/HarborLogi 이름과 컨테이너 H 아이콘을 유지한다. 기존 브랜드 자산은 네이비·청록·오렌지·아이보리를 사용한다. 화면은 기존 Operate 시각 체계와 채택된 124개 토큰을 계승하며 DESIGN.md에 기록한다. 컨셉 이미지를 실제 장비 사진이나 실측 배치로 표시하지 않는다.
 
-[디자인 철학](docs/design/07-design-foundation.md)은 ‘현재 업무와 다음 판단이 분명한 관제’다. [의미별 토큰 정본](design/tokens.json)에서 CSS를 생성하고 로컬 운영 현황·업무·사용 안내에 적용한다. [DESIGN.md](DESIGN.md)는 구현 기록이다. 재고·장비·감사 메뉴와 운영 사용자 수용은 후속이며 현재 지원이 없는 메뉴를 완성된 기능처럼 노출하지 않는다.
+[디자인 철학](docs/design/07-design-foundation.md)은 ‘현재 업무와 다음 판단이 분명한 관제’다. [의미별 토큰 정본](design/tokens.json)에서 CSS를 생성하고 로컬 운영 현황·업무·사용 안내에 적용한다. [DESIGN.md](DESIGN.md)는 구현 기록이다. 인증된 제품 웹은 화물·요청, 재고 원본·계획, 작업, 현장 확인, 기록·검증, 관리자 설정을 구현했다. 장비 운영은 Fleet 소유다. 최종 수용은 진행 중이며 실제 운영 관측 producer, 모든 이동 단계의 설치 binding, 현장 UAT와 LAN/TLS 설치 검증이 남았다.
 
 ## Evidence on Hand
 
-[ADR0005](docs/adr/0005-harbor-rosy-responsibility-map.md), [ADR0006](docs/adr/0006-neutral-arm-transfer-binding.md), [플랫폼 소비 기준](docs/platform-contract.md), [관측 수용 조건](docs/observation-acceptance.md), [중립 ARM HTTP 검증](docs/validation/2026-10-24-neutral-arm-http.md), [브랜드 자산](assets/brand/README.md). 운영 화면·실사용자 UX 시험·인증된 실제 관측은 확보하지 않았다.
+[ADR0005](docs/adr/0005-harbor-rosy-responsibility-map.md), [ADR0006](docs/adr/0006-neutral-arm-transfer-binding.md), [플랫폼 소비 기준](docs/platform-contract.md), [관측 수용 조건](docs/observation-acceptance.md), [중립 ARM HTTP 검증](docs/validation/2026-10-24-neutral-arm-http.md), [브랜드 자산](assets/brand/README.md). 제품 화면과 브라우저 검증 자료를 확보했다. 실제 사용자 수용과 인증된 운영 관측은 남은 게이트다.
 
 ## Product Principles
 
@@ -55,4 +55,4 @@ PC 진입의 기준은 사용자 확정대로 조치가 필요한 업무와 막�
 
 ## Open Decisions
 
-운영 framework·배포/인증 방식, 실제 사용자 조직과 권한, 운영 관측 전달 계약, Fleet의 ARM 승인 화면, 실제 장치/화면 크기·현장 사용성은 미확정이다. 다음 설계 문서의 추천안을 사용자 결정으로 기록하지 않는다.
+팀 자체 계정·역할 방식은 확정됐고 기술 계층은 ADR0007을 따른다. 실제 사용자 조직/겸임, 운영 관측 전달 계약, Fleet ARM 승인 화면과 신원 대응, 현장 네트워크/TLS·장치 수용은 남았다. 기술 추천과 실제 사용자 결정을 구분한다.

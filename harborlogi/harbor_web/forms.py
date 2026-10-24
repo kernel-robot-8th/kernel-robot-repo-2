@@ -1,0 +1,108 @@
+from django import forms
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from harbor_web.models import Cargo, Condition, Measurement, Observation, Order
+
+
+class CargoForm(forms.ModelForm):
+    def clean_code(self):
+        code = self.cleaned_data['code']
+        if Cargo.objects.filter(code=code).exists():
+            raise forms.ValidationError('이미 등록된 화물 ID입니다. 기존 화물의 연결된 요청을 확인하거나 다른 ID를 입력하세요.')
+        return code
+
+    class Meta:
+        model = Cargo
+        fields = ['code', 'name', 'weight_kg', 'volume_m3', 'destination']
+        labels = dict(code='화물 ID', name='화물 이름', weight_kg='중량 (kg)', volume_m3='부피 (m³)', destination='목적지')
+        help_texts = dict(code='등록 뒤에도 원래 ID를 유지합니다. 실제 위치는 관측으로 확인합니다.')
+
+
+class OrderForm(forms.ModelForm):
+    class Meta:
+        model = Order
+        fields = ['cargo', 'kind', 'priority_group', 'sequence', 'tie_policy', 'note']
+        labels = dict(cargo='화물', kind='요청 종류', priority_group='우선순위 그룹', sequence='그룹 안 순서', tie_policy='동순위 처리', note='요청 메모')
+        widgets = {'note': forms.Textarea(attrs={'rows': 3})}
+        help_texts = dict(priority_group='작은 그룹부터 검토합니다.', sequence='순서 고정 그룹에서 작은 값부터 처리합니다.')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['kind'].choices = [('INBOUND', '입고'), ('OUTBOUND', '반출')]
+        self.fields['tie_policy'].choices = [('FIXED', '순서 고정'), ('ANY', '같은 그룹 안에서 선택 허용')]
+
+
+class PriorityForm(forms.Form):
+    expected_version = forms.IntegerField(widget=forms.HiddenInput)
+    priority_group = forms.IntegerField(label='우선순위 그룹', min_value=1)
+    sequence = forms.IntegerField(label='그룹 안 순서', min_value=1)
+    tie_policy = forms.ChoiceField(label='동순위 처리', choices=[('FIXED', '순서 고정'), ('ANY', '그룹 안 선택 허용')])
+    note = forms.CharField(label='변경 메모', max_length=500, required=False, widget=forms.Textarea(attrs={'rows': 3}))
+
+
+class PlanForm(forms.Form):
+    expected_version = forms.IntegerField(widget=forms.HiddenInput)
+    observation = forms.ModelChoiceField(label='검토할 관측 원본', queryset=Observation.objects.none(), empty_label='관측을 선택하세요')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        recent = Observation.objects.order_by('-id').values('pk')[:100]
+        self.fields['observation'].queryset = Observation.objects.filter(pk__in=recent).select_related('condition').order_by('-id')
+        self.fields['observation'].label_from_instance = lambda item: f'{item.source_id} / {item.source_revision} · {item.observed_at:%m-%d %H:%M} · {item.provenance}'
+
+
+class ConditionForm(forms.ModelForm):
+    class Meta:
+        model = Condition
+        fields = ['name', 'calibration_ref', 'payload']
+        labels = dict(name='설치 기준 이름', calibration_ref='보정·검증 기록 참조', payload='이동·도달 조건 (JSON)')
+        widgets = {'payload': forms.Textarea(attrs={'rows': 15, 'spellcheck': 'false'})}
+        help_texts = {'payload': 'outbound_stand, temporary_bays, allowed_moves, max_observation_age_seconds, conveyor, arm_reach의 6개 필드가 필요합니다. 등록은 실행 허가나 compile 검증을 뜻하지 않습니다.'}
+
+
+class ObservationForm(forms.ModelForm):
+    class Meta:
+        model = Observation
+        fields = ['condition', 'source_id', 'source_revision', 'observed_at', 'provenance', 'payload']
+        labels = dict(condition='설치 조건', source_id='원본 출처', source_revision='출처 revision', observed_at='관측 시각', provenance='자료 구분', payload='관측 원본 (JSON)')
+        widgets = {'observed_at': forms.DateTimeInput(attrs={'type': 'datetime-local'}, format='%Y-%m-%dT%H:%M'), 'payload': forms.Textarea(attrs={'rows': 12, 'spellcheck': 'false'})}
+        help_texts = {'payload': 'bays와 holdings만 받습니다. cargo 순서는 아래→위입니다. 이 수동 등록은 인증된 운영 관측으로 승격되지 않습니다.'}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['provenance'].choices = [('DECLARED', '수동 등록 자료 · 인증 미확인')]
+        if settings.MODE != 'live':
+            self.fields['provenance'].choices.append(('SYNTHETIC', '합성 시험 자료'))
+
+
+class EpisodeForm(forms.Form):
+    order = forms.ModelChoiceField(label='입고 요청', queryset=Order.objects.none())
+    vehicle_id = forms.CharField(label='대상 차량 ID', max_length=96)
+    assigned_to = forms.ModelChoiceField(label='현장 확인 담당', queryset=get_user_model().objects.none())
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['order'].queryset = Order.objects.filter(kind='INBOUND').select_related('cargo')
+        self.fields['order'].label_from_instance = lambda item: f'요청 #{item.pk} · {item.cargo.code}'
+        self.fields['assigned_to'].queryset = get_user_model().objects.filter(is_active=True, groups__name='field').distinct()
+
+
+class ConfirmForm(forms.Form):
+    expected_version = forms.IntegerField(widget=forms.HiddenInput)
+    observed_at = forms.DateTimeField(label='직접 확인한 시각', widget=forms.DateTimeInput(attrs={'type': 'datetime-local'}, format='%Y-%m-%dT%H:%M'), help_text='현재 시각 기준 5분 이내의 직접 확인만 제출하세요.')
+    outcome = forms.ChoiceField(label='확인 결과', choices=[('CLEAR', 'S가 이 차량의 적재면을 비웠음'), ('MISMATCH', '대상 또는 상태가 일치하지 않음'), ('UNABLE', '현재 확인할 수 없음')], widget=forms.RadioSelect)
+
+
+class MeasurementForm(forms.ModelForm):
+    class Meta:
+        model = Measurement
+        fields = ['label', 'scenario', 'conditions_ref', 'initial_layout_ref', 'information_ref', 'method', 'baseline_reach_verified', 'provenance', 'source_ref', 'vehicle_transfers', 'human_interventions', 'elapsed_seconds']
+        labels = dict(label='측정 자료 이름', scenario='시나리오 ID', conditions_ref='실행 조건 참조', initial_layout_ref='초기 배치 참조', information_ref='정보 제공 시각·버전 참조', method='비교 방식', baseline_reach_verified='한 팔 기준의 실제 도달 가능성을 검증했음', provenance='자료 구분', source_ref='측정 원본 참조', vehicle_transfers='추가 차량 이송·왕복 수', human_interventions='사람 개입 수', elapsed_seconds='소요 시간 (초)')
+        help_texts = {'vehicle_transfers': '미측정이면 비워 두세요. 실제 0회와 구분합니다.'}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['method'].choices = [('BASELINE', '한 팔 기준'), ('COLLABORATIVE', '협업 방식')]
+        self.fields['provenance'].choices = [('MEASURED', '원본이 있는 측정 자료')]
+        if settings.MODE != 'live':
+            self.fields['provenance'].choices.append(('SYNTHETIC', '합성 시험 자료'))

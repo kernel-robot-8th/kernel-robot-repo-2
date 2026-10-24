@@ -42,24 +42,29 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--transport-only', action='store_true', help='Verify neutral TRIP without the Cell compiler')
     mode.add_argument('--arm-only', action='store_true', help='Verify neutral ARM with an independent observer and real UDS')
+    mode.add_argument('--web-arm-only', action='store_true', help='Verify authenticated Django over actual Fleet HTTP')
+    parser.add_argument('--app-python', type=Path, help='Isolated Harbor/web Python interpreter')
     args = parser.parse_args(argv)
+    if args.web_arm_only and args.app_python is None:
+        parser.error('--web-arm-only requires --app-python')
     app_root = Path(__file__).resolve().parents[2]
     app_sha = app_checkout(app_root)
     platform_sha = verify_checkout(args.platform_root, args.platform_sha)
     sys.path.insert(0, str(app_root))
     # Loaded by path only here: the harness needs the platform's test dependencies.
-    source = Path(__file__).resolve().parent / ('arm_fleet_harness.py' if args.arm_only else 'fleet_harness.py')
+    source = Path(__file__).resolve().parent / ('arm_fleet_harness.py' if (args.arm_only or args.web_arm_only) else 'fleet_harness.py')
     spec = importlib.util.spec_from_file_location('harbor_fleet_harness', source)
     harness = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(harness)
     # Windows keeps the in-process Fleet SQLite file open after stop; a leftover temp dir must not mask the result.
     with tempfile.TemporaryDirectory(prefix='harbor-http-integration-', ignore_cleanup_errors=True) as temporary:
-        fleet = (harness.ArmFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet') if args.arm_only else
+        request_key_path = Path(temporary) / 'request-key' if args.web_arm_only else None
+        fleet = (harness.ArmFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet', request_key_path=request_key_path) if (args.arm_only or args.web_arm_only) else
                  harness.RealFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet', transport_only=args.transport_only))
         try:
             fleet.start()
             ref, artifact = {}, None
-            if not args.transport_only and not args.arm_only:
+            if not args.transport_only and not args.arm_only and not args.web_arm_only:
                 ref = next(iter(fleet.transfers.values()))
                 with fleet.client() as client:
                     response = client.post('/api/fleet/cell-app/compile', json=ref)
@@ -76,21 +81,25 @@ def main(argv=None):
                 'candidates': [harness.ROBOT], 'steps': [{'to': 'inbound'}],
                 'alternate_steps': [{'to': 'outbound'}],
             }
-            if args.arm_only:
+            if args.arm_only or args.web_arm_only:
                 config = {'schema': 'harbor.arm-http-test/1', 'simulation': True, 'origin': fleet.url,
                     'operator': fleet.tokens['operator'], 'viewer': fleet.tokens['viewer'],
                     'platform_sha': platform_sha, 'app_sha': app_sha,
                     'binding': {'cargo_id': 'synthetic-outbound', 'source': 'yard', 'destination': 'stand',
                         'workcell_id': harness.WORKCELL, 'instance_id': harness.INSTANCE, 'object_ref': 'object-1',
                         'source_ref': 'source', 'target_ref': 'target'}}
+            if args.web_arm_only:
+                config['schema'] = 'harbor.web-arm-http-test/1'
+                config['request_key_path'] = str(request_key_path)
+                config.pop('viewer')
             path = Path(temporary) / 'http-test.json'
             path.write_text(json.dumps(config), encoding='utf-8')
             path.chmod(0o600)
             env = dict(os.environ, HARBOR_INTEGRATION='1', HARBOR_INTEGRATION_CONFIG=str(path))
             env.pop('PYTHONPATH', None)
             print(f'Platform {platform_sha}; Harbor (with harness) {app_sha}', flush=True)
-            pattern = 'arm_http.py' if args.arm_only else 'transport_http.py' if args.transport_only else 'test_real_fleet_http.py'
-            return subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests/integration', '-p', pattern, '-v'],
+            pattern = 'product_web_http.py' if args.web_arm_only else 'arm_http.py' if (args.arm_only or args.web_arm_only) else 'transport_http.py' if args.transport_only else 'test_real_fleet_http.py'
+            return subprocess.run([str(args.app_python) if args.app_python else sys.executable, '-m', 'unittest', 'discover', '-s', 'tests/integration', '-p', pattern, '-v'],
                                   cwd=app_root, env=env, timeout=180).returncode
         finally:
             fleet.stop()

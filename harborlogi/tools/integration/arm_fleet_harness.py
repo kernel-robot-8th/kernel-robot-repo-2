@@ -79,8 +79,9 @@ class SyntheticStops:
 
 
 class ArmFleet:
-    def __init__(self, *, root, workdir):
+    def __init__(self, *, root, workdir, request_key_path=None):
         self.root, self.workdir = Path(root), Path(workdir)
+        self.request_key_path = Path(request_key_path) if request_key_path else None
         self.tokens = {name: secrets.token_urlsafe(40) for name in ("operator", "viewer", "approver")}
         self.observer_token = secrets.token_urlsafe(40)
         self.url = f"http://127.0.0.1:{_free_port()}"
@@ -197,12 +198,19 @@ class ArmFleet:
 
     def _approve_and_observe(self):
         approved, observed, sequence = False, self.observed, 0
+        request_key = None if self.request_key_path else "neutral-arm-http:0"
         try:
             with self.client() as proposer, self.client("approver") as approver, httpx.Client(
                     base_url=self.url, headers={"X-Physical-Observation-Token": self.observer_token}, timeout=5) as observer:
                 while not self.stopped.wait(.05):
+                    if request_key is None:
+                        if not self.request_key_path.exists():
+                            continue
+                        request_key = self.request_key_path.read_text(encoding="utf-8").strip()
+                        if not request_key.startswith("harbor:") or not request_key.endswith(":0"):
+                            raise ValueError("invalid web request key")
                     if not approved:
-                        response = proposer.get("/api/fleet/arm-transfers/jobs", params={"request_key": "neutral-arm-http:0"})
+                        response = proposer.get("/api/fleet/arm-transfers/jobs", params={"request_key": request_key})
                         if response.status_code == 200:
                             job = response.json()["job"]
                             generation = approver.get("/api/fleet/dispatch-control").json()["generation"]

@@ -8,7 +8,7 @@ HarborLogi의 항만 업무 앱이다. 선적 순서가 바뀌었을 때 묻힌 
 
 ## 빠른 시작
 
-Python 3.10 이상이면 되고, 런타임 외부 의존성은 없다.
+Python 3.10 이상. domain·CLI·기존 조회 preview는 표준 라이브러리만 사용한다. 계정과 영속 업무를 가진 제품 웹은 선택 의존성 `.[web]`을 설치한다.
 
 ```bash
 cd harborlogi
@@ -35,11 +35,13 @@ python -m harbor
 
 ## 웹 작업 관제
 
-`python -m harbor.web --demo --port 8050` 후 같은 PC의 `http://127.0.0.1:8050/overview`를 연다. 기존 이미지·테마와 의미별 토큰을 적용한 조치 필요 운영 현황, 업무 목록·개요·계획·실행/근거를 확인한다. 실제 장부와 ROSY ARM job·receipt 연결은 [웹 실행 안내](docs/web-workbench.md)를 따른다. 현재는 로컬 조회 단계이며 로그인·업무 쓰기·현장 태블릿 배포는 후속이다.
+계정/역할·화물/요청·관측/계획·작업 인계·현장 확인·기록/비교를 가진 새 웹은 [제품 웹 안내](docs/product-web.md)를 따른다. 로컬 검토는 `runs/web-venv/Scripts/python.exe tools/product_preview.py`와 `http://127.0.0.1:8060/`이다. 합성 개발 자료이며 운영 관측/전체 장치 수용은 별도다.
+
+기존 `python -m harbor.web --demo --port 8050`과 `http://127.0.0.1:8050/overview`는 호환용 로컬 조회 preview다. 실제 장부와 ROSY ARM job·receipt 읽기는 [조회 웹 안내](docs/web-workbench.md)를 따른다. 이 preview는 계정이나 업무 쓰기를 제공하지 않는다.
 
 ## Harbor와 ROSY의 경계
 
-재고·반출 계획은 demo의 `/planning`에서 검토한다. 기존 계획 엔진으로 재취급→반출→복귀 또는 공간/관측 HOLD를 계산한다. 실제 재고 source·순위 지시·입고 접수·실행·이력·비교 전체를 구현한 것은 아니다.
+제품 웹은 저장된 요청·관측 revision으로 기존 계획 엔진의 재취급→반출→복귀 또는 공간/관측 HOLD를 계산한다. 기존 preview의 `/planning`은 고정 합성 입력이다. 실제 인증 관측 producer·입고 planner·전체 공정/현장 수용은 미완료이며 물리 receipt만으로 전체 업무를 완료하지 않는다.
 
 | Harbor가 하는 일 | ROSY가 하는 일 |
 |---|---|

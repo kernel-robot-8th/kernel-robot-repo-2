@@ -95,6 +95,7 @@ class ArmTransferBinding:
         for key in ("authority_epoch", "dispatch_generation", "validated_at_ns"):
             if type(receipt.get(key)) is not int or not 0 <= receipt[key] < 2**63:
                 raise ValueError("Physical receipt requires exact counters")
+        # Receipt request_digest identifies the full grant; job request_digest identifies the transfer body (ADR 0006).
         for key in ("request_digest", "policy_digest", "evidence_digest"):
             if not isinstance(receipt.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", receipt[key]):
                 raise ValueError("Invalid physical receipt digest")

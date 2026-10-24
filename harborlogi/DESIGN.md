@@ -1,6 +1,6 @@
 ---
 name: Harbor
-description: Local read-only workbench for Harbor business records and ROSY execution evidence.
+description: Authenticated Harbor product web for business requests, planning and execution evidence.
 colors:
   navy: "#102e40"
   ink: "#183748"
@@ -123,13 +123,14 @@ Harbor는 사용자가 맡은 화물의 진행, 막힌 이유, 필요한 근거�
 - 전역 메뉴·업무 선택·업무 탭의 세 층 탐색.
 - 상태 색과 문구, 출처와 조회 범위를 함께 표시.
 
-**적용 상태와 정본:** 이 문서는 로컬 조회 앱에 구현된 디자인의 추출 기록이다. [design/tokens.json](design/tokens.json)의 124개 primitive→semantic→component 토큰이 런타임 값의 정본이며, [생성 도구](tools/design_tokens.py)가 [tokens.css](harbor/web_assets/tokens.css)를 만든다. Frontmatter는 DESIGN.md 도구를 위한 현재 값의 기록이며 별도 편집 원본이 아니다. 토큰을 변경하면 생성 CSS와 이 기록을 함께 갱신한다. Sidecar는 확장 메타데이터와 현재 CSS 변수에 연결한 패널 예제를 담는다.
+**적용 상태와 정본:** 이 문서는 인증된 Django 제품 웹과 별도로 유지하는 로컬 조회 preview의 구현 기록이다. [design/tokens.json](design/tokens.json)의 124개 primitive→semantic→component 토큰이 런타임 값의 정본이며, [생성 도구](tools/design_tokens.py)가 [tokens.css](harbor/web_assets/tokens.css)를 만든다. Frontmatter는 DESIGN.md 도구를 위한 현재 값의 기록이며 별도 편집 원본이 아니다. 토큰을 변경하면 생성 CSS와 이 기록을 함께 갱신한다. Sidecar는 확장 메타데이터와 현재 CSS 변수에 연결한 패널 예제를 담는다.
 
 - [디자인 철학](docs/design/07-design-foundation.md), [네비게이션](docs/design/08-navigation.md), [토큰·패턴 계약](docs/design/09-tokens-and-patterns.md): 제품 기준과 후속 범위.
 - [페이지 구현 계획](docs/design/10-navigation-pages-plan.md), [재고·반출 계획 페이지](docs/design/11-retrieval-planning-page.md), [PRODUCT.md](PRODUCT.md), [브랜드 자산](assets/brand/README.md): 맥락과 범위.
-- 구현 근거: `harbor/web_assets/{index.html,app.css,app.js,tokens.css}`.
+- 제품 웹 근거: `harbor_web/templates/`, `harbor_web/static/harbor_web/{product.css,product.js}`, `harbor_web/urls_product.py`. 기존 조회 preview 근거: `harbor/web_assets/{index.html,app.css,app.js,tokens.css}`.
+- 역할별 화면 계약: [제품 웹 화면·동작 계약](docs/design/13-product-web-surface.md).
 
-현재 구현은 운영 현황·업무·도움말과 데모 전용 재고·반출 계획을 제공하는 로컬 읽기 전용 앱이다. 데모와 실제 Fleet 조회 어댑터의 경계는 유지한다. 운영 인증·RBAC·업무 쓰기·LAN 태블릿 배포·실물 수용은 이 디자인 기록의 완료 범위에 포함하지 않는다.
+인증된 제품 웹은 팀 계정·명시적 역할, 영속 화물/요청, 관측 원본 등록, 불변 계획, 실행 intent, 현장 회차와 감사/비교 화면을 구현했다. 최종 수용은 진행 중이며 실제 운영 관측 producer, 모든 이동 단계의 설치 binding, 현장 UAT와 LAN/TLS 설치가 남은 게이트다. 기존 읽기 전용 preview의 합성 계획·Fleet 조회 범위는 별도로 유지한다. 기존 Operate 화면의 FORM을 확장했으므로 concept-seed/comp 선택과 새 raster 생성은 적용하지 않았다. 생성기 실패나 사용 불가를 의미하지 않는다.
 
 ## Colors
 
@@ -153,17 +154,17 @@ Harbor는 사용자가 맡은 화물의 진행, 막힌 이유, 필요한 근거�
 
 ## Layout
 
-데스크톱은 desktop 토큰 이상(1280px)에서 전역 메뉴 navigation(200px), 업무 영역의 work-list(280px), 유연한 상세 열을 둔다. Topbar는 topbar(64px) 최소 높이이며 상단에 고정한다. 운영 현황과 도움말은 각각 최대 1440px와 1152px이다. 전역 메뉴는 업무 목록과 별도다. 재고·반출 계획은 최대 1440px에서 상태·이유 요약을 두 열 전체 너비로 먼저 보여 준다. 아래에는 왼쪽 관측·예상 배치, 오른쪽 이동 순서·필요 완료 조건을 두고 desktop 미만에서는 같은 순서로 한 열에 쌓는다. 계획 입력은 대상·합성 조건·미리보기 버튼의 세 열이며 mobile에서는 한 열이다. 논리 장치 칸은 각 영역 안에서 세 열을 유지한다.
+제품 웹은 900px 초과에서 왼쪽 고정 탐색(200px), sticky topbar(64px), 본문 여백(32px)을 사용한다. 본문 최대 폭은 1800px이며 1279px 이하에서는 여백 24px와 facts 두 열을 사용한다. 계정·환경은 topbar에 둔다. 표의 스크롤은 표 영역에 한정한다.
 
-Tablet 토큰 이상부터 desktop 미만(768–1279px)은 drawer 탐색과 목록→상세의 개별 화면을 사용한다. 그 아래는 mobile 한 열이며 근거·도움말 열도 쌓인다. JavaScript가 생성 CSS의 breakpoint 변수를 읽어 body의 layout 상태를 정하고 CSS가 배치한다. 화면 폭은 사용자 역할이나 권한을 바꾸지 않는다.
+900px 이하에서는 메뉴를 본문 위에서 펼치고 접으며 비교 배치는 한 열이다. JavaScript가 없으면 메뉴가 보인다. 제품 웹 메뉴는 modal drawer가 아니다. 600px 이하에서는 본문 여백 16px, 제목·조작의 상하 배치, 전체 폭 검색 필드를 사용한다. 조치 필요 표는 사유와 후속 링크가 있는 행으로 재배치한다. 이동 표는 내부 가로 스크롤을 유지하고 facts는 두 열이다. 버튼·입력은 최소 44px, 현장 결과 버튼은 최소 56px다. 화면 폭은 역할을 바꾸지 않는다.
 
-Desktop의 페이지 기본 inset은 space-8이며 mobile은 가로 space-4·세로 space-6을 사용한다. 간격 scale은 frontmatter의 원본 단계를 따른다. 조작 최소 높이는 control(44px), 좁은 화면의 button/input/select는 touch-control(48px), 업무 행은 row(56px)·touch-row(64px)다. 긴 내용은 최소 높이 이상으로 늘어난다.
+기존 조회 preview는 별도 768/1280px 토큰 breakpoint와 업무 목록/상세, modal drawer 구성을 유지한다. 이 값은 제품 웹의 900/600px 실제 CSS 규칙을 대체하지 않는다. 채택된 124개 토큰과 간격 scale을 재사용하며 제품 웹 breakpoint는 추가 토큰이 아니다.
 
 ## Elevation & Depth
 
 작업면은 평면이며 그림자는 없다. 배경 톤, 구분선과 간격으로 위계를 만든다. Sticky 탐색·topbar와 drawer/backdrop은 primitive-layer 단계로 분리한다. 키보드 포커스는 focus-width와 focus-offset을 사용한다.
 
-Drawer는 navigation duration과 ease 토큰으로 전환하고 reduced motion에서는 reduced 토큰으로 줄인다. Feedback duration은 토큰으로 제공되지만 별도 버튼 애니메이션은 현재 CSS에 적용되지 않았다. 추정 로봇 움직임이나 진행률을 애니메이션으로 만들지 않는다.
+기존 preview drawer는 navigation duration과 ease 토큰으로 전환하고 reduced motion에서는 reduced 토큰으로 줄인다. 제품 웹 메뉴에는 별도 전환 애니메이션이 없다. Feedback duration은 토큰으로 제공되지만 별도 버튼 애니메이션은 현재 CSS에 적용되지 않았다. 추정 로봇 움직임이나 진행률을 애니메이션으로 만들지 않는다.
 
 ## Shapes
 
@@ -173,21 +174,21 @@ Drawer는 navigation duration과 ease 토큰으로 전환하고 reduced motion�
 
 ### Buttons and inputs
 
-주요 버튼은 설정된 Fleet 콘솔로 명시적으로 인계하거나 데모 반출 계획을 미리 계산한다. 보조 버튼은 장부 새로고침·ROSY 상태 재조회·원래 mission ID 복사를 제공한다. Hover는 선택/행동 의미 토큰을, focus는 공통 outline을 사용한다. 비활성 버튼은 disabled 면과 보조 텍스트·wait cursor를 사용한다. 검색과 보기 select는 보이는 label, 조작 최소 높이와 입력 경계를 유지한다.
+제품 웹의 주요 버튼은 역할에 따라 화물·요청 저장, 계획 생성·검토, 지원되는 단계 제안과 현장 확인을 제공한다. 기존 preview의 주요 버튼은 Fleet 콘솔 인계와 합성 계획 미리보기다. 보조 버튼은 장부 새로고침·ROSY 상태 재조회·원래 mission ID 복사를 제공한다. Hover는 선택/행동 의미 토큰을, focus는 공통 outline을 사용한다. 비활성 버튼은 disabled 면과 보조 텍스트·wait cursor를 사용한다. 검색과 보기 select는 보이는 label, 조작 최소 높이와 입력 경계를 유지한다.
 
 ### Navigation and work tabs
 
-전역 메뉴에는 운영 현황(`/overview`)과 업무(`/work`)를 열고 사용 안내(`/help`)는 하단에 둔다. 데모 장부 조회가 가능할 때만 재고·반출 계획(`/planning`)을 추가한다. 실제 모드에는 계획 메뉴와 입력 폼을 숨기며 직접 접근 시 실제 재고 source 미설정 오류를 보여 준다. `/api/planning`은 이때 503을 반환하고 합성 재고로 대체하지 않는다. 별도 실제 재고·장비·기록의 빈 메뉴를 추가하지 않는다. 전역 현재 영역은 `aria-current=page`, 선택 업무는 `aria-current=location`, 업무 탭은 `aria-selected`로 구별한다.
+제품 웹 전역 탐색은 운영 현황(`/`), 화물·요청(`/requests/`), 재고·반출(`/inventory/`), 작업(`/work/`), 기록·검증(`/records/`)이다. 현장 확인(`/field/`)과 설정·계정(`/settings/`)은 역할별로 노출한다. 화물/요청은 영역 내부 링크이며 계획은 요청 상세에서 생성한다. 현재 링크는 `aria-current`로 표시한다. 로그인·로그아웃·비밀번호 변경과 명시적 앱 역할이 구현되어 있다.
 
-업무 상세는 같은 ID의 개요(`/work/{business_id}`), 계획(`/work/{business_id}/plan`), 실행·근거(`/work/{business_id}/execution`)로 이동한다. 탭 방향키·Home/End와 browser 뒤로 가기를 제공한다. 검색·보기는 URL 맥락으로 전달하며 상세가 필터 밖이어도 현재 상세와 안내를 유지한다. 메뉴 drawer는 닫기·Escape·backdrop, 포커스 가두기와 원래 버튼 복귀를 제공한다. 숨은 배경은 inert로 처리한다.
+검색·필터·pagination은 URL 맥락을 유지한다. 폼은 보이는 label, 필드 오류와 입력 보존을 제공한다. 403·409·미연동은 이유와 복귀/재조회 경로를 제공한다. 상세 facts, 펼칠 수 있는 원본, 관측/예상 배치 비교, 이동 표와 실행 조건을 사용한다. 기존 preview의 업무 개요/계획/실행·근거 탭과 키보드 탭 동작은 해당 preview 범위다.
 
 ### Work rows, badges and next check
 
 현재 업무 행은 선택 경계와 연한 면을 함께 사용한다. Badge는 상호작용이 없는 한국어 상태 label이다. 운영 현황은 장부의 SUBMITTING·HOLD·AWAITING_FINAL_EVIDENCE에서 도출 가능한 조치 필요 업무를 보여 주며 WAITING은 별도 대기로 둔다. 담당이 없으면 담당 미지정으로 표시한다. 다음 확인은 현재 판단과 책임을 담는 tonal section이다.
 
-### Synthetic retrieval planning
+### Product planning and separate synthetic preview
 
-재고·반출 계획은 단일 목표 화물과 합성 조건을 선택해 기존 서버 planner의 결과를 읽는 화면이다. 입력 변경 시 이전 결과를 숨기고 재계산을 안내한다. 계산 중 버튼을 비활성화하고 실패는 alert와 미확인 안내로 남긴다. 관측 배치와 계획 후 예상 배치를 별도 제목·설명·출처로 분리한다. 합성 고정 시점·source·revision과 합성 팔 도달 표임을 명시한다.
+제품 웹은 저장한 요청과 선택한 관측 revision으로 불변 계획을 만들고 관측/예상 배치와 단계를 대조한다. DECLARED/SYNTHETIC 등록은 인증 관측이 아니다. 다음 합성 상호작용 설명은 별도 preview 범위다. Preview는 단일 목표 화물과 합성 조건으로 기존 서버 planner 결과를 읽는다. 입력 변경 시 이전 결과를 숨기고 재계산을 안내한다. 계산 중 버튼을 비활성화하고 실패는 alert와 미확인 안내로 남긴다. 관측 배치와 계획 후 예상 배치를 별도 제목·설명·출처로 분리한다. 합성 고정 시점·source·revision과 합성 팔 도달 표임을 명시한다.
 
 칸의 stack은 위에서 아래로 표시하며 화물 ID·단·대상 설명을 붙인다. 반출 대상은 기존 선택 면, 위의 재취급 대상은 기존 주의 면을 사용한다. 이 도식은 논리 배치이며 실제 위치 지도나 도달성 증거가 아니다. 예상 배치는 ‘관측 아님’으로 표시하고 원래 관측 배치는 바꾸지 않는다.
 
@@ -207,6 +208,6 @@ H 아이콘은 `assets/brand/harbor-app-icon-20261023.png`를 `/assets/icon.png`
 - Do derive shared CSS values from design/tokens.json and regenerate tokens.css.
 - Don't present demo data or concept artwork as device evidence.
 - Don't imply that a read, an Action success or a receipt authorizes execution or completes all business checks.
-- Don't present this local workbench as production login, RBAC or physical acceptance.
-- Don't open operational inventory, equipment or history navigation before their data and access contracts exist.
+- Don't equate implemented login and roles with deployment security or field acceptance.
+- Don't present declared inventory, audit records or fixture comparisons as authenticated operational evidence or field performance acceptance.
 - Do label synthetic observed stacks and projected plan results separately; keep HOLD free of partial moves or projected completion.

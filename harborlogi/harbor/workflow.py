@@ -232,6 +232,32 @@ class BusinessLedger:
             raise ValueError("Late proposal response retained for reconciliation; restart HOLD remains")
         return mission_id
 
+    def hold(self, key):
+        with closing(self._connect()) as c, c:
+            c.execute('BEGIN IMMEDIATE')
+            self._row(c, key)
+            c.execute("UPDATE business SET state='HOLD',row_version=row_version+1 WHERE request_key=?", (key,))
+
+    def recover_arm(self, key, client, *, now):
+        aware_time(now)
+        row = self.read(key)
+        payload = _payload(row)
+        if row['state'] != 'HOLD' or payload.get('execution_kind') != 'ARM_TRANSFER':
+            raise ValueError('Only held physical transfers can be recovered')
+        if hashlib.sha256(_json(payload).encode()).hexdigest() != row['digest']:
+            raise ValueError('Saved business body changed')
+        binding = ArmTransferBinding(**payload['moves'][row['step_index']])
+        request_key = f"{key}:{row['step_index']}"
+        job = binding.check(client.arm_request(request_key)['job'], request_key)
+        if row['mission_id'] and row['mission_id'] != job['mission_id']:
+            raise ValueError('Recovered mission identity differs')
+        with closing(self._connect()) as c, c:
+            c.execute('BEGIN IMMEDIATE')
+            self._check_current(c, key, row)
+            c.execute('UPDATE business SET mission_id=?,row_version=row_version+1 WHERE request_key=?',
+                      (job['mission_id'], key))
+        return job
+
     def refresh(self, key, client, *, now):
         aware_time(now)
         row = self.read(key)

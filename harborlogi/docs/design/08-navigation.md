@@ -1,6 +1,6 @@
 # Harbor 정보 구조와 네비게이션
 
-상태: 디자인 기준과 부분 구현. **조치 필요 중심의 PC 첫 화면은 사용자 확정**이다. `/overview`, `/work`, 업무 개요/계획/실행·근거, `/help`를 구현했고 demo에는 `/planning` 합성 재고·반출 계획을 추가했다. 실제 재고 관측·장비·전체 감사는 후속이다. Harbor 화면 URL은 ROSY API 계약이 아니다. 원칙은 [디자인 철학](07-design-foundation.md)을 따른다.
+상태: 기존 조회 preview의 디자인 기준과 탐색 기록. **조치 필요 중심의 PC 첫 화면은 사용자 확정**이다. 계정/영속 입력을 가진 새 제품 웹의 경로·역할·탐색 정본은 [제품 웹 계약](13-product-web-surface.md)이다. 아래 `/overview`, `/work`, `/planning`, `/help`는 8050 조회 preview에 한정되며 새 제품 경로와 혼용하지 않는다. Harbor 화면 URL은 ROSY API 계약이 아니다. 원칙은 [디자인 철학](07-design-foundation.md)을 따른다.
 
 ## 1. 탐색을 세 층으로 구분한다
 
