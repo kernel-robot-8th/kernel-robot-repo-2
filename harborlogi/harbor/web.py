@@ -7,6 +7,7 @@ import ipaddress
 from importlib.metadata import distribution
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 from urllib.error import HTTPError
@@ -149,16 +150,22 @@ class Workbench:
 class DemoLedger:
     """Explicit, memory-only illustrative data; never substitutes for failed live reads."""
     def tasks(self):
-        moves = [dict(cargo_id='C2', source='yard-01', destination='temp-01'),
-                 dict(cargo_id='C1', source='yard-01', destination='outbound-01'),
-                 dict(cargo_id='C2', source='temp-01', destination='yard-01')]
-        return [dict(request_key=key, state=state, row_version=4, step_index=step, mission_id=mission,
-                     attempt_id=None, goal_confirmed=0, payload=json.dumps(dict(
-                         outbound_id='C1', revision=3, execution_kind='ARM_TRANSFER', moves=moves,
-                         move_arms=[['A', 'B'], ['B'], ['A', 'B']])))
-                for key, state, step, mission in [('DEMO-1024', 'WAITING', 0, 'demo-arm-01'),
-                                                  ('DEMO-1025', 'HOLD', 1, 'demo-arm-02'),
-                                                  ('DEMO-1026', 'PLANNED', 0, None)]]
+        rows = []
+        cases = [('DEMO-1024', 'WAITING', 0, 'demo-arm-01', 'C1', 'C2'),
+                 ('DEMO-1025', 'HOLD', 1, 'demo-arm-02', 'C4', 'C5'),
+                 ('DEMO-1026', 'PLANNED', 0, None, 'C7', 'C8'),
+                 ('DEMO-1027', 'SUBMITTING', 0, None, 'C9', 'C10'),
+                 ('DEMO-1028', 'AWAITING_FINAL_EVIDENCE', 3, None, 'C11', 'C12'),
+                 ('DEMO-1029', 'COMPLETED', 3, None, 'C13', 'C14')]
+        for key, state, step, mission, cargo, blocker in cases:
+            moves = [dict(cargo_id=blocker, source='yard-01', destination='temp-01'),
+                     dict(cargo_id=cargo, source='yard-01', destination='outbound-01'),
+                     dict(cargo_id=blocker, source='temp-01', destination='yard-01')]
+            rows.append(dict(request_key=key, state=state, row_version=4, step_index=step, mission_id=mission,
+                             attempt_id=None, goal_confirmed=0, payload=json.dumps(dict(
+                                 outbound_id=cargo, revision=3, execution_kind='ARM_TRANSFER', moves=moves,
+                                 move_arms=[['A', 'B'], ['B'], ['A', 'B']]))))
+        return rows
 
     def read(self, key):
         for row in self.tasks():
@@ -187,14 +194,20 @@ class Application:
                 data = (self.workbench.detail(query['key'][0]) if 'key' in query else
                         {'mode': 'demo' if self.workbench.demo else 'live', 'tasks': self.workbench.tasks()})
             else:
+                path = env['PATH_INFO']
+                page = (path in {'/', '/overview', '/work', '/help'}
+                        or re.fullmatch(r'/work/[^/\x00-\x1f]+(?:/(?:plan|execution))?', path))
                 files = {'/': (ASSETS / 'index.html', 'text/html; charset=utf-8'),
+                         '/assets/tokens.css': (ASSETS / 'tokens.css', 'text/css; charset=utf-8'),
                          '/assets/app.css': (ASSETS / 'app.css', 'text/css; charset=utf-8'),
                          '/assets/app.js': (ASSETS / 'app.js', 'text/javascript; charset=utf-8'),
                          '/assets/icon.png': (_brand_file('harbor-app-icon-20261023.png'), 'image/png'),
                          '/assets/banner.png': (_brand_file('harborlogi-github-banner-20261023.png'), 'image/png')}
-                if env['PATH_INFO'] not in files:
+                if page:
+                    path = '/'
+                if path not in files:
                     raise KeyError('Not found')
-                path, mime = files[env['PATH_INFO']]
+                path, mime = files[path]
                 body = path.read_bytes()
                 data = None
         except KeyError:

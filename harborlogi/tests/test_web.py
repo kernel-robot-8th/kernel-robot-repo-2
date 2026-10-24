@@ -9,6 +9,7 @@ import tempfile
 from threading import Thread
 import unittest
 from urllib.request import urlopen
+from urllib.parse import urlencode
 from wsgiref.util import setup_testing_defaults
 from wsgiref.simple_server import make_server
 
@@ -98,6 +99,28 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(headers['Cache-Control'], 'no-store')
         self.assertNotIn('Access-Control-Allow-Origin', headers)
+
+    def test_real_navigation_urls_open_shell_without_fleet_or_ledger_mutations(self):
+        before = self.path.read_bytes()
+        for path in ('/overview', '/work', '/work/outbound', '/work/outbound/plan',
+                     '/work/outbound/execution', '/help', '/assets/tokens.css'):
+            with self.subTest(path=path):
+                self.assertEqual(request(self.app, path)[0], 200)
+        self.assertEqual(request(self.app, '/work/outbound/approve')[0], 404)
+        self.assertEqual(request(self.app, '/equipment')[0], 404)
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.fleet.calls, [])
+
+    def test_existing_special_business_keys_are_data_in_query_routes(self):
+        for key in ('.', '..', 'a/b', 'a\\b'):
+            self.ledger.prepare(key, 3, (binding(),), outbound_id='outbound',
+                                outbound_stand='stand', move_arms=(('A', 'B'),))
+            before = self.path.read_bytes()
+            status, _, body = request(self.app, '/api/work', query=urlencode({'key': key}))
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body)['business']['request_key'], key)
+            self.assertEqual(request(self.app, '/work', query=urlencode({'key': key, 'tab': 'plan'}))[0], 200)
+            self.assertEqual(self.path.read_bytes(), before)
 
     def test_missing_database_is_never_created(self):
         missing = self.path.parent / 'missing.sqlite3'

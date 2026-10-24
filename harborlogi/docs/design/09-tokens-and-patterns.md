@@ -1,6 +1,6 @@
 # Harbor 토큰·컴포넌트·상태 계약
 
-상태: 다음 구현의 제안. [tokens.proposed.json](../../design/tokens.proposed.json)은 앱이 아직 소비하지 않는다. 현재 CSS의 실측 기록은 [DESIGN.md](../../DESIGN.md)와 `.impeccable/design.json`이다. 제안 토큰이 현재 구현이나 사용자 수용을 증명하지 않는다.
+상태: 로컬 페이지에 적용한 토큰·공통 패턴 기준. [tokens.json](../../design/tokens.json)을 정본으로 승격했고 `tools/design_tokens.py`가 `harbor/web_assets/tokens.css`를 생성한다. 페이지는 의미별 변수를 사용한다. [DESIGN.md](../../DESIGN.md)와 `.impeccable/design.json`은 구현 기록이며 운영·현장 사용자 수용과 구분한다.
 
 ## 1. 토큰의 세 층과 정본
 
@@ -16,9 +16,9 @@ primitive.color.teal-soft
 
 원색을 바꿀 때와 의미를 바꿀 때의 범위를 구별한다. 버튼에서 직접 `orange`를 골라 위험/선택/완료를 제각각 표현하지 않는다. 원색에 raw 값을, 의미에 원색 참조를, 컴포넌트에 의미·치수 참조를 둔다. 동일 값을 여러 JSON·CSS에 수동 복사하지 않는다.
 
-제안 파일의 schema는 프로젝트 내부 `harbor.design-tokens/1`이며 외부 표준 도구 호환성을 검증했다는 주장은 아니다. leaf는 `$type`, `$value`를 갖고 alias는 `{semantic.action.primary}`처럼 **한 토큰 전체**를 참조한다. alias의 타입은 대상과 같아야 하고 순환·없는 참조·층 역참조를 허용하지 않는다.
+파일의 schema는 프로젝트 내부 `harbor.design-tokens/1`이며 외부 표준 도구 호환성을 검증했다는 주장은 아니다. leaf는 `$type`, `$value`를 갖고 alias는 `{semantic.action.primary}`처럼 **한 토큰 전체**를 참조한다. alias의 타입은 대상과 같아야 하고 순환·없는 참조·층 역참조를 허용하지 않는다.
 
-채택 시 `tokens.proposed.json`을 정식 토큰 파일로 승격하고 CSS custom property 생성 절차를 둔다. generated CSS는 직접 편집하지 않는다. 현재 `app.css`의 값을 일괄 치환하는 것만으로 컴포넌트·상태 계약을 구현했다고 보지 않는다. 승격 전에는 기존 CSS가 실제 화면의 정본이며 이 파일은 설계 입력이다.
+`tokens.json`을 편집하고 `python tools/design_tokens.py` 출력을 `harbor/web_assets/tokens.css`로 저장한다. `python tools/design_tokens.py --check`와 unittest가 생성물 일치를 검사한다. generated CSS는 직접 편집하지 않는다. `app.css`는 의미별 변수와 컴포넌트를 정의하며 값 일괄 치환만으로 탐색·상태 계약을 구현했다고 보지 않는다.
 
 ## 2. 색상은 의미로 사용한다
 
@@ -35,18 +35,18 @@ primitive.color.teal-soft
 | 미확인 | muted / unknown-soft | 정보 없음·불명. 대기나 정상으로 바꾸지 않음 |
 | 포커스 | light 면에는 focus, navy 면에는 paper | 3px outline + 3px offset. 선택 색과 별도 |
 
-성공·위험·미확인 면의 추가 색상은 신규 제안이다. 기존 brand orange는 유지하지만 상태마다 동일한 오렌지를 남용하지 않는다. 상태 색을 장비 타입이나 팔 A/B 구분 색과 겸용하지 않는다. 데모는 환경 표식이며 실제 장애 심각도를 뜻하지 않는다.
+성공·위험·미확인 면의 추가 색상은 로컬 UI 토큰으로 채택했다. 데이터가 없는 위험 알람을 만들라는 뜻은 아니다. 기존 brand orange는 유지하지만 상태마다 동일한 오렌지를 남용하지 않는다. 상태 색을 장비 타입이나 팔 A/B 구분 색과 겸용하지 않는다. 데모는 환경 표식이며 실제 장애 심각도를 뜻하지 않는다.
 
 텍스트 대비 4.5:1 이상, 큰 글씨 3:1 이상, 핵심 조작 경계·포커스는 인접 면에서 3:1 이상을 검토 기준으로 삼는다. 색상 쌍의 수치 검사와 실제 렌더 검토는 별개다. 선택·상태를 색 하나로만 표시하지 않는다.
 
 ## 3. 서체·간격·밀도
 
 - UI 서체는 운영체제의 한글 가능 sans stack을 유지한다. 폰트를 원격에서 내려받는 의존성을 추가하지 않는다.
-- 제안 scale: metadata12, label14, body16, section18, page28px 상당의 rem. 현재 구현 body15/metadata11~13과는 다르며 다음 적용 때 실제 한글·긴 ID로 검증한다.
+- 적용 scale: metadata12, label14, body16, section18, page28px 상당의 rem. 초기 body15/metadata11~13에서 변경했고 한글·긴 ID의 새 렌더를 검증한다.
 - 본문 line-height1.6, 제목1.3. 핵심 상태/판단은 본문 이상, 원본 ID는 복사와 전체 확인이 가능하도록 줄바꿈/펼침을 제공한다. 수치 열은 tabular numerals를 쓴다.
 - 간격은 4/8/12/16/24/32/48/64px 상당의 scale이다. 관련 label·값은 가깝게, 다른 판단 영역은 더 넓게 둔다.
 - 기본 조작 높이44px, 태블릿48px, 업무 행56px/태블릿64px은 **최소 높이**다. 긴 이유를 잘라 이 높이에 강제로 맞추지 않는다.
-- 전역 메뉴200px·목록280px·topbar64px, 1280/768px 구간은 다음 구조의 제안이다. 현재 구현의 320px 목록/700·1100px 분기를 이미 바꿨다는 뜻은 아니다.
+- 전역 메뉴200px·목록280px·topbar64px, 1280/768px 구간을 적용했다. JS가 생성 CSS의 breakpoint 토큰을 읽어 배치를 선택한다. 이전 320px 목록/700·1100px 분기는 현재 구조가 아니다.
 - radius는 상태4·조작6·섹션8px. 모든 정보를 같은 둥근 카드로 감싸지 않고 면·제목·간격·구분선을 먼저 사용한다.
 - 평면 작업면을 유지한다. z-index는 base0/sticky10/popover20/dialog30/notification40 순서이며 dialog 아래 내용을 toast가 가리는 경우를 별도 검토한다.
 - feedback120ms, 탐색180ms 제안. reduced motion에서는 0ms로 줄이고 정보 전달을 애니메이션에 의존하지 않는다. 실제 작업 진행률이나 로봇 동작을 시각 효과로 추정하지 않는다.
@@ -76,6 +76,6 @@ primitive.color.teal-soft
 4. 동일한 데이터로 1440×1000, 1280×800, 768×1024, 390×844를 확인하고 zoom200%, 키보드, 긴 한글/ID, 빈/불명/실패/권한을 검토한다. 아직 실행한 시험이 아니다.
 5. 실제 운영자의 조치 찾기·원래 업무 복귀·Fleet 인계·태블릿 확인 흐름을 관측해 확정한다. 쓰기와 실물 수용은 API/인증 게이트를 그대로 따른다.
 
-현재 파일은 색상·치수를 담는 데이터이며 생성기나 runtime 설정이 아니다. 이번 문서 작업에서 웹 서버·장부·로봇 API 동작은 변경하지 않는다.
+JSON은 디자인 데이터이며 장치 설정이 아니다. 새 페이지는 CSS 생성과 화면 route를 추가하지만 업무 장부를 변경하거나 ROSY 쓰기 API를 추가하지 않는다.
 
 이번 정적 확인: 124개 토큰의 alias 존재·타입 일치·층 방향·순환 검사를 통과했다. status 텍스트/면 대비는 info5.40, warning7.86, danger6.07, success6.20, unknown5.00이다. control border/white3.11, light 포커스/paper5.96, inverse 포커스/navy12.63을 확인했다. 아직 새 토큰을 적용한 브라우저나 실제 사용자를 검사한 결과는 아니다.

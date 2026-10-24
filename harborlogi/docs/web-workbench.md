@@ -1,16 +1,18 @@
 # Harbor 웹 작업 관제
 
-2026-10-25 첫 구현: 기존 Harbor 이미지·테마의 로컬 조회 웹 앱. PC·태블릿 폭에 대응한다. 운영 로그인·쓰기·LAN 태블릿 배포는 후속이다.
+2026-10-25: 기존 이미지·테마와 정식 의미별 토큰을 적용한 로컬 조회 웹 앱. 조치 필요 운영 현황, 업무 목록·개요·계획·실행/근거, 사용 안내를 제공한다. 운영 로그인·쓰기·LAN 태블릿 배포는 후속이다.
 
 ## 합성 화면
 
 Python 3.10 이상, 추가 런타임 패키지 없이 `harborlogi/`에서 실행한다.
 
 ```bash
-python -m harbor.web --demo
+python -m harbor.web --demo --port 8050
 ```
 
-같은 PC의 `http://127.0.0.1:8040`을 연다. `--port`로 포트를 바꾼다. 합성 업무의 검색·필터·상세·계획·근거를 확인한다. 장부 생성이나 Fleet 통신은 하지 않는다. 배너·아이콘은 [기존 자산](../assets/brand/README.md)이다.
+같은 PC의 `http://127.0.0.1:8050/overview`를 연다. 기본 포트는8040이며 위 명령은8050을 명시한다. 합성 업무6개로 검색·보기·상세·탭·복귀를 확인한다. 장부 생성이나 Fleet 통신은 하지 않는다. 아이콘은 전역 메뉴에, 배너는 사용 안내에 [기존 자산](../assets/brand/README.md)을 사용한다.
+
+화면은 `/overview`, `/work`, `/work/{key}`, `/work/{key}/plan`, `/work/{key}/execution`, `/help`다. 점·슬래시 등의 일부 기존 ID는 `/work?key=…&tab=…`로 보존한다. [페이지 구현](design/10-navigation-pages-plan.md)과 [새 검증 기록](validation/2026-10-25-navigation-pages.md)을 따른다.
 
 ## 실제 장부·ROSY 연결
 
@@ -44,6 +46,6 @@ python -m unittest discover -s tests -v
 
 `test_web.py`는 파일 불변성·GET 전용·불일치·오류 비밀값 비노출·동시 변경·로컬 경계를 검사하고 합성 Fleet까지 실제 HTTP 소켓으로 연결한다. 전체 시험의 실제 Fleet suite skip은 연동 통과가 아니다.
 
-Playwright Python 패키지와 Edge가 있는 환경에서는 위 데모 서버를 실행한 뒤 `python tools/integration/web_browser_check.py --output runs/web-review`로 폭 1440·768·390px의 검색·필터·상세·재조회·포커스·실패를 검사한다. 캡처는 Git 제외 경로 `runs/`에 둔다. 실제 태블릿·사용자 수용과 구분한다.
+Playwright Python 패키지와 Edge가 있는 환경에서는 위8050 데모 서버를 실행한 뒤 `python tools/integration/web_browser_check.py --output runs/navigation-review`로 폭1440·1280·768·390px의 탐색·탭·직접 URL·복귀·검색·drawer·긴/특수 ID·오류를 검사한다. 다른 포트는 도구의 `--url`로 지정한다. 캡처는 Git 제외 경로 `runs/`에 둔다. 실제 태블릿·사용자 수용과 구분한다.
 
 기존 `tools.integration.real_fleet_http --arm-only`에도 웹 HTTP projection 검사를 추가했다. 고정 소스와 팀 시험 PC에서 명시 실행해야 새 구현의 실제 ROSY 근거가 된다. [검증 기록](validation/2026-10-25-web-workbench.md)에서 결과를 구분한다. 후속 업무 쓰기·Fleet 승인 화면·공급 인계 회차·업무 관측·TRIP 위임·실물은 [단계별 계획](design/04-delivery-and-acceptance.md)을 따른다.

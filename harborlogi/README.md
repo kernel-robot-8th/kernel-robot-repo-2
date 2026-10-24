@@ -35,7 +35,7 @@ python -m harbor
 
 ## 웹 작업 관제
 
-`python -m harbor.web --demo` 후 같은 PC의 `http://127.0.0.1:8040`을 연다. 기존 이미지·네이비/청록 테마의 작업 목록·상세를 확인한다. 실제 장부와 ROSY ARM job·receipt 연결은 [웹 실행 안내](docs/web-workbench.md)를 따른다. 현재는 로컬 조회 단계이며 로그인·업무 쓰기·현장 태블릿 배포는 후속이다.
+`python -m harbor.web --demo --port 8050` 후 같은 PC의 `http://127.0.0.1:8050/overview`를 연다. 기존 이미지·테마와 의미별 토큰을 적용한 조치 필요 운영 현황, 업무 목록·개요·계획·실행/근거를 확인한다. 실제 장부와 ROSY ARM job·receipt 연결은 [웹 실행 안내](docs/web-workbench.md)를 따른다. 현재는 로컬 조회 단계이며 로그인·업무 쓰기·현장 태블릿 배포는 후속이다.
 
 ## Harbor와 ROSY의 경계
 

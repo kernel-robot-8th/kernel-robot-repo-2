@@ -4,42 +4,212 @@
   "title": "Design System: Harbor",
   "extensions": {
     "colorMeta": {
-      "navy": {"role":"primary","displayName":"Harbor Navy","tonalRamp":["oklch(15% .03 240)","oklch(26% .03 240)","oklch(37% .03 240)","oklch(49% .03 240)","oklch(60% .03 240)","oklch(72% .03 240)","oklch(84% .03 240)","oklch(95% .03 240)"]},
-      "ink": {"role":"neutral","displayName":"Ink","tonalRamp":["oklch(15% .02 240)","oklch(26% .02 240)","oklch(37% .02 240)","oklch(49% .02 240)","oklch(60% .02 240)","oklch(72% .02 240)","oklch(84% .02 240)","oklch(95% .02 240)"]},
-      "muted": {"role":"neutral","displayName":"Muted Slate","tonalRamp":["oklch(15% .02 235)","oklch(26% .02 235)","oklch(37% .02 235)","oklch(49% .02 235)","oklch(60% .02 235)","oklch(72% .02 235)","oklch(84% .02 235)","oklch(95% .02 235)"]},
-      "teal": {"role":"primary","displayName":"Harbor Teal","tonalRamp":["oklch(15% .05 207)","oklch(26% .05 207)","oklch(37% .05 207)","oklch(49% .05 207)","oklch(60% .05 207)","oklch(72% .05 207)","oklch(84% .05 207)","oklch(95% .05 207)"]},
-      "teal-soft": {"role":"primary","displayName":"Soft Teal","tonalRamp":["oklch(15% .01 180)","oklch(26% .01 180)","oklch(37% .01 180)","oklch(49% .01 180)","oklch(60% .01 180)","oklch(72% .01 180)","oklch(84% .01 180)","oklch(95% .01 180)"]},
-      "orange": {"role":"secondary","displayName":"Brand Orange","tonalRamp":["oklch(15% .08 40)","oklch(26% .08 40)","oklch(37% .08 40)","oklch(49% .08 40)","oklch(60% .08 40)","oklch(72% .08 40)","oklch(84% .08 40)","oklch(95% .08 40)"]},
-      "orange-soft": {"role":"secondary","displayName":"Soft Orange","tonalRamp":["oklch(15% .02 65)","oklch(26% .02 65)","oklch(37% .02 65)","oklch(49% .02 65)","oklch(60% .02 65)","oklch(72% .02 65)","oklch(84% .02 65)","oklch(95% .02 65)"]},
-      "paper": {"role":"neutral","displayName":"Ivory Paper","tonalRamp":["oklch(15% .01 85)","oklch(26% .01 85)","oklch(37% .01 85)","oklch(49% .01 85)","oklch(60% .01 85)","oklch(72% .01 85)","oklch(84% .01 85)","oklch(95% .01 85)"]},
-      "white": {"role":"neutral","displayName":"White Surface","tonalRamp":["oklch(15% 0 0)","oklch(26% 0 0)","oklch(37% 0 0)","oklch(49% 0 0)","oklch(60% 0 0)","oklch(72% 0 0)","oklch(84% 0 0)","oklch(95% 0 0)"]},
-      "line": {"role":"neutral","displayName":"Cool Divider","tonalRamp":["oklch(15% .005 170)","oklch(26% .005 170)","oklch(37% .005 170)","oklch(49% .005 170)","oklch(60% .005 170)","oklch(72% .005 170)","oklch(84% .005 170)","oklch(95% .005 170)"]},
-      "focus": {"role":"secondary","displayName":"Warm Focus","tonalRamp":["oklch(15% .08 40)","oklch(26% .08 40)","oklch(37% .08 40)","oklch(49% .08 40)","oklch(60% .08 40)","oklch(72% .08 40)","oklch(84% .08 40)","oklch(95% .08 40)"]}
+      "navy": {
+        "role": "primary",
+        "displayName": "Harbor Navy"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted Slate"
+      },
+      "teal": {
+        "role": "primary",
+        "displayName": "Harbor Teal"
+      },
+      "teal-soft": {
+        "role": "primary",
+        "displayName": "Soft Teal"
+      },
+      "orange": {
+        "role": "secondary",
+        "displayName": "Brand Orange"
+      },
+      "orange-soft": {
+        "role": "secondary",
+        "displayName": "Soft Orange"
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Ivory Paper"
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "White Surface"
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Cool Divider"
+      },
+      "focus": {
+        "role": "secondary",
+        "displayName": "Warm Focus"
+      },
+      "warning-ink": {
+        "role": "secondary",
+        "displayName": "Warning Ink"
+      },
+      "control-border": {
+        "role": "neutral",
+        "displayName": "Control Border"
+      },
+      "success-ink": {
+        "role": "neutral",
+        "displayName": "Verified Result Ink"
+      },
+      "success-soft": {
+        "role": "neutral",
+        "displayName": "Verified Result Surface"
+      },
+      "danger-ink": {
+        "role": "neutral",
+        "displayName": "Failure Ink (available token)"
+      },
+      "danger-soft": {
+        "role": "neutral",
+        "displayName": "Failure Surface (available token)"
+      },
+      "unknown-soft": {
+        "role": "neutral",
+        "displayName": "Unverified Surface"
+      }
     },
     "typographyMeta": {
-      "headline":{"displayName":"Work headline","purpose":"Work ID and welcome heading; 26px at the mobile breakpoint."},
-      "title":{"displayName":"Section title","purpose":"Plan, execution, evidence and next-check headings."},
-      "body":{"displayName":"Korean system body","purpose":"Operation text without a downloaded font."},
-      "label":{"displayName":"Status label","purpose":"Compact text badges."}
+      "headline": {
+        "displayName": "Page and work title",
+        "purpose": "Current page and selected work; semantic-type-page."
+      },
+      "title": {
+        "displayName": "Section title",
+        "purpose": "Plan, execution, evidence and next-check sections."
+      },
+      "body": {
+        "displayName": "Korean system body",
+        "purpose": "Primary operation text using semantic-type-body without a downloaded font."
+      },
+      "label": {
+        "displayName": "Control and supporting text",
+        "purpose": "Controls and supporting descriptions; metadata uses the separate caption token."
+      }
     },
     "shadows": [],
-    "motion": [],
-    "breakpoints": [{"name":"mobile-max","value":"700px"},{"name":"compact-max","value":"1100px"},{"name":"wide-min","value":"1600px"}]
+    "motion": [
+      {
+        "name": "navigation",
+        "value": "var(--primitive-motion-navigation)",
+        "purpose": "Implemented drawer transition."
+      },
+      {
+        "name": "ease",
+        "value": "var(--primitive-motion-ease)",
+        "purpose": "Implemented drawer easing."
+      },
+      {
+        "name": "reduced",
+        "value": "var(--primitive-motion-reduced)",
+        "purpose": "Drawer duration under prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "tablet-min",
+        "value": "var(--primitive-breakpoint-tablet)"
+      },
+      {
+        "name": "desktop-min",
+        "value": "var(--primitive-breakpoint-desktop)"
+      }
+    ]
   },
   "components": [
-    {"name":"Primary read button","kind":"button","refersTo":"button-primary","description":"Manual ROSY status read.","html":"<button class=\"ds-primary\" type=\"button\">ROSY 상태 다시 조회</button>","css":".ds-primary{font:600 15px/1.65 'Segoe UI','Malgun Gothic',sans-serif;min-height:44px;padding:9px 15px;border:1px solid var(--teal,#116974);border-radius:6px;color:var(--white,#fff);background:var(--teal,#116974);cursor:pointer}.ds-primary:hover{background:var(--navy,#102e40);border-color:var(--navy,#102e40)}.ds-primary:focus-visible{outline:3px solid var(--focus,#a53709);outline-offset:3px}.ds-primary:disabled{cursor:wait;opacity:.55}"},
-    {"name":"Quiet copy button","kind":"button","refersTo":"button-quiet","description":"Copies the original mission ID locally.","html":"<button class=\"ds-quiet\" type=\"button\">mission ID 복사</button>","css":".ds-quiet{font:600 15px/1.65 'Segoe UI','Malgun Gothic',sans-serif;min-height:44px;padding:9px 15px;border:1px solid var(--line,#d6dedc);border-radius:6px;color:var(--teal,#116974);background:transparent;cursor:pointer}.ds-quiet:hover{background:var(--teal-soft,#e2efed);border-color:var(--navy,#102e40)}.ds-quiet:focus-visible{outline:3px solid var(--focus,#a53709);outline-offset:3px}.ds-quiet:disabled{cursor:wait;opacity:.55}"},
-    {"name":"Work search","kind":"input","refersTo":"input-search","description":"Labeled local task filter.","html":"<label class=\"ds-label\" for=\"ds-search\">업무 ID · 화물 검색</label><input class=\"ds-search\" id=\"ds-search\" type=\"search\" placeholder=\"업무 또는 화물 ID\">","css":".ds-label{display:block;margin-bottom:7px;font:13px/1.65 'Segoe UI','Malgun Gothic',sans-serif;color:var(--ink,#183748)}.ds-search{font:15px/1.65 'Segoe UI','Malgun Gothic',sans-serif;width:100%;min-height:44px;padding:9px 12px;border:1px solid #83959c;border-radius:5px;color:var(--ink,#183748);background:var(--white,#fff);caret-color:var(--teal,#116974)}.ds-search::placeholder{color:var(--muted,#526775)}.ds-search:focus-visible{outline:3px solid var(--focus,#a53709);outline-offset:3px}"},
-    {"name":"Current task navigation","kind":"nav","refersTo":"task-current","description":"Current selection in the task rail.","html":"<nav aria-label=\"업무 목록\"><button class=\"ds-task\" type=\"button\" aria-current=\"true\"><strong>WORK-001</strong><span>화물 C-001 · 계획 검토</span></button></nav>","css":".ds-task{display:block;width:100%;min-height:44px;text-align:left;font:400 15px/1.65 'Segoe UI','Malgun Gothic',sans-serif;padding:18px 12px;color:var(--ink,#183748);background:transparent;border:1px solid transparent;border-radius:4px;cursor:pointer}.ds-task strong{display:block;margin-bottom:6px;overflow-wrap:anywhere}.ds-task span{font-size:12px}.ds-task:hover,.ds-task[aria-current=true]{background:var(--teal-soft,#e2efed);border-color:var(--teal,#116974)}.ds-task:focus-visible{outline:3px solid var(--focus,#a53709);outline-offset:3px}"},
-    {"name":"Hold badge","kind":"chip","refersTo":"badge-hold","description":"Noninteractive business hold label.","html":"<span class=\"ds-hold\">보류</span>","css":".ds-hold{display:inline-block;padding:3px 9px;border-radius:4px;font:600 12px/1.65 'Segoe UI','Malgun Gothic',sans-serif;color:#81320f;background:var(--orange-soft,#fff0e4)}"},
-    {"name":"Next check panel","kind":"card","refersTo":"next-action","description":"Tonal section for the next human check.","html":"<section class=\"ds-next\" aria-labelledby=\"ds-next-title\"><h3 id=\"ds-next-title\">다음 확인</h3><p>ROSY 실행 상태와 Harbor 업무 근거를 각각 확인하세요.</p></section>","css":".ds-next{padding:20px 24px;border-radius:8px;color:var(--ink,#183748);background:var(--teal-soft,#e2efed);font:15px/1.65 'Segoe UI','Malgun Gothic',sans-serif}.ds-next h3{margin:0;font-size:18px;line-height:1.5}.ds-next p{margin:6px 0 0;font-size:14px;max-width:72ch}"}
+    {
+      "name": "Primary Fleet handoff",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Opens the configured Fleet console in a separate session; preview link is inert.",
+      "html": "<a class=\"ds-primary\" href=\"#fleet-preview\">Fleet 콘솔 열기</a>",
+      "css": ".ds-primary{font:var(--primitive-font-strong) var(--semantic-type-label)/var(--primitive-font-body-line) var(--semantic-type-family);display:inline-flex;align-items:center;justify-content:center;min-height:var(--component-button-min-height);padding:var(--primitive-space-2) var(--component-button-padding-x);border:var(--primitive-border-thin) solid transparent;border-radius:var(--component-button-radius);cursor:pointer;color:var(--component-button-foreground);background:var(--component-button-background);text-decoration:none}.ds-primary:hover{background:var(--component-button-hover)}.ds-primary:focus-visible{outline:var(--semantic-focus-width) solid var(--semantic-focus-on-light);outline-offset:var(--semantic-focus-offset)}"
+    },
+    {
+      "name": "Quiet read or copy",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "Manual status read, list refresh or local mission-ID copy.",
+      "html": "<button class=\"ds-quiet\" type=\"button\">ROSY 상태 다시 조회</button>",
+      "css": ".ds-quiet{font:var(--primitive-font-strong) var(--semantic-type-label)/var(--primitive-font-body-line) var(--semantic-type-family);display:inline-flex;align-items:center;justify-content:center;min-height:var(--component-button-min-height);padding:var(--primitive-space-2) var(--component-button-padding-x);border:var(--primitive-border-thin) solid transparent;border-radius:var(--component-button-radius);cursor:pointer;border-color:var(--semantic-border-control);color:var(--semantic-text-link);background:var(--semantic-surface-panel)}.ds-quiet:hover{background:var(--semantic-surface-selected);border-color:var(--semantic-border-selected)}.ds-quiet:disabled{cursor:wait;color:var(--semantic-text-secondary);background:var(--semantic-surface-disabled)}.ds-quiet:focus-visible{outline:var(--semantic-focus-width) solid var(--semantic-focus-on-light);outline-offset:var(--semantic-focus-offset)}"
+    },
+    {
+      "name": "Work search",
+      "kind": "input",
+      "refersTo": "input-search",
+      "description": "Labeled search of the local work list.",
+      "html": "<label class=\"ds-label\" for=\"ds-search\">업무 ID · 화물 검색</label><input class=\"ds-search\" id=\"ds-search\" type=\"search\" placeholder=\"업무 또는 화물 ID\">",
+      "css": ".ds-label{display:block;margin:var(--primitive-space-4) 0 var(--primitive-space-2);font:var(--semantic-type-metadata)/var(--primitive-font-body-line) var(--semantic-type-family);color:var(--semantic-text-primary)}.ds-search{font:var(--semantic-type-label)/var(--primitive-font-body-line) var(--semantic-type-family);width:100%;min-height:var(--component-button-min-height);padding:var(--primitive-space-2) var(--primitive-space-3);border:var(--primitive-border-thin) solid var(--semantic-border-control);border-radius:var(--component-button-radius);color:var(--semantic-text-primary);background:var(--semantic-surface-panel);caret-color:var(--semantic-action-primary)}.ds-search::placeholder{color:var(--semantic-text-secondary)}.ds-search:focus-visible{outline:var(--semantic-focus-width) solid var(--semantic-focus-on-light);outline-offset:var(--semantic-focus-offset)}"
+    },
+    {
+      "name": "Global navigation",
+      "kind": "nav",
+      "refersTo": "navigation-current",
+      "description": "Overview and work are the only open primary destinations; help lives in the footer.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"주요 메뉴\"><a href=\"/overview\" aria-current=\"page\">운영 현황</a><a href=\"/work\">업무</a></nav>",
+      "css": ".ds-nav{display:flex;flex-direction:column;gap:var(--primitive-space-2);padding:var(--primitive-space-3);background:var(--component-navigation-background)}.ds-nav a{font:var(--primitive-font-strong) var(--semantic-type-label)/var(--primitive-font-body-line) var(--semantic-type-family);display:flex;align-items:center;min-height:var(--component-navigation-item-min-height);padding:var(--primitive-space-3);border-radius:var(--primitive-radius-control);color:var(--component-navigation-foreground);text-decoration:none}.ds-nav a:hover{background:color-mix(in srgb,var(--primitive-color-white) 10%,transparent)}.ds-nav a[aria-current=page]{color:var(--component-navigation-selected-foreground);background:var(--component-navigation-selected-background)}.ds-nav a:focus-visible{outline:var(--semantic-focus-width) solid var(--semantic-focus-on-light);outline-offset:var(--semantic-focus-offset)}.ds-nav a:focus-visible{outline-color:var(--semantic-focus-on-inverse)}"
+    },
+    {
+      "name": "Current work row",
+      "kind": "nav",
+      "refersTo": "task-current",
+      "description": "Selected work uses location semantics separately from the global page.",
+      "html": "<a class=\"ds-task\" href=\"/work/WORK-001\" aria-current=\"location\"><strong>WORK-001</strong><span>화물 C-001 · 계획 검토</span></a>",
+      "css": ".ds-task{display:block;min-height:var(--component-work-row-min-height);padding:var(--primitive-space-4) var(--primitive-space-3);border:var(--primitive-border-thin) solid transparent;border-radius:var(--primitive-radius-small);color:var(--semantic-text-primary);text-decoration:none;font:var(--semantic-type-label)/var(--primitive-font-body-line) var(--semantic-type-family)}.ds-task strong{display:block;overflow-wrap:anywhere}.ds-task span{display:block;margin-top:var(--primitive-space-2);font-size:var(--semantic-type-metadata)}.ds-task:hover,.ds-task[aria-current=location]{border-color:var(--component-work-row-selected-border);background:var(--component-work-row-selected-background)}.ds-task:focus-visible{outline:var(--semantic-focus-width) solid var(--semantic-focus-on-light);outline-offset:var(--semantic-focus-offset)}"
+    },
+    {
+      "name": "Work perspective tabs",
+      "kind": "nav",
+      "refersTo": "tab-current",
+      "description": "Overview, plan and execution/evidence stay bound to one business ID; panel preview does not run app routing.",
+      "html": "<nav class=\"ds-tabs\" role=\"tablist\" aria-label=\"업무 보기\"><a role=\"tab\" href=\"/work/WORK-001\" aria-selected=\"true\">개요</a><a role=\"tab\" href=\"/work/WORK-001/plan\" aria-selected=\"false\" tabindex=\"-1\">계획</a><a role=\"tab\" href=\"/work/WORK-001/execution\" aria-selected=\"false\" tabindex=\"-1\">실행·근거</a></nav>",
+      "css": ".ds-tabs{display:flex;gap:var(--primitive-space-6);border-bottom:var(--primitive-border-thin) solid var(--semantic-border-divider)}.ds-tabs a{font:var(--primitive-font-strong) var(--semantic-type-label)/var(--primitive-font-body-line) var(--semantic-type-family);display:inline-flex;align-items:center;min-height:var(--component-tabs-min-height);color:var(--component-tabs-foreground);border-bottom:calc(2 * var(--primitive-border-thin)) solid transparent;text-decoration:none}.ds-tabs a:hover{color:var(--semantic-text-link)}.ds-tabs a[aria-selected=true]{color:var(--component-tabs-selected-foreground);border-color:var(--component-tabs-selected-line)}.ds-tabs a:focus-visible{outline:var(--semantic-focus-width) solid var(--semantic-focus-on-light);outline-offset:var(--semantic-focus-offset)}"
+    },
+    {
+      "name": "Hold badge",
+      "kind": "chip",
+      "refersTo": "badge-hold",
+      "description": "Noninteractive business hold label; color accompanies text.",
+      "html": "<span class=\"ds-hold\">보류</span>",
+      "css": ".ds-hold{display:inline-block;padding:var(--primitive-space-1) var(--primitive-space-2);border-radius:var(--primitive-radius-small);font:var(--primitive-font-strong) var(--semantic-type-metadata)/var(--primitive-font-body-line) var(--semantic-type-family);color:var(--semantic-status-warning-foreground);background:var(--semantic-status-warning-background)}"
+    },
+    {
+      "name": "Next check panel",
+      "kind": "card",
+      "refersTo": "next-action",
+      "description": "Flat tonal section for the next human check, separate from execution authority.",
+      "html": "<section class=\"ds-next\" aria-labelledby=\"ds-next-title\"><h3 id=\"ds-next-title\">지금 확인할 내용</h3><p>ROSY 실행 상태와 Harbor 업무 근거를 각각 확인하세요.</p></section>",
+      "css": ".ds-next{padding:var(--primitive-space-6);border-radius:var(--primitive-radius-panel);color:var(--semantic-text-primary);background:var(--semantic-status-info-background);font:var(--semantic-type-body)/var(--primitive-font-body-line) var(--semantic-type-family)}.ds-next h3{margin:0;font-size:var(--semantic-type-section);line-height:1.4}.ds-next p{margin:var(--primitive-space-3) 0 0;max-width:var(--primitive-size-read-measure)}"
+    }
   ],
   "narrative": {
-    "northStar": "HarborLogi 작업 관제",
-    "overview": "The implemented workbench carries the existing HarborLogi navy, teal, orange and ivory identity into a Korean operation interface. Dense task facts sit on quiet surfaces; the current task and next check receive the clearest emphasis.\n\nThe local read-only interface separates Harbor business state, ROSY execution and physical receipt evidence. Demo data is visibly identified. This document records the implementation, not production authentication, field usability acceptance or physical device acceptance.",
-    "keyCharacteristics": ["Persistent brand header and adjacent task list.","Separate business, execution and evidence sections.","Text labels accompany state colors."],
+    "northStar": "현재 업무와 다음 판단이 분명한 관제",
+    "overview": "Harbor는 사용자가 맡은 화물의 진행, 막힌 이유, 필요한 근거와 다음 행동을 판단하는 업무 도구다. 기존 네이비·청록·오렌지·아이보리와 컨테이너 H 아이콘을 유지한다. 밝고 차분한 작업면에서 선택과 다음 확인을 강조하고 상태에는 읽을 수 있는 문구를 붙인다.\n\n업무 식별→현재 판단→진행→근거→추적 정보의 순서로 읽게 한다. 전역 탐색, 업무 목록의 검색·보기, 한 업무의 탭을 구분한다. Harbor 업무 상태, ROSY 실행, physical receipt와 업무 완료 근거는 각각 이름 붙이고 미확인과 조회 실패를 드러낸다.",
+    "keyCharacteristics": [
+      "조치 필요 중심의 운영 현황과 별도 업무 목록.",
+      "전역 메뉴·업무 선택·업무 탭의 세 층 탐색.",
+      "상태 색과 문구, 출처와 조회 범위를 함께 표시."
+    ],
     "rules": [],
-    "dos": ["Do keep business state, ROSY execution and receipt evidence separately labeled.","Do pair status color with readable text and preserve keyboard focus.","Do reuse the existing Harbor name, container H icon and concept banner."],
-    "donts": ["Don't present demo data or concept artwork as device evidence.","Don't imply that a read, an Action success or a receipt authorizes execution or completes all business checks.","Don't present this local workbench as production login, RBAC or physical acceptance."]
+    "dos": [
+      "Do keep business state, ROSY execution and receipt evidence separately labeled.",
+      "Do pair status color with readable text and preserve keyboard focus.",
+      "Do reuse the existing Harbor name, container H icon and concept banner.",
+      "Do derive shared CSS values from design/tokens.json and regenerate tokens.css."
+    ],
+    "donts": [
+      "Don't present demo data or concept artwork as device evidence.",
+      "Don't imply that a read, an Action success or a receipt authorizes execution or completes all business checks.",
+      "Don't present this local workbench as production login, RBAC or physical acceptance.",
+      "Don't open inventory, equipment or history navigation before their data and access contracts exist."
+    ]
   }
 }

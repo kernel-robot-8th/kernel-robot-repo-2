@@ -13,144 +13,185 @@ colors:
   white: "#ffffff"
   line: "#d6dedc"
   focus: "#a53709"
+  warning-ink: "#81320f"
+  control-border: "#83959c"
+  success-ink: "#226345"
+  success-soft: "#e5f2e9"
+  danger-ink: "#a52c31"
+  danger-soft: "#fcebec"
+  unknown-soft: "#e8edef"
 typography:
   headline:
-    fontFamily: '"Segoe UI", "Malgun Gothic", sans-serif'
-    fontSize: "30px"
+    fontFamily: '"Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif'
+    fontSize: "1.75rem"
     fontWeight: 700
     lineHeight: 1.3
-    letterSpacing: "-.025em"
+    letterSpacing: "-.02em"
   title:
-    fontFamily: '"Segoe UI", "Malgun Gothic", sans-serif'
-    fontSize: "18px"
+    fontFamily: '"Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif'
+    fontSize: "1.125rem"
     fontWeight: 700
-    lineHeight: 1.5
+    lineHeight: 1.4
   body:
-    fontFamily: '"Segoe UI", "Malgun Gothic", sans-serif'
-    fontSize: "15px"
+    fontFamily: '"Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif'
+    fontSize: "1rem"
     fontWeight: 400
-    lineHeight: 1.65
+    lineHeight: 1.6
   label:
-    fontFamily: '"Segoe UI", "Malgun Gothic", sans-serif'
-    fontSize: "12px"
+    fontFamily: '"Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif'
+    fontSize: "0.875rem"
     fontWeight: 600
-    lineHeight: 1.65
+    lineHeight: 1.6
 rounded:
-  badge: "4px"
-  input: "5px"
-  button: "6px"
+  small: "4px"
+  control: "6px"
   panel: "8px"
 spacing:
-  compact: "8px"
-  control-y: "9px"
-  control-x: "15px"
-  inset: "18px"
-  section: "24px"
-  column: "40px"
+  "1": "0.25rem"
+  "2": "0.5rem"
+  "3": "0.75rem"
+  "4": "1rem"
+  "6": "1.5rem"
+  "8": "2rem"
+  "12": "3rem"
+  "16": "4rem"
 components:
   button-primary:
     backgroundColor: "{colors.teal}"
     textColor: "{colors.white}"
-    rounded: "{rounded.button}"
-    padding: "9px 15px"
+    rounded: "{rounded.control}"
+    padding: "0.5rem 1rem"
+    height: "44px"
   button-primary-hover:
     backgroundColor: "{colors.navy}"
     textColor: "{colors.white}"
   button-quiet:
-    backgroundColor: "transparent"
+    backgroundColor: "{colors.white}"
     textColor: "{colors.teal}"
-    rounded: "{rounded.button}"
-    padding: "9px 15px"
+    rounded: "{rounded.control}"
+    padding: "0.5rem 1rem"
   input-search:
     backgroundColor: "{colors.white}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.input}"
-    padding: "9px 12px"
+    rounded: "{rounded.control}"
+    padding: "0.5rem 0.75rem"
+  navigation-current:
+    backgroundColor: "{colors.teal-soft}"
+    textColor: "{colors.teal}"
+    rounded: "{rounded.control}"
+    padding: "0.75rem"
   task-current:
     backgroundColor: "{colors.teal-soft}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.badge}"
-    padding: "18px 12px"
+    rounded: "{rounded.small}"
+    padding: "1rem 0.75rem"
+  tab-current:
+    textColor: "{colors.teal}"
+    height: "48px"
   badge-hold:
     backgroundColor: "{colors.orange-soft}"
-    textColor: "#81320f"
-    rounded: "{rounded.badge}"
-    padding: "3px 9px"
+    textColor: "{colors.warning-ink}"
+    rounded: "{rounded.small}"
+    padding: "0.25rem 0.5rem"
   next-action:
     backgroundColor: "{colors.teal-soft}"
     textColor: "{colors.ink}"
     rounded: "{rounded.panel}"
-    padding: "20px 24px"
+    padding: "1.5rem"
+
 ---
 
 # Design System: Harbor
 
 ## Overview
 
-**디자인 철학: 현재 업무와 다음 판단이 분명한 관제.**
+**Creative North Star: "현재 업무와 다음 판단이 분명한 관제"**
 
-Harbor는 사용자가 맡은 화물의 진행, 막힌 이유, 필요한 근거와 다음 행동을 판단하는 업무 도구다. 로봇의 모든 수치를 나열하는 조종판으로 구성하지 않는다. 사용자 확인에 따라 PC 첫 화면은 **조치 필요 중심**으로 설계한다. 전체 업무는 별도 목록에서 찾고 같은 업무 상세로 연결한다.
+Harbor는 사용자가 맡은 화물의 진행, 막힌 이유, 필요한 근거와 다음 행동을 판단하는 업무 도구다. 기존 네이비·청록·오렌지·아이보리와 컨테이너 H 아이콘을 유지한다. 밝고 차분한 작업면에서 선택과 다음 확인을 강조하고 상태에는 읽을 수 있는 문구를 붙인다.
 
-업무 식별→현재 판단→진행→근거→추적 정보의 순서로 읽게 한다. 전역 탐색, 업무 목록의 선택/필터, 한 업무의 탭을 서로 다른 층으로 둔다. 업무 상태·Fleet 실행·physical receipt·업무 완료 근거를 따로 표시하고 미확인과 조회 실패도 명시한다. 태블릿에서는 같은 업무 원본을 사용하되 배정된 확인과 복귀에 집중한다.
+업무 식별→현재 판단→진행→근거→추적 정보의 순서로 읽게 한다. 전역 탐색, 업무 목록의 검색·보기, 한 업무의 탭을 구분한다. Harbor 업무 상태, ROSY 실행, physical receipt와 업무 완료 근거는 각각 이름 붙이고 미확인과 조회 실패를 드러낸다.
 
-기존 네이비·청록·오렌지·아이보리와 H 아이콘을 유지한다. 브랜드 이미지는 제품 식별과 소개에 쓰고 실제 실행 상태를 대신하지 않는다. 긴 시간 읽는 작업면은 밝고 차분하게 유지하며 중요한 상태는 색과 문구를 함께 쓴다.
+**Key Characteristics:**
 
-**적용 상태와 정본:** 이 파일의 frontmatter 및 아래 시각 치수는 현재 로컬 조회 앱에서 추출한 기록이다. `.impeccable/design.json`도 같은 구현 기록이다. 다음 전역 네비게이션과 의미별 토큰은 아직 runtime에 적용하지 않았다.
+- 조치 필요 중심의 운영 현황과 별도 업무 목록.
+- 전역 메뉴·업무 선택·업무 탭의 세 층 탐색.
+- 상태 색과 문구, 출처와 조회 범위를 함께 표시.
 
-- [디자인 철학](docs/design/07-design-foundation.md): 판단 기준과 정보 위계.
-- [네비게이션](docs/design/08-navigation.md): 조치 필요 첫 화면, 전역 메뉴, 업무 탭, PC/태블릿 이동.
-- [토큰·패턴 계약](docs/design/09-tokens-and-patterns.md), [제안 토큰](design/tokens.proposed.json): 다음 구현의 3단계 토큰과 상태 규칙.
-- 현재 구현 근거: [PRODUCT.md](PRODUCT.md), [브랜드 자산](assets/brand/README.md), [첫 구현](docs/design/06-web-integration-plan.md), `harbor/web_assets/{index.html,app.css,app.js}`.
+**적용 상태와 정본:** 이 문서는 로컬 조회 앱에 구현된 디자인의 추출 기록이다. [design/tokens.json](design/tokens.json)의 124개 primitive→semantic→component 토큰이 런타임 값의 정본이며, [생성 도구](tools/design_tokens.py)가 [tokens.css](harbor/web_assets/tokens.css)를 만든다. Frontmatter는 DESIGN.md 도구를 위한 현재 값의 기록이며 별도 편집 원본이 아니다. 토큰을 변경하면 생성 CSS와 이 기록을 함께 갱신한다. Sidecar는 확장 메타데이터와 현재 CSS 변수에 연결한 패널 예제를 담는다.
 
-현재 화면은 장부와 Fleet HTTP를 읽는 기능이 있지만 전체 앱의 네비게이션·인증·쓰기·현장 수용을 완성한 제품은 아니다. 제안 토큰은 채택·CSS 적용·렌더 검증 후 구현 기록으로 갱신한다.
+- [디자인 철학](docs/design/07-design-foundation.md), [네비게이션](docs/design/08-navigation.md), [토큰·패턴 계약](docs/design/09-tokens-and-patterns.md): 제품 기준과 후속 범위.
+- [페이지 구현 계획](docs/design/10-navigation-pages-plan.md), [PRODUCT.md](PRODUCT.md), [브랜드 자산](assets/brand/README.md): 맥락과 범위.
+- 구현 근거: `harbor/web_assets/{index.html,app.css,app.js,tokens.css}`.
+
+현재 구현은 운영 현황·업무·도움말을 제공하는 로컬 읽기 전용 앱이다. 데모와 실제 Fleet 조회 어댑터의 경계는 유지한다. 운영 인증·RBAC·업무 쓰기·LAN 태블릿 배포·실물 수용은 이 디자인 기록의 완료 범위에 포함하지 않는다.
 
 ## Colors
 
 ### Primary
 
-Teal identifies links, primary controls, current steps and selected tasks. Soft teal supplies their supporting surfaces. Navy anchors the header, active filters and primary-button hover.
+청록은 링크·주요 조회 조작·현재 선택을, 연한 청록은 선택 면을 나타낸다. 네이비는 전역 탐색의 배경과 주요 버튼 hover에 사용한다. 기존 브랜드 색상을 유지한다.
 
 ### Secondary
 
-Orange belongs to the existing brand palette. The interface uses soft orange with dark warm text for hold, error and demo context; it does not use the saturated orange token as a general action fill. The shared focus token supplies the visible keyboard outline.
+오렌지는 브랜드의 일부다. 보류·대조 필요와 데모 맥락은 연한 오렌지와 warning-ink를 사용한다. 데모 표식은 장애 심각도 표시가 아니다. 성공·위험·미확인 의미 토큰을 제공하며 실제 badge는 info·warning·success·unknown 변형을 사용한다. danger 토큰의 존재를 장치 안전 알람 구현으로 해석하지 않는다.
 
 ### Neutral
 
-Paper is the page canvas; white is the task-list and input surface. Ink carries main text, muted carries secondary explanations, and line separates sections. Use the frontmatter values rather than sampling the PNG assets. Sidecar tonal ramps are synthesized panel previews; they are not additional implemented color tokens.
+아이보리는 페이지 바탕, 흰색은 목록·입력·보조 헤더 면이다. ink는 주본문, muted는 보조 설명, line은 구분선, control-border는 입력과 보조 버튼 경계다. 밝은 면의 키보드 포커스는 focus, 네이비 면에서는 paper를 사용한다. PNG에서 새 색상을 추출하거나 패널 미리보기를 런타임 토큰으로 복사하지 않는다.
 
 ## Typography
 
-Operate UI uses the system Korean-capable sans stack in frontmatter, without a downloaded font. Body copy has a generous line height and paragraphs are limited to 72ch. The work-detail headline uses the headline token and becomes 26px below the 700px breakpoint. The sidebar heading and wordmark are 24px; section titles are 18px. Secondary copy is generally 13px, while evidence metadata ranges from 11px to 12px. IDs wrap; fact values and step numbers use tabular numerals.
+운영체제의 한글 가능 sans stack을 사용하며 원격 폰트를 내려받지 않는다. 본문은 body, 페이지·업무 제목은 headline, 섹션 제목은 title, 조작과 보조 설명은 label을 사용한다. Metadata는 primitive-font-caption(0.75rem)이다. 본문 line-height는 body-line, 제목은 실제 CSS의 heading-line 또는 섹션 1.4를 사용한다. 이전 화면의 body15·headline30과 모바일 제목 축소 규칙은 적용하지 않는다.
+
+문단의 읽기 폭은 read-measure(72ch)로 제한한다. 긴 ID는 줄바꿈하고 fact 값과 단계 번호는 tabular numerals로 정렬한다. 핵심 상태와 실패 이유를 metadata 크기로 압축하지 않는다.
 
 ## Layout
 
-The implemented workspace is a 320px task list and a flexible detail column. This list is not global application navigation. Main content is capped at 1440px with 40px 42px 32px padding. Plan/execution and evidence use two columns with 40px gaps. The proposed navigation shell and its different widths belong to the linked navigation and token specifications until implemented.
+데스크톱은 desktop 토큰 이상(1280px)에서 전역 메뉴 navigation(200px), 업무 영역의 work-list(280px), 유연한 상세 열을 둔다. Topbar는 topbar(64px) 최소 높이이며 상단에 고정한다. 운영 현황과 도움말은 각각 최대 1440px와 1152px이다. 전역 메뉴는 업무 목록과 별도다.
 
-At widths up to 1100px, the rail becomes 270px, main padding becomes 32px 24px, and detail/evidence sections stack with 28px gaps. Up to 700px, the rail sits above details, main padding becomes 28px 18px, and the task list scrolls within 250px. At 1600px and above, the rail becomes 350px and main padding becomes 48px 64px. These are implemented breakpoints, not evidence of acceptance on a deployed tablet.
+Tablet 토큰 이상부터 desktop 미만(768–1279px)은 drawer 탐색과 목록→상세의 개별 화면을 사용한다. 그 아래는 mobile 한 열이며 근거·도움말 열도 쌓인다. JavaScript가 생성 CSS의 breakpoint 변수를 읽어 body의 layout 상태를 정하고 CSS가 배치한다. 화면 폭은 사용자 역할이나 권한을 바꾸지 않는다.
+
+Desktop의 페이지 기본 inset은 space-8이며 mobile은 가로 space-4·세로 space-6을 사용한다. 간격 scale은 frontmatter의 원본 단계를 따른다. 조작 최소 높이는 control(44px), 좁은 화면의 button/input/select는 touch-control(48px), 업무 행은 row(56px)·touch-row(64px)다. 긴 내용은 최소 높이 이상으로 늘어난다.
 
 ## Elevation & Depth
 
-Surfaces are flat. Background tones, thin dividers and the execution section's 2px navy top rule establish hierarchy. No shadows or animated transitions are defined. Keyboard focus uses a 3px outline with a 3px offset.
+작업면은 평면이며 그림자는 없다. 배경 톤, 구분선과 간격으로 위계를 만든다. Sticky 탐색·topbar와 drawer/backdrop은 primitive-layer 단계로 분리한다. 키보드 포커스는 focus-width와 focus-offset을 사용한다.
+
+Drawer는 navigation duration과 ease 토큰으로 전환하고 reduced motion에서는 reduced 토큰으로 줄인다. Feedback duration은 토큰으로 제공되지만 별도 버튼 애니메이션은 현재 CSS에 적용되지 않았다. 추정 로봇 움직임이나 진행률을 애니메이션으로 만들지 않는다.
 
 ## Shapes
 
-Controls and status surfaces use small corners from the frontmatter. Step numbers are circular, while the existing brand icon has a 9px display radius. The next-check panel and welcome banner use the panel radius. Preserve the container H artwork rather than redrawing it.
+상태·업무 행에는 small, 입력·버튼·전역 메뉴 항목에는 control, 안내 패널·컨셉 배너에는 panel 모서리를 사용한다. 단계 번호는 원형이다. 면·제목·간격·구분선을 우선하며 모든 정보를 같은 카드로 감싸지 않는다. 컨테이너 H 원본을 다시 그리지 않는다.
 
 ## Components
 
-Primary buttons perform local reads or link to the configured Fleet console. Quiet buttons refresh the task list or copy the original mission ID. Both have a 44px minimum height. Disabled buttons use reduced opacity and a wait cursor. Inputs retain visible labels and a 44px minimum height.
+### Buttons and inputs
 
-Task navigation uses full-width text buttons with a teal outline and pale fill on hover or current selection. Status filters expose their selected state through `aria-pressed`; current tasks expose `aria-current`. Hold badges use warm text and pale orange. The next-check panel is a tonal section, not a floating card.
+주요 버튼은 설정된 Fleet 콘솔로 명시적으로 인계한다. 보조 버튼은 장부 새로고침·ROSY 상태 재조회·원래 mission ID 복사를 제공한다. Hover는 선택/행동 의미 토큰을, focus는 공통 outline을 사용한다. 비활성 버튼은 disabled 면과 보조 텍스트·wait cursor를 사용한다. 검색과 보기 select는 보이는 label, 조작 최소 높이와 입력 경계를 유지한다.
 
-Keep the skip link, focus outlines, live status text, explicit error alerts, and focus transfer to the selected work heading. Preserve the distinction between loading, unavailable, mismatched, unverified and completed records.
+### Navigation and work tabs
 
-The header serves `assets/brand/harbor-app-icon-20261023.png` through `/assets/icon.png`; the welcome illustration serves `assets/brand/harborlogi-github-banner-20261023.png` through `/assets/banner.png`. Keep both existing images unchanged and retain the concept-image caption. The illustration is not measured equipment or execution evidence.
+전역 메뉴에는 운영 현황(`/overview`)과 업무(`/work`)만 열고 사용 안내(`/help`)는 하단에 둔다. 재고·장비·기록의 빈 메뉴를 추가하지 않는다. 전역 현재 영역은 `aria-current=page`, 선택 업무는 `aria-current=location`, 업무 탭은 `aria-selected`로 구별한다.
+
+업무 상세는 같은 ID의 개요(`/work/{business_id}`), 계획(`/work/{business_id}/plan`), 실행·근거(`/work/{business_id}/execution`)로 이동한다. 탭 방향키·Home/End와 browser 뒤로 가기를 제공한다. 검색·보기는 URL 맥락으로 전달하며 상세가 필터 밖이어도 현재 상세와 안내를 유지한다. 메뉴 drawer는 닫기·Escape·backdrop, 포커스 가두기와 원래 버튼 복귀를 제공한다. 숨은 배경은 inert로 처리한다.
+
+### Work rows, badges and next check
+
+현재 업무 행은 선택 경계와 연한 면을 함께 사용한다. Badge는 상호작용이 없는 한국어 상태 label이다. 운영 현황은 장부의 SUBMITTING·HOLD·AWAITING_FINAL_EVIDENCE에서 도출 가능한 조치 필요 업무를 보여 주며 WAITING은 별도 대기로 둔다. 담당이 없으면 담당 미지정으로 표시한다. 다음 확인은 현재 판단과 책임을 담는 tonal section이다.
+
+### Evidence and brand
+
+실행·근거 탭은 Fleet 실행, physical receipt, Harbor 업무 장부를 분리한다. 원래 ID와 추적 정보는 펼칠 수 있게 보존한다. Loading·빈 목록·연결 실패·불일치·미확인을 구별하며 화면 조회 시각을 원본 관측 시각으로 표시하지 않는다. Skip link·live status·오류 alert·선택 후 제목 focus를 유지한다.
+
+H 아이콘은 `assets/brand/harbor-app-icon-20261023.png`를 `/assets/icon.png`로 제공한다. 도움말은 기존 `assets/brand/harborlogi-github-banner-20261023.png`를 `/assets/banner.png`로 제공하고 컨셉 이미지 caption을 유지한다. 배너는 장치 실측이나 실행 증거가 아니다.
 
 ## Do's and Don'ts
 
 - Do keep business state, ROSY execution and receipt evidence separately labeled.
 - Do pair status color with readable text and preserve keyboard focus.
 - Do reuse the existing Harbor name, container H icon and concept banner.
+- Do derive shared CSS values from design/tokens.json and regenerate tokens.css.
 - Don't present demo data or concept artwork as device evidence.
 - Don't imply that a read, an Action success or a receipt authorizes execution or completes all business checks.
 - Don't present this local workbench as production login, RBAC or physical acceptance.
+- Don't open inventory, equipment or history navigation before their data and access contracts exist.
