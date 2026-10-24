@@ -400,6 +400,10 @@ class RealFleet:
 
     def _seed(self, docs) -> None:
         """사람이 Fleet 콘솔에서 하는 준비: 문서 저장, 컴파일 미리보기, 출발 허가(rearm, open_dispatch일 때)."""
+        if self.transport_only:
+            if self.open_dispatch:
+                self.rearm()
+            return
         with self.client("operator") as c:
             saved = {}
             for (kind, ident), doc in docs.items():

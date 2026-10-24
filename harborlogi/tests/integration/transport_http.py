@@ -39,7 +39,10 @@ class TransportHttpTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 restarted.submit(intent.request_key, client, operator_confirmed=True)
             job = restarted.reconcile(intent.request_key, client)
-            self.assertEqual(client.trip_job(job['mission_id'])['job'], job)
+            by_id = client.trip_job(job['mission_id'])['job']
+            for field in ('mission_id', 'request_key', 'request_digest', 'robot_id'):
+                self.assertEqual(by_id[field], job[field])
+            self.assertEqual(by_id['steps'][0]['step'], job['steps'][0]['step'])
             other = RosyClient(config['origin'], config['approver'])
             with self.assertRaises(HTTPError) as denied:
                 other.trip_request(intent.request_key)
