@@ -17,6 +17,7 @@
     <nav aria-label="주요 메뉴">
       <a id="nav-overview" href="/overview" data-route><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 15h7m-7 5h7"/></svg><span>운영 현황</span><span id="nav-attention" class="nav-count"></span></a>
       <a id="nav-work" href="/work" data-route><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8m-8 4h8m-8 4h5"/></svg><span>업무</span></a>
+      <a id="nav-planning" href="/planning" data-route hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 7 9-4 9 4-9 4-9-4Zm0 5 9 4 9-4M3 17l9 4 9-4"/></svg><span>재고·반출 계획</span></a>
     </nav>
     <div class="nav-bottom"><p>업무의 흐름은 Harbor에서,<br>실행의 판단은 ROSY에서.</p><a id="nav-help" href="/help" data-route><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.4 9a2.7 2.7 0 1 1 4.6 2c-1 .7-2 1.1-2 2.5M12 17h.01"/></svg>사용 안내</a><span>HarborLogi · 조회 전용</span></div>
   </aside>
@@ -28,7 +29,7 @@
     <div id="mode-note" class="mode-note" role="status">업무 장부를 읽고 있습니다.</div>
     <main id="page" tabindex="-1">
       <section id="overview-page" class="overview-page" aria-labelledby="overview-title">
-        <div class="page-heading"><div><h1 id="overview-title" tabindex="-1">지금 확인할 업무</h1><p>멈춘 업무와 부족한 근거를 확인하고, 다음 판단을 이어가세요.</p></div><a href="/work" data-route class="text-link">전체 업무 보기<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></a></div>
+        <div class="page-heading"><div><h1 id="overview-title" tabindex="-1">지금 확인할 업무</h1><p>재취급·반출과 복귀가 막힌 이유, 부족한 완료 근거를 확인하세요.</p></div><a href="/work" data-route class="text-link">전체 업무 보기<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></a></div>
         <div class="section-heading"><h2>조치 필요 <span id="attention-count" class="count">미확인</span></h2><span id="overview-read" class="metadata"></span></div>
         <p id="overview-error" class="error" role="alert" hidden></p>
         <div class="attention-head" aria-hidden="true"><span>업무 / 화물</span><span>확인할 내용</span><span>담당</span><span>다음 행동</span></div>
@@ -66,6 +67,19 @@
             </section>
             <footer class="read-note"><p id="read-time"></p><p>화면 조회 시각은 원본 관측 시각이 아닙니다. 실행 승인과 정지는 ROSY Fleet에서 처리합니다.</p></footer>
           </article>
+        </div>
+      </section>
+      <section id="planning-page" class="planning-page" hidden aria-labelledby="planning-title">
+        <div class="page-heading"><div><h1 id="planning-title" tabindex="-1">재고·반출 계획</h1><p>묻힌 목표 화물을 꺼내고, 재취급 화물이 돌아갈 순서를 검토합니다.</p></div><span id="planning-environment" class="badge warning">합성 계획 미리보기</span></div>
+        <p class="notice">한 건의 반출 계획을 검토하는 화면입니다. 실제 출고 순위 지시를 접수하거나 로봇 실행을 승인하지 않습니다.</p>
+        <form id="planning-form" class="planning-form"><div><label for="planning-cargo">반출 대상</label><select id="planning-cargo"><option value="C1">C1</option><option value="C2">C2</option></select></div><div><label for="planning-scenario">합성 조건</label><select id="planning-scenario"><option value="normal">기본 배치</option><option value="no-space">임시 공간 부족</option><option value="stale">오래된 관측</option></select></div><button id="planning-calculate" type="submit" class="button-primary">계획 미리보기</button></form>
+        <p id="planning-error" class="error" role="alert" hidden></p><p id="planning-message" class="metadata" role="status"></p>
+        <div id="planning-result" class="planning-columns" hidden>
+          <section class="planning-summary"><div class="section-heading"><h2>계획 검토 결과</h2><span id="planning-status" class="badge"></span></div><p id="planning-reason" class="planning-reason"></p></section>
+          <div><section><div class="section-heading"><h2>관측 배치</h2><span class="source">합성 · 고정 시점</span></div><p class="section-description">칸별 위에서 아래 순서입니다. 선택한 목표와 위의 재취급 대상을 구분합니다.</p><div id="observed-bays" class="bay-grid"></div><p id="inventory-source" class="metadata"></p></section>
+          <section class="projected-section"><div class="section-heading"><h2>계획 후 예상 배치</h2><span class="source">관측 아님</span></div><div id="projected-bays" class="bay-grid"></div><p id="projected-note" class="section-description"></p></section></div>
+          <div><section><h2>이동 순서</h2><ol id="planning-moves" class="moves"></ol><p id="reach-source" class="metadata"></p></section>
+          <section class="completion-section"><h2>끝내야 할 상태</h2><ul class="completion-list"><li>목표 화물의 반출대 내려놓기</li><li>재취급 화물의 유효 위치 복귀</li><li>관련 팔의 퇴피</li></ul><p class="section-description">필요한 완료 조건입니다. 이 미리보기는 세 조건의 실제 근거를 생성하거나 완료로 판정하지 않습니다.</p></section></div>
         </div>
       </section>
       <section id="help-page" class="help-page" hidden aria-labelledby="help-title"><h1 id="help-title" tabindex="-1">Harbor 사용 안내</h1><p class="page-intro">현재 업무와 다음 판단이 분명한 관제.</p><figure><img src="/assets/banner.png" alt="컨테이너와 협력 로봇으로 구성한 HarborLogi 컨셉 이미지" width="1774" height="887"><figcaption>HarborLogi 컨셉 이미지 · 실제 장치의 외형이나 실행 상태를 나타내지 않습니다.</figcaption></figure><div class="help-columns"><section><h2>Harbor에서 할 일</h2><p>조치가 필요한 업무를 찾고 계획·장부·실행 근거를 대조합니다. 현재 페이지는 조회 전용이며 업무 제안이나 현장 확인 제출은 제공하지 않습니다.</p></section><section><h2>ROSY에서 할 일</h2><p>원래 mission을 확인하고 운영자의 별도 세션에서 실행을 승인합니다. 로봇의 정지·복구도 Fleet과 장치 owner의 권한으로 처리합니다.</p></section></div><section class="help-status"><h2>이 화면을 읽는 기준</h2><p>데모는 합성 데이터입니다. 연결 실패·미확인·불일치와 빈 장부를 구분하고, Action 성공이나 receipt를 업무 완료로 바꾸지 않습니다. 실제 태블릿 공개와 운영 로그인·권한은 별도 준비가 필요합니다.</p></section><a href="/overview" data-route class="text-link">운영 현황으로 돌아가기</a></section>

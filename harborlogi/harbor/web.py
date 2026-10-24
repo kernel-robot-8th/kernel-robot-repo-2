@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 from wsgiref.simple_server import make_server, WSGIRequestHandler
 
 from harbor.process import ArmTransferBinding
+from harbor.planning_view import preview
 from harbor.rosy_http import RosyClient
 
 
@@ -187,6 +188,18 @@ class Application:
                 status, data = 403, {'error': 'LOCAL_ONLY', 'message': '이 단계는 같은 PC에서만 조회할 수 있습니다.'}
             elif env['REQUEST_METHOD'] != 'GET':
                 status, data = 405, {'error': 'READ_ONLY', 'message': '현재 웹 앱은 조회만 지원합니다.'}
+            elif env['PATH_INFO'] == '/api/planning':
+                if not self.workbench.demo:
+                    status, data = 503, {'error': 'INVENTORY_NOT_CONFIGURED',
+                                        'message': '실제 재고 관측과 작업 지시가 연결되지 않았습니다. 데모로 대체하지 않습니다.'}
+                else:
+                    query = parse_qs(env.get('QUERY_STRING', ''), keep_blank_values=True)
+                    try:
+                        if set(query) - {'cargo', 'scenario'} or any(len(v) != 1 for v in query.values()):
+                            raise ValueError('Invalid query')
+                        data = preview(query.get('cargo', ['C1'])[0], query.get('scenario', ['normal'])[0])
+                    except ValueError:
+                        status, data = 400, {'error': 'INVALID_PREVIEW', 'message': '반출 대상과 합성 조건을 확인하세요.'}
             elif env['PATH_INFO'] == '/api/work':
                 query = parse_qs(env.get('QUERY_STRING', ''), keep_blank_values=True)
                 if set(query) - {'key'} or any(len(v) != 1 for v in query.values()):
@@ -195,7 +208,7 @@ class Application:
                         {'mode': 'demo' if self.workbench.demo else 'live', 'tasks': self.workbench.tasks()})
             else:
                 path = env['PATH_INFO']
-                page = (path in {'/', '/overview', '/work', '/help'}
+                page = (path in {'/', '/overview', '/work', '/planning', '/help'}
                         or re.fullmatch(r'/work/[^/\x00-\x1f]+(?:/(?:plan|execution))?', path))
                 files = {'/': (ASSETS / 'index.html', 'text/html; charset=utf-8'),
                          '/assets/tokens.css': (ASSETS / 'tokens.css', 'text/css; charset=utf-8'),

@@ -153,7 +153,7 @@
       "name": "Global navigation",
       "kind": "nav",
       "refersTo": "navigation-current",
-      "description": "Overview and work are the only open primary destinations; help lives in the footer.",
+      "description": "Overview and work are always available; synthetic retrieval planning appears only with a readable demo list. Help lives in the footer.",
       "html": "<nav class=\"ds-nav\" aria-label=\"주요 메뉴\"><a href=\"/overview\" aria-current=\"page\">운영 현황</a><a href=\"/work\">업무</a></nav>",
       "css": ".ds-nav{display:flex;flex-direction:column;gap:var(--primitive-space-2);padding:var(--primitive-space-3);background:var(--component-navigation-background)}.ds-nav a{font:var(--primitive-font-strong) var(--semantic-type-label)/var(--primitive-font-body-line) var(--semantic-type-family);display:flex;align-items:center;min-height:var(--component-navigation-item-min-height);padding:var(--primitive-space-3);border-radius:var(--primitive-radius-control);color:var(--component-navigation-foreground);text-decoration:none}.ds-nav a:hover{background:color-mix(in srgb,var(--primitive-color-white) 10%,transparent)}.ds-nav a[aria-current=page]{color:var(--component-navigation-selected-foreground);background:var(--component-navigation-selected-background)}.ds-nav a:focus-visible{outline:var(--semantic-focus-width) solid var(--semantic-focus-on-light);outline-offset:var(--semantic-focus-offset)}.ds-nav a:focus-visible{outline-color:var(--semantic-focus-on-inverse)}"
     },
@@ -188,6 +188,22 @@
       "description": "Flat tonal section for the next human check, separate from execution authority.",
       "html": "<section class=\"ds-next\" aria-labelledby=\"ds-next-title\"><h3 id=\"ds-next-title\">지금 확인할 내용</h3><p>ROSY 실행 상태와 Harbor 업무 근거를 각각 확인하세요.</p></section>",
       "css": ".ds-next{padding:var(--primitive-space-6);border-radius:var(--primitive-radius-panel);color:var(--semantic-text-primary);background:var(--semantic-status-info-background);font:var(--semantic-type-body)/var(--primitive-font-body-line) var(--semantic-type-family)}.ds-next h3{margin:0;font-size:var(--semantic-type-section);line-height:1.4}.ds-next p{margin:var(--primitive-space-3) 0 0;max-width:var(--primitive-size-read-measure)}"
+    },
+    {
+      "name": "Synthetic retrieval planning form",
+      "kind": "custom",
+      "refersTo": "input-search",
+      "description": "Demo-only target and synthetic-condition inputs reuse the labeled field and primary-button patterns. This panel preview does not call the planner.",
+      "html": "<form class=\"ds-planning\"><div><label for=\"ds-plan-cargo\">반출 대상</label><select id=\"ds-plan-cargo\"><option>C1</option><option>C2</option></select></div><div><label for=\"ds-plan-scenario\">합성 조건</label><select id=\"ds-plan-scenario\"><option>기본 배치</option><option>임시 공간 부족</option><option>오래된 관측</option></select></div><button type=\"button\">계획 미리보기</button></form><p class=\"ds-planning-note\">합성 계획 미리보기 · 실행 허가 아님</p>",
+      "css": ".ds-planning{display:grid;grid-template-columns:minmax(120px,1fr) minmax(180px,1.5fr) auto;gap:var(--primitive-space-4);align-items:end;margin:var(--primitive-space-6) 0;color:var(--semantic-text-primary);font:var(--semantic-type-label)/var(--primitive-font-body-line) var(--semantic-type-family)}.ds-planning label{display:block;margin-bottom:var(--primitive-space-2)}.ds-planning select{width:100%;min-height:var(--component-button-min-height);padding:var(--primitive-space-2) var(--primitive-space-3);border:var(--primitive-border-thin) solid var(--semantic-border-control);border-radius:var(--component-button-radius);font:inherit;color:var(--semantic-text-primary);background:var(--semantic-surface-panel)}.ds-planning button{min-height:var(--component-button-min-height);padding:var(--primitive-space-2) var(--component-button-padding-x);border:var(--primitive-border-thin) solid transparent;border-radius:var(--component-button-radius);font:inherit;font-weight:var(--primitive-font-strong);color:var(--component-button-foreground);background:var(--component-button-background);cursor:pointer}.ds-planning button:hover{background:var(--component-button-hover)}.ds-planning button:disabled{cursor:wait;color:var(--semantic-text-secondary);background:var(--semantic-surface-disabled)}.ds-planning select:focus-visible,.ds-planning button:focus-visible{outline:var(--semantic-focus-width) solid var(--semantic-focus-on-light);outline-offset:var(--semantic-focus-offset)}.ds-planning-note{color:var(--semantic-text-secondary);font:var(--semantic-type-metadata)/var(--primitive-font-body-line) var(--semantic-type-family)}"
+    },
+    {
+      "name": "Logical bay and projected-result distinction",
+      "kind": "custom",
+      "refersTo": "planning-bay",
+      "description": "Illustrative bay excerpts distinguish synthetic observed stacks from projected output. The page puts full-width status/reason first, then left-side stacks and right-side moves/completion conditions. Target and blockers carry explicit text; HOLD shows no projected stack or partial moves.",
+      "html": "<div class=\"ds-bays\"><section><h2>관측 배치</h2><p>합성 · 고정 시점</p><section class=\"ds-bay\"><h3>장치 칸</h3><ol class=\"ds-stack\"><li class=\"ds-blocker\"><strong>C2</strong><span>2단 · 재취급 대상</span></li><li class=\"ds-target\"><strong>C1</strong><span>1단 · 반출 대상</span></li></ol><p>허용 3단 · 합성 조건</p></section></section><section><h2>계획 후 예상 배치</h2><p>관측 아님 · 계획안 생성 시에만 표시</p><section class=\"ds-bay\"><h3>반출대</h3><ol class=\"ds-stack\"><li class=\"ds-target\"><strong>C1</strong><span>1단 · 반출 대상</span></li></ol><p>허용 1단 · 합성 조건</p></section></section></div>",
+      "css": ".ds-bays{display:grid;gap:var(--primitive-space-8);color:var(--semantic-text-primary);font:var(--semantic-type-body)/var(--primitive-font-body-line) var(--semantic-type-family)}.ds-bays h2{margin:0;font-size:var(--semantic-type-section);line-height:1.4}.ds-bays p{color:var(--semantic-text-secondary);font-size:var(--semantic-type-metadata)}.ds-bay{min-width:0;margin-top:var(--primitive-space-4);padding:var(--primitive-space-3);background:var(--semantic-surface-panel);border:var(--primitive-border-thin) solid var(--semantic-border-divider);border-radius:var(--primitive-radius-control)}.ds-bay h3{margin:0;font-size:var(--semantic-type-label)}.ds-stack{list-style:none;padding:0;margin:var(--primitive-space-3) 0;display:flex;flex-direction:column;gap:var(--primitive-space-2)}.ds-stack li{padding:var(--primitive-space-2);background:var(--semantic-status-unknown-background);border-radius:var(--primitive-radius-small);overflow-wrap:anywhere}.ds-stack li.ds-target{color:var(--semantic-text-selected);background:var(--semantic-surface-selected)}.ds-stack li.ds-blocker{color:var(--semantic-status-warning-foreground);background:var(--semantic-status-warning-background)}.ds-stack strong{display:block;font-size:var(--semantic-type-label)}.ds-stack span{display:block;font-size:var(--semantic-type-metadata)}"
     }
   ],
   "narrative": {
@@ -203,13 +219,14 @@
       "Do keep business state, ROSY execution and receipt evidence separately labeled.",
       "Do pair status color with readable text and preserve keyboard focus.",
       "Do reuse the existing Harbor name, container H icon and concept banner.",
-      "Do derive shared CSS values from design/tokens.json and regenerate tokens.css."
+      "Do derive shared CSS values from design/tokens.json and regenerate tokens.css.",
+      "Do label synthetic observed stacks and projected plan results separately; keep HOLD free of partial moves or projected completion."
     ],
     "donts": [
       "Don't present demo data or concept artwork as device evidence.",
       "Don't imply that a read, an Action success or a receipt authorizes execution or completes all business checks.",
       "Don't present this local workbench as production login, RBAC or physical acceptance.",
-      "Don't open inventory, equipment or history navigation before their data and access contracts exist."
+      "Don't open operational inventory, equipment or history navigation before their data and access contracts exist."
     ]
   }
 }

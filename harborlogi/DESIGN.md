@@ -99,6 +99,12 @@ components:
     rounded: "{rounded.panel}"
     padding: "1.5rem"
 
+  planning-bay:
+    backgroundColor: "{colors.white}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.control}"
+    padding: "0.75rem"
+
 ---
 
 # Design System: Harbor
@@ -120,10 +126,10 @@ Harbor는 사용자가 맡은 화물의 진행, 막힌 이유, 필요한 근거�
 **적용 상태와 정본:** 이 문서는 로컬 조회 앱에 구현된 디자인의 추출 기록이다. [design/tokens.json](design/tokens.json)의 124개 primitive→semantic→component 토큰이 런타임 값의 정본이며, [생성 도구](tools/design_tokens.py)가 [tokens.css](harbor/web_assets/tokens.css)를 만든다. Frontmatter는 DESIGN.md 도구를 위한 현재 값의 기록이며 별도 편집 원본이 아니다. 토큰을 변경하면 생성 CSS와 이 기록을 함께 갱신한다. Sidecar는 확장 메타데이터와 현재 CSS 변수에 연결한 패널 예제를 담는다.
 
 - [디자인 철학](docs/design/07-design-foundation.md), [네비게이션](docs/design/08-navigation.md), [토큰·패턴 계약](docs/design/09-tokens-and-patterns.md): 제품 기준과 후속 범위.
-- [페이지 구현 계획](docs/design/10-navigation-pages-plan.md), [PRODUCT.md](PRODUCT.md), [브랜드 자산](assets/brand/README.md): 맥락과 범위.
+- [페이지 구현 계획](docs/design/10-navigation-pages-plan.md), [재고·반출 계획 페이지](docs/design/11-retrieval-planning-page.md), [PRODUCT.md](PRODUCT.md), [브랜드 자산](assets/brand/README.md): 맥락과 범위.
 - 구현 근거: `harbor/web_assets/{index.html,app.css,app.js,tokens.css}`.
 
-현재 구현은 운영 현황·업무·도움말을 제공하는 로컬 읽기 전용 앱이다. 데모와 실제 Fleet 조회 어댑터의 경계는 유지한다. 운영 인증·RBAC·업무 쓰기·LAN 태블릿 배포·실물 수용은 이 디자인 기록의 완료 범위에 포함하지 않는다.
+현재 구현은 운영 현황·업무·도움말과 데모 전용 재고·반출 계획을 제공하는 로컬 읽기 전용 앱이다. 데모와 실제 Fleet 조회 어댑터의 경계는 유지한다. 운영 인증·RBAC·업무 쓰기·LAN 태블릿 배포·실물 수용은 이 디자인 기록의 완료 범위에 포함하지 않는다.
 
 ## Colors
 
@@ -147,7 +153,7 @@ Harbor는 사용자가 맡은 화물의 진행, 막힌 이유, 필요한 근거�
 
 ## Layout
 
-데스크톱은 desktop 토큰 이상(1280px)에서 전역 메뉴 navigation(200px), 업무 영역의 work-list(280px), 유연한 상세 열을 둔다. Topbar는 topbar(64px) 최소 높이이며 상단에 고정한다. 운영 현황과 도움말은 각각 최대 1440px와 1152px이다. 전역 메뉴는 업무 목록과 별도다.
+데스크톱은 desktop 토큰 이상(1280px)에서 전역 메뉴 navigation(200px), 업무 영역의 work-list(280px), 유연한 상세 열을 둔다. Topbar는 topbar(64px) 최소 높이이며 상단에 고정한다. 운영 현황과 도움말은 각각 최대 1440px와 1152px이다. 전역 메뉴는 업무 목록과 별도다. 재고·반출 계획은 최대 1440px에서 상태·이유 요약을 두 열 전체 너비로 먼저 보여 준다. 아래에는 왼쪽 관측·예상 배치, 오른쪽 이동 순서·필요 완료 조건을 두고 desktop 미만에서는 같은 순서로 한 열에 쌓는다. 계획 입력은 대상·합성 조건·미리보기 버튼의 세 열이며 mobile에서는 한 열이다. 논리 장치 칸은 각 영역 안에서 세 열을 유지한다.
 
 Tablet 토큰 이상부터 desktop 미만(768–1279px)은 drawer 탐색과 목록→상세의 개별 화면을 사용한다. 그 아래는 mobile 한 열이며 근거·도움말 열도 쌓인다. JavaScript가 생성 CSS의 breakpoint 변수를 읽어 body의 layout 상태를 정하고 CSS가 배치한다. 화면 폭은 사용자 역할이나 권한을 바꾸지 않는다.
 
@@ -167,17 +173,25 @@ Drawer는 navigation duration과 ease 토큰으로 전환하고 reduced motion�
 
 ### Buttons and inputs
 
-주요 버튼은 설정된 Fleet 콘솔로 명시적으로 인계한다. 보조 버튼은 장부 새로고침·ROSY 상태 재조회·원래 mission ID 복사를 제공한다. Hover는 선택/행동 의미 토큰을, focus는 공통 outline을 사용한다. 비활성 버튼은 disabled 면과 보조 텍스트·wait cursor를 사용한다. 검색과 보기 select는 보이는 label, 조작 최소 높이와 입력 경계를 유지한다.
+주요 버튼은 설정된 Fleet 콘솔로 명시적으로 인계하거나 데모 반출 계획을 미리 계산한다. 보조 버튼은 장부 새로고침·ROSY 상태 재조회·원래 mission ID 복사를 제공한다. Hover는 선택/행동 의미 토큰을, focus는 공통 outline을 사용한다. 비활성 버튼은 disabled 면과 보조 텍스트·wait cursor를 사용한다. 검색과 보기 select는 보이는 label, 조작 최소 높이와 입력 경계를 유지한다.
 
 ### Navigation and work tabs
 
-전역 메뉴에는 운영 현황(`/overview`)과 업무(`/work`)만 열고 사용 안내(`/help`)는 하단에 둔다. 재고·장비·기록의 빈 메뉴를 추가하지 않는다. 전역 현재 영역은 `aria-current=page`, 선택 업무는 `aria-current=location`, 업무 탭은 `aria-selected`로 구별한다.
+전역 메뉴에는 운영 현황(`/overview`)과 업무(`/work`)를 열고 사용 안내(`/help`)는 하단에 둔다. 데모 장부 조회가 가능할 때만 재고·반출 계획(`/planning`)을 추가한다. 실제 모드에는 계획 메뉴와 입력 폼을 숨기며 직접 접근 시 실제 재고 source 미설정 오류를 보여 준다. `/api/planning`은 이때 503을 반환하고 합성 재고로 대체하지 않는다. 별도 실제 재고·장비·기록의 빈 메뉴를 추가하지 않는다. 전역 현재 영역은 `aria-current=page`, 선택 업무는 `aria-current=location`, 업무 탭은 `aria-selected`로 구별한다.
 
 업무 상세는 같은 ID의 개요(`/work/{business_id}`), 계획(`/work/{business_id}/plan`), 실행·근거(`/work/{business_id}/execution`)로 이동한다. 탭 방향키·Home/End와 browser 뒤로 가기를 제공한다. 검색·보기는 URL 맥락으로 전달하며 상세가 필터 밖이어도 현재 상세와 안내를 유지한다. 메뉴 drawer는 닫기·Escape·backdrop, 포커스 가두기와 원래 버튼 복귀를 제공한다. 숨은 배경은 inert로 처리한다.
 
 ### Work rows, badges and next check
 
 현재 업무 행은 선택 경계와 연한 면을 함께 사용한다. Badge는 상호작용이 없는 한국어 상태 label이다. 운영 현황은 장부의 SUBMITTING·HOLD·AWAITING_FINAL_EVIDENCE에서 도출 가능한 조치 필요 업무를 보여 주며 WAITING은 별도 대기로 둔다. 담당이 없으면 담당 미지정으로 표시한다. 다음 확인은 현재 판단과 책임을 담는 tonal section이다.
+
+### Synthetic retrieval planning
+
+재고·반출 계획은 단일 목표 화물과 합성 조건을 선택해 기존 서버 planner의 결과를 읽는 화면이다. 입력 변경 시 이전 결과를 숨기고 재계산을 안내한다. 계산 중 버튼을 비활성화하고 실패는 alert와 미확인 안내로 남긴다. 관측 배치와 계획 후 예상 배치를 별도 제목·설명·출처로 분리한다. 합성 고정 시점·source·revision과 합성 팔 도달 표임을 명시한다.
+
+칸의 stack은 위에서 아래로 표시하며 화물 ID·단·대상 설명을 붙인다. 반출 대상은 기존 선택 면, 위의 재취급 대상은 기존 주의 면을 사용한다. 이 도식은 논리 배치이며 실제 위치 지도나 도달성 증거가 아니다. 예상 배치는 ‘관측 아님’으로 표시하고 원래 관측 배치는 바꾸지 않는다.
+
+READY 결과는 재취급→반출→복귀의 단계와 주/대체 팔을 보여 준다. 임시 공간 부족·오래된 관측 등의 HOLD 결과는 이유를 표시하고 부분 이동이나 예상 완료 배치를 만들지 않는다. 필요한 반출대 내려놓기·재취급 화물 복귀·관련 팔 퇴피는 확인 전 조건으로 제시한다. 이 화면은 실행 배정·허가·완료 판정, 순위 지시 접수·입고 등록·실제 관측·양팔 성능 비교 또는 전체 UR/SR 수용을 제공하지 않는다. 기존 124개 토큰만 재사용한다.
 
 ### Evidence and brand
 
@@ -194,4 +208,5 @@ H 아이콘은 `assets/brand/harbor-app-icon-20261023.png`를 `/assets/icon.png`
 - Don't present demo data or concept artwork as device evidence.
 - Don't imply that a read, an Action success or a receipt authorizes execution or completes all business checks.
 - Don't present this local workbench as production login, RBAC or physical acceptance.
-- Don't open inventory, equipment or history navigation before their data and access contracts exist.
+- Don't open operational inventory, equipment or history navigation before their data and access contracts exist.
+- Do label synthetic observed stacks and projected plan results separately; keep HOLD free of partial moves or projected completion.

@@ -68,7 +68,7 @@ function route() {
     try { return {page: 'work', key: decodeURIComponent(match[1]), tab: match[2] || 'overview'}; }
     catch { return {page: 'work', key: null, tab: 'overview'}; }
   }
-  return {page: location.pathname === '/help' ? 'help' : 'overview'};
+  return {page: location.pathname === '/help' ? 'help' : location.pathname === '/planning' ? 'planning' : 'overview'};
 }
 function filtered(ctx = context()) {
   const search = ctx.q.trim().toLocaleLowerCase();
@@ -79,18 +79,25 @@ function filtered(ctx = context()) {
 function formatTime(value) {
   return value ? new Date(value).toLocaleString('ko-KR') : '미확인';
 }
-async function api(key = null) {
+async function requestJSON(path) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
   try {
-    const response = await fetch('/api/work' + (key == null ? '' : '?key=' + encodeURIComponent(key)),
-      {cache: 'no-store', signal: controller.signal});
+    const response = await fetch(path, {cache: 'no-store', signal: controller.signal});
     const data = await response.json();
-    if (!response.ok) throw new Error(data.message || '조회하지 못했습니다. 다시 시도하세요.');
+    if (!response.ok) {
+      const error = new Error('Request unavailable');
+      error.apiMessage = data.message;
+      throw error;
+    }
     return data;
   } finally { clearTimeout(timeout); }
 }
+function api(key = null) {
+  return requestJSON('/api/work' + (key == null ? '' : '?key=' + encodeURIComponent(key)));
+}
 function showMode() {
+  $('nav-planning').hidden = !listAvailable || mode !== 'demo';
   text('mode', listAvailable ? mode === 'demo' ? 'DEMO · 합성' : '실제 장부' : '조회 미확인');
   $('mode').className = 'environment' + (mode === 'demo' ? ' demo' : '');
   $('mode-note').className = 'mode-note' + (mode === 'demo' ? ' demo' : '');
@@ -235,14 +242,26 @@ function renderDetail(detail, current) {
 async function renderRoute(options = {}) {
   const ticket = ++generation, current = route();
   closeMenu(false);
-  const names = {overview: '운영 현황', work: '업무', help: '사용 안내'};
+  const names = {overview: '운영 현황', work: '업무', planning: '재고·반출 계획', help: '사용 안내'};
   text('location', names[current.page]); document.title = 'Harbor · ' + names[current.page];
-  for (const page of ['overview', 'work', 'help']) {
+  for (const page of ['overview', 'work', 'planning', 'help']) {
     $(page + '-page').hidden = current.page !== page;
     $('nav-' + page).removeAttribute('aria-current');
   }
   $('nav-' + current.page).setAttribute('aria-current', 'page');
   renderOverview();
+  if (current.page === 'planning') {
+    $('planning-form').hidden = mode !== 'demo';
+    text('planning-environment', mode === 'demo' ? '합성 계획 미리보기' : '재고 관측 연결 필요');
+    const params = new URLSearchParams(location.search);
+    for (const [id, key, fallback] of [['planning-cargo', 'cargo', 'C1'], ['planning-scenario', 'scenario', 'normal']]) {
+      const value = params.has(key) ? params.get(key) : fallback, select = $(id);
+      if (![...select.options].some(option => option.value === value)) select.append(Object.assign(node('option', value + ' · 미확인'), {value}));
+      select.value = value;
+    }
+    calculatePlanning(Boolean(options.focus));
+    return;
+  }
   if (current.page !== 'work') {
     if (options.focus) $(current.page === 'overview' ? 'overview-title' : 'help-title').focus();
     return;
@@ -278,6 +297,78 @@ async function renderRoute(options = {}) {
     text('detail-error', '이 업무를 조회하지 못했습니다. 목록으로 돌아가 다시 열거나 연결 설정을 확인하세요.');
   } finally {
     if (ticket === generation) { $('detail').setAttribute('aria-busy', 'false'); $('refresh').disabled = false; }
+  }
+}
+function renderBays(id, bays, target, blockers = false) {
+  $(id).replaceChildren();
+  for (const bay of bays) {
+    const section = node('section', undefined, 'bay');
+    const names = {yard: '장치 칸', temp: '임시 칸', stand: '반출대'};
+    section.append(node('h3', names[bay.bay_id] || bay.bay_id));
+    const stack = node('ol', undefined, 'bay-stack'), targetIndex = bay.cargo.indexOf(target);
+    if (!bay.cargo.length) stack.append(node('li', '빈 칸', 'metadata'));
+    [...bay.cargo].reverse().forEach((cargo, offset) => {
+      const level = bay.cargo.length - offset, isTarget = cargo === target;
+      const isBlocker = blockers && targetIndex >= 0 && level - 1 > targetIndex;
+      const item = node('li', undefined, isTarget ? 'target' : isBlocker ? 'blocker' : '');
+      item.append(node('strong', cargo), node('span', level + '단 · ' + (isTarget ? '반출 대상' : isBlocker ? '재취급 대상' : '화물')));
+      stack.append(item);
+    });
+    section.append(stack, node('p', '허용 ' + bay.capacity + '단 · 합성 조건', 'metadata'));
+    $(id).append(section);
+  }
+}
+async function calculatePlanning(focus = false) {
+  const ticket = ++generation, cargo = $('planning-cargo').value, scenario = $('planning-scenario').value;
+  history.replaceState(history.state, '', '/planning?' + new URLSearchParams({cargo, scenario}));
+  $('planning-result').hidden = true; $('planning-error').hidden = true;
+  $('planning-calculate').disabled = true;
+  text('planning-message', '합성 관측을 기준으로 반출 계획을 계산하고 있습니다…');
+  try {
+    const data = await requestJSON('/api/planning?' + new URLSearchParams({cargo, scenario}));
+    if (ticket !== generation) return;
+    if (data.mode !== 'demo') throw new Error('Unexpected preview source');
+    $('planning-form').hidden = false;
+    text('planning-environment', '합성 계획 미리보기');
+    const options = data.candidates.map(id => Object.assign(node('option', id), {value: id}));
+    if (!data.candidates.includes(cargo)) options.push(Object.assign(node('option', cargo + ' · 관측 미확인'), {value: cargo}));
+    $('planning-cargo').replaceChildren(...options); $('planning-cargo').value = cargo;
+    renderBays('observed-bays', data.observed_bays, cargo, true);
+    text('inventory-source', '합성 source ' + data.source_id + ' · revision ' + data.revision + ' · 관측 ' + formatTime(data.observed_at));
+    const ready = data.proposal.status === 'READY';
+    text('planning-status', ready ? '계획안 생성' : '계획 보류');
+    $('planning-status').className = 'badge' + (ready ? '' : ' warning');
+    const reasons = Object.assign(Object.create(null), {
+      PROPOSAL_REQUIRES_ADMISSION_AND_EVIDENCE: '재취급·반출·복귀 순서를 검토하세요. 계획안은 실행 허가가 아닙니다.',
+      NO_LEGAL_TEMPORARY_BAY: '재취급 화물을 둘 유효한 임시 공간이 부족합니다. 부분 이동을 제안하지 않습니다.',
+      OBSERVATION_NOT_CURRENT: '합성 관측이 유효기간을 벗어났습니다. 새 근거와 대조하기 전 계획을 보류합니다.',
+      OUTBOUND_NOT_OBSERVED: '반출 대상 화물이 현재 합성 관측에 없습니다.'
+    });
+    text('planning-reason', reasons[data.proposal.reason] || '계획 조건과 필요한 근거를 다시 확인하세요.');
+    $('planning-moves').replaceChildren();
+    const phases = {REHANDLE: '재취급', OUTBOUND: '반출', RESTORE: '복귀'};
+    for (const move of data.proposal.moves) {
+      const row = node('li'), content = node('div');
+      content.append(node('strong', phases[move.phase] + ' · ' + move.cargo_id), node('p', move.source + ' → ' + move.destination),
+        node('p', '주 팔 ' + move.primary_arm + (move.alternate_arms.length ? ' · 대체 ' + move.alternate_arms.join(', ') : ' · 대체 없음')));
+      row.append(content); $('planning-moves').append(row);
+    }
+    $('projected-bays').replaceChildren();
+    if (ready) renderBays('projected-bays', data.projected_bays, cargo);
+    text('projected-note', ready ? '계획을 적용했을 때의 예상 배치입니다. 관측 배치를 수정하지 않았습니다.' : '유효한 계획이 없어 예상 완료 배치를 만들지 않았습니다.');
+    text('reach-source', '팔 도달 정보는 합성 설치 표입니다. 실제 compile 사전 검증·실물 도달성의 근거가 아닙니다.');
+    text('planning-message', (ready ? '계획안 생성' : '계획 보류') + ' · 합성 판단 시각 ' + formatTime(data.reference_time) + ' · 유효기간 ' + data.max_observation_age_seconds + '초는 이 합성 사례의 조건입니다.');
+    $('planning-result').hidden = false;
+  } catch (error) {
+    if (ticket !== generation) return;
+    $('planning-error').hidden = false;
+    text('planning-error', error.apiMessage || '반출 계획을 읽지 못했습니다. 연결과 입력을 확인한 뒤 다시 계산하세요.');
+    text('planning-message', '재고와 계획은 미확인입니다. 빈 재고나 성공 계획으로 대체하지 않습니다.');
+  } finally {
+    if (ticket === generation) {
+      $('planning-calculate').disabled = false;
+      if (focus) $('planning-title').focus();
+    }
   }
 }
 function saveLocation() {
@@ -356,6 +447,13 @@ $('search').addEventListener('input', updateFilter);
 $('view').addEventListener('change', updateFilter);
 $('reload').addEventListener('click', async () => { await loadList(); await renderRoute(); });
 $('refresh').addEventListener('click', () => renderRoute());
+$('planning-form').addEventListener('submit', event => { event.preventDefault(); calculatePlanning(); });
+$('planning-form').addEventListener('change', () => {
+  ++generation;
+  $('planning-result').hidden = true; $('planning-error').hidden = true;
+  $('planning-calculate').disabled = false;
+  text('planning-message', '입력이 바뀌었습니다. 선택한 조건으로 미리보기를 다시 계산하세요.');
+});
 $('copy').addEventListener('click', async () => {
   if (!mission) return;
   try { await navigator.clipboard.writeText(mission); text('copy-status', 'mission ID를 복사했습니다.'); }

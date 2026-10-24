@@ -14,6 +14,8 @@ python -m harbor.web --demo --port 8050
 
 화면은 `/overview`, `/work`, `/work/{key}`, `/work/{key}/plan`, `/work/{key}/execution`, `/help`다. 점·슬래시 등의 일부 기존 ID는 `/work?key=…&tab=…`로 보존한다. [페이지 구현](design/10-navigation-pages-plan.md)과 [새 검증 기록](validation/2026-10-25-navigation-pages.md)을 따른다.
 
+demo의 `/planning`은 기존 `plan_outbound`를 호출하는 합성 재고·반출 미리보기다. C1/C2 대상과 기본/공간 부족/오래된 관측 조건을 바꾸어 계획 또는 HOLD를 검토한다. 관측과 예상 결과를 구분하며 실행·업무 장부·실제 관측을 바꾸지 않는다. 실제 모드의 `/api/planning`은 재고 관측 source가 없으므로503을 반환하고 데모로 대체하지 않는다. [제품 기능과 검증](validation/2026-10-25-retrieval-planning.md)을 따른다.
+
 ## 실제 장부·ROSY 연결
 
 `--demo` 대신 기존 장부 **절대 경로**를 `--ledger`에 전달한다. SQLite `mode=ro`로 읽으며 파일 생성·SUBMITTING 복구·마이그레이션·업무 refresh를 하지 않는다. 현재 최대 200개 업무를 지원하며 초과 시 누락 대신 조회 실패를 알린다.

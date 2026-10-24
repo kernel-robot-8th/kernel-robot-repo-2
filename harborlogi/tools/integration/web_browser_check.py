@@ -101,10 +101,43 @@ def main():
             page.locator('#help-page').wait_for(state='visible')
             assert page.locator('#help-page img').evaluate('(n) => n.complete && n.naturalWidth > 0')
             page.screenshot(path=str(args.output / (name + '-help.png')), full_page=True)
+            nav(page, 'planning')
+            page.locator('#planning-result').wait_for(state='visible')
+            assert page.locator('#planning-status').inner_text() == '계획안 생성'
+            assert page.locator('#planning-moves li').count() == 3
+            assert '재취급' in page.locator('#planning-moves li').nth(0).inner_text()
+            assert '반출' in page.locator('#planning-moves li').nth(1).inner_text()
+            assert '복귀' in page.locator('#planning-moves li').nth(2).inner_text()
+            assert 'C1' in page.locator('#observed-bays .bay').nth(0).inner_text()
+            assert 'C1' not in page.locator('#projected-bays .bay').nth(0).inner_text()
+            assert 'C1' in page.locator('#projected-bays .bay').nth(2).inner_text()
+            no_overflow(page)
+            page.screenshot(path=str(args.output / (name + '-planning.png')), full_page=True)
+            page.locator('#planning-cargo').select_option('C2')
+            assert page.locator('#planning-result').is_hidden()
+            page.get_by_role('button', name='계획 미리보기', exact=True).click()
+            page.locator('#planning-result').wait_for(state='visible')
+            assert page.locator('#planning-moves li').count() == 1
+            page.reload()
+            loaded(page)
+            page.locator('#planning-result').wait_for(state='visible')
+            assert page.locator('#planning-cargo').input_value() == 'C2'
+            page.locator('#planning-cargo').select_option('C1')
+            for scenario in ('no-space', 'stale'):
+                page.locator('#planning-scenario').select_option(scenario)
+                assert page.locator('#planning-result').is_hidden()
+                page.get_by_role('button', name='계획 미리보기', exact=True).click()
+                page.locator('#planning-result').wait_for(state='visible')
+                assert page.locator('#planning-status').inner_text() == '계획 보류'
+                assert page.locator('#planning-moves li').count() == 0
+                assert page.locator('#projected-bays .bay').count() == 0
+                assert page.locator('#planning-reason').bounding_box()['y'] < page.locator('#observed-bays').bounding_box()['y']
+                no_overflow(page)
+                page.screenshot(path=str(args.output / (name + '-planning-' + scenario + '.png')), full_page=True)
             assert not errors, errors
             assert not failed, failed
             results.append({'viewport': [width, height], 'page_errors': len(errors), 'failed_requests': len(failed),
-                            'navigation_tabs_back_filters_focus_drawer': 'passed', 'horizontal_overflow': False,
+                            'navigation_tabs_back_filters_focus_drawer': 'passed', 'planning_ready_hold_projection': 'passed', 'horizontal_overflow': False,
                             'computed_styles': sizes})
             page.close()
 
@@ -139,6 +172,42 @@ def main():
         loaded(page)
         assert page.locator('#view').input_value() == 'all'
         assert page.locator('.task').count() == 6
+        page.close()
+
+        page = browser.new_page()
+        page.route('**/api/work*', lambda route: route.fulfill(content_type='application/json',
+            body=json.dumps({'mode': 'live', 'tasks': []})))
+        page.route('**/api/planning*', lambda route: route.fulfill(status=503, content_type='application/json',
+            body=json.dumps({'error': 'INVENTORY_NOT_CONFIGURED', 'message': '실제 재고 source 미연동'})))
+        page.goto(args.url + '/planning')
+        page.locator('#planning-error').wait_for(state='visible')
+        assert page.locator('#nav-planning').is_hidden()
+        assert page.locator('#planning-result').is_hidden()
+        assert page.locator('#planning-form').is_hidden()
+        assert page.locator('#observed-bays .bay').count() == 0
+        page.close()
+
+        page = browser.new_page()
+        page.goto(args.url + '/planning?cargo=&scenario=normal')
+        page.locator('#planning-error').wait_for(state='visible')
+        assert page.locator('#planning-result').is_hidden()
+        assert page.locator('#planning-cargo').input_value() == ''
+        page.close()
+
+        page = browser.new_page()
+        page.goto(args.url + '/planning?cargo=C1&scenario=normal')
+        page.locator('#planning-result').wait_for(state='visible')
+        page.route('**/api/planning*', lambda route: route.fulfill(status=503, content_type='application/json',
+            body=json.dumps({'message': 'synthetic unavailable'})))
+        page.locator('#planning-cargo').select_option('C2')
+        page.locator('#planning-scenario').select_option('stale')
+        page.get_by_role('button', name='계획 미리보기', exact=True).click()
+        page.locator('#planning-error').wait_for(state='visible')
+        assert 'cargo=C2' in page.url and 'scenario=stale' in page.url
+        page.reload()
+        page.locator('#planning-error').wait_for(state='visible')
+        assert page.locator('#planning-cargo').input_value() == 'C2'
+        assert page.locator('#planning-scenario').input_value() == 'stale'
         page.close()
 
         with urlopen(args.url + '/api/work') as response:
