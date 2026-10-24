@@ -94,6 +94,9 @@ class ArmFleet:
     def start(self):
         enable(self.root)
         import sys
+        if "rosy_cell" in sys.modules:
+            raise RuntimeError("neutral harness must start without the palletizing package")
+        sys.modules["rosy_cell"] = None
         sys.path.insert(0, str(self.root / "middleware/devices/omx/adapter"))
         import uvicorn
         from core_common.protocol.schemas import ArmTransferCapability, DeviceActionReceipt, FleetArmTransferGrant
@@ -236,6 +239,8 @@ class ArmFleet:
             server.stop()
         for thread in self.threads:
             thread.join(timeout=5)
+        import sys
+        sys.modules.pop("rosy_cell", None)
         if self.errors or any(thread.is_alive() for thread in self.threads):
             raise RuntimeError("simulation harness worker failed or did not stop")
         submits = sum(o.operations.count("SubmitAction") for o in self.owners)
