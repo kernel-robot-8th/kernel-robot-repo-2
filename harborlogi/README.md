@@ -52,8 +52,8 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 | `harbor/outbound.py` | 재취급·반출·복귀 순서의 결정적 제안 |
 | `harbor/site.py` | 적층암 A/B 2대(공급암 S는 외부 단계로 관측만), 이송 차량 3대, 컨베이어(용량 1), 업무 위치·셀 위치 두 층, 충전 한 자리, 직렬 이동 제약 |
 | `harbor/availability.py` | 수동 충전·대기·적재·정비·불명 이송 차량의 후보 제외 |
-| `harbor/process.py` | 각 화물 이동을 설치된 공정 문서 ID·digest·compiler artifact에 연결 |
-| `harbor/rosy_http.py` | Fleet compile/proposal/job 조회와 이송 후보 요청의 HTTP 클라이언트 |
+| `harbor/process.py` | 기존 공정 문서 binding과 중립 ARM 물리 참조 binding, 반출 계획의 이동별 대응 |
+| `harbor/rosy_http.py` | 기존 Cell·TRIP와 중립 ARM 제안/조회·physical receipt의 HTTP 클라이언트. 승인·관측 제출은 제공하지 않음 |
 | `harbor/workflow.py` | 중복 요청 방지·불명 접수 HOLD·현재 시도와 관측 대조의 업무 장부 |
 | `harbor/departure.py` | 공급암 S 퇴피 확인(1차 사람, 이후 카메라)의 근거 보존과 이송 차량 출발 허용 (ADR 0005 결정 6) |
 
@@ -73,6 +73,8 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 |---|---|
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | 함께 작업하기 — Harbor와 ROSY 중 어디서 고칠지, 연결 확인 단계, PR 절차 |
 | [CONTEXT.md](CONTEXT.md) | 항만 업무 용어 |
+| [PRODUCT.md](PRODUCT.md) | 관제 PC·현장 태블릿 제품 맥락과 확정/미정 |
+| [역할·앱·UI/UX 상세설계](docs/design/README.md) | 역할·업무 흐름, 화면·예외, 앱 구성·계약 결손, 단계별 구현·수용 기준(검토안) |
 | [docs/platform-contract.md](docs/platform-contract.md) | 플랫폼 연결 기준과 다음 작업 |
 | [docs/execution.md](docs/execution.md) | 공정 제안과 업무 장부 사용법 |
 | [docs/observation-acceptance.md](docs/observation-acceptance.md) | 물리 관측 연동의 수용 조건 |
