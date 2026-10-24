@@ -46,6 +46,7 @@ def main(argv=None):
     app_root = Path(__file__).resolve().parents[2]
     app_sha = app_checkout(app_root)
     platform_sha = verify_checkout(args.platform_root, args.platform_sha)
+    sys.path.insert(0, str(app_root))
     # Loaded by path only here: the harness needs the platform's test dependencies.
     source = Path(__file__).resolve().parent / ('arm_fleet_harness.py' if args.arm_only else 'fleet_harness.py')
     spec = importlib.util.spec_from_file_location('harbor_fleet_harness', source)

@@ -4,6 +4,7 @@ import ipaddress
 import os
 from pathlib import Path
 import tempfile
+import sys
 import time
 import unittest
 from urllib.error import HTTPError
@@ -62,6 +63,8 @@ class ArmHttpTests(unittest.TestCase):
             self.assertEqual(denied.exception.code, 403)
             with self.assertRaises(ValueError):
                 ledger.propose("neutral-arm-http", client)
+        self.assertFalse(any(name == prefix or name.startswith(prefix + ".") for name in sys.modules
+                             for prefix in ("fleet", "core_common", "omx_adapter", "rosy")))
 
 
 if __name__ == "__main__":

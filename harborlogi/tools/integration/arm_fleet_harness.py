@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 
 import httpx
 
-from fleet_harness import enable, _free_port
+from tools.integration.fleet_harness import enable, _free_port
 
 WORKCELL, INSTANCE, ROBOT = "w-1", "arm-1", "unused"
 
