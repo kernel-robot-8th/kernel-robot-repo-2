@@ -47,4 +47,22 @@ Django 선택 웹 계층에 명시적 역할, 화물/요청/관측 원본/불변
 
 독립 finish review의 fix verdict는 네 지적 모두 해결, **ship(해당 수정 범위)**이다. 이후 업무 원본/이력 보강은 별도 전체 코드 검토와 위72개 시험, 마지막 browser run을 따른다. 개발 preview 초기화도 writer lease 안에서만 수행하며 실행 중 두 번째 초기화가 장부를 쓰기 전에 거절되는 것을 확인했다.
 
+## 고정 commit 실제 HTTP 최종 결과
+
+| 항목 | 확인한 값 |
+|---|---|
+| Harbor 제품 코드 | `885a566a0fe0c32b645b1a57dc1144529d34c6a4` |
+| 취소 보류 추가 검증을 포함한 Harbor source | `82e4ecf00855f989c2f3c23a60d7e45576e5114c` (제품 코드는 위와 동일, 통합 시험만 추가) |
+| ROSY Platform | `bb38fdcdd0140873e4e9d0133662982c1d6a30e0` |
+| 호스트/환경 | 지정 비현장 test PC, 기존 platform 환경과 별도 web venv, `pip check` 성공 |
+| 실행 | `tools.integration.real_fleet_http --web-arm-only --app-python <격리 web Python>` |
+| 결과 | 각 source에서 1개 수집·1개 수행·OK·skip0, 최종2.852초, exit0 |
+| 합성 owner I/O | SubmitAction1, GetAction1, PRE_DISPATCH/POST_ACTION 두 근거 |
+
+실제 Django HTTP 로그인/CSRF→요청/계획→현재 ARM 제안→원래 key 대조→receipt 표시, 중복 제출409, registry 재시작 후 원본 보존, GET 장부 무변경, 부족한 업무 근거로 완료 차단을 확인했다. 취소 요청과 후속 원본 대조 뒤에도 웹 CANCEL_PENDING/업무 HOLD가 유지된다. 이는 취소를 정지/점유 해제 근거로 바꾸지 않는 검사이며 실제 정지나 물리 퇴피의 수용을 의미하지 않는다.
+
+부모 개발 하네스만 실제 플랫폼을 import하고 독립 승인/관측과 합성 UDS owner를 소유한다. 앱 child에는 proposer credential만 전달했고 observer/approver credential과 플랫폼 Python을 넘기지 않았다. 원본 byte 로그는 Git 밖 workspace-records의 `harbor-product-web-http-evidence/product-web-http-82e4ecf00855.txt`에 보존한다. 로그를 공개 저장소로 복사하지 않았다.
+
+최종 wheel은 소스 밖 전용 venv에서 template/계정 경로·전체 migration·favicon·토큰·브랜드·product CSS를 확인했다. 실제 장치·인증 운영 관측·전체 공정/현장 LAN/TLS·외부 게시·GitHub CI는 이 결과에 포함하지 않는다.
+
 CE: 해당 없음 — 새로 발견한 소프트웨어 경계/Windows 동작의 이유와 회귀는 최종 코드·시험·본 검증 기록에 보존된다. 실물 장치나 운영 장애를 해결한 사실로 기록하지 않는다.
