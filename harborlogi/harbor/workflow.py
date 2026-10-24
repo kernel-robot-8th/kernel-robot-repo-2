@@ -7,7 +7,7 @@ import math
 import sqlite3
 
 from harbor.model import YARD_ARMS, aware_time, identifier, identifiers, revision
-from harbor.process import ProcessBinding
+from harbor.process import ArmTransferBinding, ProcessBinding
 
 
 def _json(value):
@@ -155,7 +155,9 @@ class BusinessLedger:
         revision(plan_revision)
         identifier(outbound_id)
         identifier(outbound_stand)
-        if not isinstance(moves, tuple) or not moves or not all(isinstance(m, ProcessBinding) for m in moves):
+        if (not isinstance(moves, tuple) or not moves
+                or not all(isinstance(m, (ProcessBinding, ArmTransferBinding)) for m in moves)
+                or len({type(m) for m in moves}) != 1):
             raise ValueError("Expected a nonempty immutable bound plan")
         if sum(m.cargo_id == outbound_id for m in moves) != 1 or not any(
                 m.cargo_id == outbound_id and m.destination == outbound_stand for m in moves):
@@ -165,7 +167,8 @@ class BusinessLedger:
                 or not all(isinstance(a, tuple) and a and set(a) <= set(YARD_ARMS) and len(set(a)) == len(a)
                            for a in move_arms)):
             raise ValueError("Expected nonempty A/B arm roles for every move")
-        payload = _json({"revision": plan_revision, "moves": [asdict(m) for m in moves],
+        mode = {"execution_kind": "ARM_TRANSFER"} if isinstance(moves[0], ArmTransferBinding) else {}
+        payload = _json({**mode, "revision": plan_revision, "moves": [asdict(m) for m in moves],
                          "outbound_id": outbound_id, "outbound_stand": outbound_stand,
                          "move_arms": [list(a) for a in move_arms]})
         digest = hashlib.sha256(payload.encode()).hexdigest()
@@ -182,8 +185,10 @@ class BusinessLedger:
         if row["state"] != "PLANNED":
             raise ValueError("Current stage cannot submit a proposal")
         payload = _payload(row)
-        binding = ProcessBinding(**payload["moves"][row["step_index"]])
-        client.compile(binding)
+        neutral = payload.get("execution_kind") == "ARM_TRANSFER"
+        binding = (ArmTransferBinding if neutral else ProcessBinding)(**payload["moves"][row["step_index"]])
+        if not neutral:
+            client.compile(binding)
         with closing(self._connect()) as c, c:
             c.execute("BEGIN IMMEDIATE")
             self._check_current(c, key, row)
@@ -191,14 +196,21 @@ class BusinessLedger:
         intent_version = row["row_version"] + 1
         request_key = f"{key}:{row['step_index']}"
         try:
-            result = client.propose(binding, request_key=request_key)
-            proposal, mission = result["proposal"], result["mission"]
-            mission_id = proposal["proposal_id"]
-            identifier(mission_id)
-            if (proposal["state"] != "RESOLVED" or proposal["request_key"] != request_key
-                    or mission["mission_id"] != mission_id
-                    or mission.get("process_artifact_digest") != binding.process_artifact_digest):
-                raise ValueError("Proposal readback does not match the submitted stage")
+            if neutral:
+                result = binding.check(client.propose_arm(binding, request_key=request_key)["job"], request_key)
+                job = binding.check(client.arm_request(request_key)["job"], request_key)
+                mission_id = job["mission_id"]
+                if result["mission_id"] != mission_id:
+                    raise ValueError("Physical proposal and readback identify different jobs")
+            else:
+                result = client.propose(binding, request_key=request_key)
+                proposal, mission = result["proposal"], result["mission"]
+                mission_id = proposal["proposal_id"]
+                identifier(mission_id)
+                if (proposal["state"] != "RESOLVED" or proposal["request_key"] != request_key
+                        or mission["mission_id"] != mission_id
+                        or mission.get("process_artifact_digest") != binding.process_artifact_digest):
+                    raise ValueError("Proposal readback does not match the submitted stage")
         except BaseException:
             with closing(self._connect()) as c, c:
                 c.execute("UPDATE business SET state='HOLD',row_version=row_version+1 "
@@ -225,10 +237,21 @@ class BusinessLedger:
         row = self.read(key)
         if row["state"] != "WAITING":
             raise ValueError("No current execution to reconcile")
-        job = client.job(row["mission_id"])["job"]
-        if job["mission_id"] != row["mission_id"] or len(job["steps"]) != 1:
-            raise ValueError("Fleet job does not match the bound single-transfer stage")
-        attempt = job["steps"][0].get("attempt_id")
+        payload = _payload(row)
+        if payload.get("execution_kind") == "ARM_TRANSFER":
+            binding = ArmTransferBinding(**payload["moves"][row["step_index"]])
+            job = binding.check(client.arm_job(row["mission_id"])["job"], f"{key}:{row['step_index']}")
+            if job["mission_id"] != row["mission_id"]:
+                raise ValueError("Physical job identity changed")
+            attempt = None
+            if job["status"] == "GOAL_CONFIRMED":
+                receipt = binding.check_receipt(job, client.physical_receipt(row["mission_id"])["receipt"])
+                attempt = receipt["attempt_id"]
+        else:
+            job = client.job(row["mission_id"])["job"]
+            if job["mission_id"] != row["mission_id"] or len(job["steps"]) != 1:
+                raise ValueError("Fleet job does not match the bound single-transfer stage")
+            attempt = job["steps"][0].get("attempt_id")
         if attempt is not None:
             identifier(attempt)
         confirmed = job["status"] == "GOAL_CONFIRMED" and attempt is not None

@@ -73,3 +73,15 @@ class RosyClient:
 
     def trip_request(self, request_key):
         return self._request("GET", "/api/fleet/trip-jobs?request_key=" + quote(request_key, safe=""), None)
+
+    def propose_arm(self, binding, *, request_key):
+        return self._request("POST", "/api/fleet/arm-transfers/jobs", binding.proposal_request(request_key))
+
+    def arm_job(self, mission_id):
+        return self._request("GET", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe=""), None)
+
+    def arm_request(self, request_key):
+        return self._request("GET", "/api/fleet/arm-transfers/jobs?request_key=" + quote(request_key, safe=""), None)
+
+    def physical_receipt(self, mission_id):
+        return self._request("GET", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/physical-receipt", None)
