@@ -107,7 +107,7 @@ class ArmFleet:
         from fleet.server.physical_transfer_evidence import PhysicalTransferPolicy, TransferParticipant
         from fleet.server.physical_transfer_observer import PhysicalTransferObserver
         from fleet.server.physical_transfer_store import TransferInstallation
-        from omx_adapter.action_api import UnixActionServer
+        from omx_adapter.action_api import ActionApi, UnixActionServer
         from rosy.world.state.projections.omx_geometry import load_omx_geometry
         from rosy.world.state.projections.physical_transfer import Bounds3, PhysicalPose
 
@@ -139,7 +139,9 @@ class ArmFleet:
             owner = SyntheticOwner(cap, DeviceActionReceipt, FleetArmTransferGrant, self.scene, self.tasks)
             path = sockets / cap.instance_id / "control.sock"
             path.parent.mkdir(parents=True)
-            server = UnixActionServer(owner, path)
+            framed = ActionApi(None)
+            framed.dispatch = owner.dispatch
+            server = UnixActionServer(framed, path)
             self.owners.append(owner)
             self.servers.append(server)
             self._thread(server.serve_forever)
