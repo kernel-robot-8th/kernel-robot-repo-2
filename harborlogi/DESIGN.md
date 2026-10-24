@@ -87,19 +87,22 @@ components:
 
 ## Overview
 
-**Creative North Star: "HarborLogi 작업 관제"**
+**디자인 철학: 현재 업무와 다음 판단이 분명한 관제.**
 
-The implemented workbench carries the existing HarborLogi navy, teal, orange and ivory identity into a Korean operation interface. Dense task facts sit on quiet surfaces; the current task and next check receive the clearest emphasis.
+Harbor는 사용자가 맡은 화물의 진행, 막힌 이유, 필요한 근거와 다음 행동을 판단하는 업무 도구다. 로봇의 모든 수치를 나열하는 조종판으로 구성하지 않는다. 사용자 확인에 따라 PC 첫 화면은 **조치 필요 중심**으로 설계한다. 전체 업무는 별도 목록에서 찾고 같은 업무 상세로 연결한다.
 
-The local read-only interface separates Harbor business state, ROSY execution and physical receipt evidence. Demo data is visibly identified. This document records the implementation, not production authentication, field usability acceptance or physical device acceptance.
+업무 식별→현재 판단→진행→근거→추적 정보의 순서로 읽게 한다. 전역 탐색, 업무 목록의 선택/필터, 한 업무의 탭을 서로 다른 층으로 둔다. 업무 상태·Fleet 실행·physical receipt·업무 완료 근거를 따로 표시하고 미확인과 조회 실패도 명시한다. 태블릿에서는 같은 업무 원본을 사용하되 배정된 확인과 복귀에 집중한다.
 
-**Key Characteristics:**
+기존 네이비·청록·오렌지·아이보리와 H 아이콘을 유지한다. 브랜드 이미지는 제품 식별과 소개에 쓰고 실제 실행 상태를 대신하지 않는다. 긴 시간 읽는 작업면은 밝고 차분하게 유지하며 중요한 상태는 색과 문구를 함께 쓴다.
 
-- Persistent brand header and adjacent task list.
-- Separate business, execution and evidence sections.
-- Text labels accompany state colors.
+**적용 상태와 정본:** 이 파일의 frontmatter 및 아래 시각 치수는 현재 로컬 조회 앱에서 추출한 기록이다. `.impeccable/design.json`도 같은 구현 기록이다. 다음 전역 네비게이션과 의미별 토큰은 아직 runtime에 적용하지 않았다.
 
-Sources: [PRODUCT.md](PRODUCT.md), [brand assets](assets/brand/README.md), [implementation plan](docs/design/06-web-integration-plan.md), and `harbor/web_assets/{index.html,app.css,app.js}`. The CSS is the implementation source; frontmatter records its reusable values. Earlier product and brand notes that describe the web UI as absent predate this implementation.
+- [디자인 철학](docs/design/07-design-foundation.md): 판단 기준과 정보 위계.
+- [네비게이션](docs/design/08-navigation.md): 조치 필요 첫 화면, 전역 메뉴, 업무 탭, PC/태블릿 이동.
+- [토큰·패턴 계약](docs/design/09-tokens-and-patterns.md), [제안 토큰](design/tokens.proposed.json): 다음 구현의 3단계 토큰과 상태 규칙.
+- 현재 구현 근거: [PRODUCT.md](PRODUCT.md), [브랜드 자산](assets/brand/README.md), [첫 구현](docs/design/06-web-integration-plan.md), `harbor/web_assets/{index.html,app.css,app.js}`.
+
+현재 화면은 장부와 Fleet HTTP를 읽는 기능이 있지만 전체 앱의 네비게이션·인증·쓰기·현장 수용을 완성한 제품은 아니다. 제안 토큰은 채택·CSS 적용·렌더 검증 후 구현 기록으로 갱신한다.
 
 ## Colors
 
@@ -121,7 +124,7 @@ Operate UI uses the system Korean-capable sans stack in frontmatter, without a d
 
 ## Layout
 
-The default workspace is a 320px task rail and a flexible detail column. Main content is capped at 1440px with 40px 42px 32px padding. Plan/execution and evidence use two columns with 40px gaps.
+The implemented workspace is a 320px task list and a flexible detail column. This list is not global application navigation. Main content is capped at 1440px with 40px 42px 32px padding. Plan/execution and evidence use two columns with 40px gaps. The proposed navigation shell and its different widths belong to the linked navigation and token specifications until implemented.
 
 At widths up to 1100px, the rail becomes 270px, main padding becomes 32px 24px, and detail/evidence sections stack with 28px gaps. Up to 700px, the rail sits above details, main padding becomes 28px 18px, and the task list scrolls within 250px. At 1600px and above, the rail becomes 350px and main padding becomes 48px 64px. These are implemented breakpoints, not evidence of acceptance on a deployed tablet.
 
