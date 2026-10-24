@@ -18,7 +18,7 @@
 기존 `tests/integration/arm_http.py`에 웹 projection 검사를 추가하고 **팀 시험 PC에서 명시 실행했다**. 실제 Fleet 소스는 `bb38fdcdd0140873e4e9d0133662982c1d6a30e0`, Harbor는 위 소스 commit이며 두 checkout 모두 깨끗한 상태로 고정했다. 시험 PC의 기존 캐시에 있는 commit으로 별도 detached checkout을 준비했고 실제 서비스나 장치를 사용하지 않았다.
 
 ```text
-python -m tools.integration.real_fleet_http --platform-root <고정 checkout> --platform-sha bb38fdcdd0140873e4e9d0133662982c1d6a30e0 --arm-only
+python -m tools.integration.real_fleet_http --platform-root <고정-checkout> --platform-sha <본문의-플랫폼-commit> --arm-only
 Ran 1 test in 1.222s
 OK
 exit 0 / skip 0
@@ -26,7 +26,7 @@ exit 0 / skip 0
 
 실제 Fleet HTTP 서버와 독립 관측자·synthetic UDS owner를 사용했다. 웹 서버의 `GET /api/work?key=neutral-arm-http`가 실제 RosyClient를 통해 같은 job·receipt를 읽었다. 화면 projection은 `mode=live`, Fleet `GOAL_CONFIRMED`, receipt `VERIFIED`, 같은 attempt를 반환했지만 업무 장부는 `WAITING`이며 조회 전후 모든 row 값이 같았다. Harbor child에는 승인자·관측자 자격이나 플랫폼 import가 없다.
 
-하네스 결과: UDS SubmitAction1회, GetAction1회, PRE_DISPATCH/POST_ACTION proof 각각1개. 이전 ARM 결과를 재사용한 것이 아니라 새 Harbor 소스로 실행했다. raw log는 저장소 밖 작업 기록 `Rosy/docs/workspace-records/2026-10-25/harbor-web-http-evidence/arm-web-http.txt`에 보존한다. 첫 탐색에서 기존 고정 checkout이 없어 실행하지 못한 기록도 보존했으며, 이후 캐시에서 소스를 준비한 재실행이 위 성공 근거다.
+하네스 결과: UDS SubmitAction1회, GetAction1회, PRE_DISPATCH/POST_ACTION proof 각각1개. 이전 ARM 결과를 재사용한 것이 아니라 새 Harbor 소스로 실행했다. raw log는 저장소 밖 작업 기록 `Rosy/docs/workspace-records/2026-10-25/harbor-web-http-evidence/arm-web-http.txt`에 보존한다. 첫 탐색에서는 기존 고정 checkout이 없었고, 이후 캐시에서 별도 소스를 준비한 재실행이 위 성공 근거다.
 
 이 검증은 실제 Fleet 코드의 HTTP/UDS 계약과 웹 projection 연동이다. 물리 시뮬레이터·실측 센서·실물 actuator·현장 안전·브라우저에서의 실제 운영 승인 수용은 아니다. 브라우저 화면 시험은 위 합성 데모와 별도의 근거다.
 
