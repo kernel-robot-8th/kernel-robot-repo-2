@@ -207,7 +207,7 @@ def main():
             visit(page, f'/field/{stale.pk}/')
             page.get_by_text('확인 담당 재배정', exact=True).click()
             page.locator('select[name=assigned_to]').select_option(str(users['field2'].pk))
-            page.get_by_role('button', name='새 담당자에게 재배정').click()
+            page.get_by_role('button', name='새 회차 배정', exact=True).click()
             page.wait_for_load_state('networkidle')
             field.locator('[name=outcome][value=CLEAR]').check()
             with field.expect_response(lambda response: response.request.method == 'POST') as denied:

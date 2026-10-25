@@ -1,8 +1,11 @@
 from django import forms as django_forms
+from django.db.models import Q
+from django.http import Http404, HttpResponseBadRequest
+from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_http_methods
 from harbor_web import forms, services
 from harbor_web.auth import require_roles
-from harbor_web.models import Audit, Measurement
+from harbor_web.models import Audit, Command, DepartureIntent, FieldConfirmation, FieldEpisode, Measurement, Order, Plan
 from harbor_web.views import form_page, page, paginate
 
 
@@ -21,10 +24,36 @@ class ComparisonForm(django_forms.Form):
 @require_http_methods(['GET'])
 def records(request):
     q = request.GET.get('q', '')[:96]
+    object_type = request.GET.get('object_type', '')
+    object_types = ('Cargo', 'CargoFootprint', 'Condition', 'Observation', 'Order', 'Plan', 'Command',
+                    'FieldEpisode', 'FieldConfirmation', 'DepartureIntent', 'Measurement')
+    if object_type and object_type not in object_types:
+        return HttpResponseBadRequest('지원하지 않는 기록 종류입니다.')
+    order_scope = None
     items = Audit.objects.select_related('actor').order_by('-id')
+    if 'order' in request.GET:
+        value = request.GET['order']
+        if not value.isascii() or not value.isdigit():
+            raise Http404('Invalid order.')
+        order_scope = get_object_or_404(Order.objects.select_related('cargo'), pk=value)
+        episodes = FieldEpisode.objects.filter(order=order_scope)
+        scopes = [(Order, [order_scope.pk]), (Plan, Plan.objects.filter(order=order_scope).values_list('pk', flat=True)),
+                  (Command, Command.objects.filter(order=order_scope).values_list('pk', flat=True)),
+                  (FieldEpisode, episodes.values_list('pk', flat=True)),
+                  (FieldConfirmation, FieldConfirmation.objects.filter(episode__in=episodes).values_list('pk', flat=True)),
+                  (DepartureIntent, DepartureIntent.objects.filter(episode__in=episodes).values_list('pk', flat=True))]
+        related = Q(pk__in=[])
+        for model, ids in scopes:
+            related |= Q(object_type=model.__name__, object_id__in=[str(pk) for pk in ids])
+        items = items.filter(related)
+    if object_type:
+        items = items.filter(object_type=object_type)
     if q:
-        items = items.filter(object_id=q)
-    return page(request, 'records.html', section='records', q=q, **paginate(request, items))
+        items = items.filter(object_id=q) if object_type else items.none()
+    return page(request, 'records.html', section='records', q=q, object_type=object_type,
+                object_types=object_types, order_scope=order_scope,
+                scope_warning='ID로 찾으려면 기록 종류를 함께 선택하세요.' if q and not object_type else '',
+                **paginate(request, items))
 
 
 @require_roles('operator')

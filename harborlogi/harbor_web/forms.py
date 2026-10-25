@@ -1,6 +1,7 @@
 from django import forms
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 from harbor_web.models import Cargo, Condition, Measurement, Observation, Order
 
 
@@ -51,9 +52,11 @@ class PlanForm(forms.Form):
     observation = forms.ModelChoiceField(label='검토할 관측 원본', queryset=Observation.objects.none(), empty_label='관측을 선택하세요')
 
     def __init__(self, *args, **kwargs):
+        review_observation = kwargs.pop('review_observation', None)
         super().__init__(*args, **kwargs)
         recent = Observation.objects.order_by('-id').values('pk')[:100]
-        self.fields['observation'].queryset = Observation.objects.filter(pk__in=recent).select_related('condition').order_by('-id')
+        selected = Q(pk=review_observation.pk) if review_observation else Q(pk__in=[])
+        self.fields['observation'].queryset = Observation.objects.filter(Q(pk__in=recent) | selected).select_related('condition').order_by('-id')
         self.fields['observation'].label_from_instance = lambda item: f'{item.source_id} / {item.source_revision} · {item.observed_at:%m-%d %H:%M} · {item.provenance}'
 
 

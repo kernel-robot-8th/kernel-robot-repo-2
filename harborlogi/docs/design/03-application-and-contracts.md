@@ -1,5 +1,7 @@
 # 앱 구성·데이터·연결 계약 상세설계
 
+2026-10-25 현행 구현: Django·역할·영속 입력·ARM 취소/대조는 [13](13-product-web-surface.md), 페이지 맥락과 실제 API/새 Fleet 승인 화면은 [17](17-operator-page-flow.md)·[18](18-harbor-rosy-pipeline.md)이 정본이다. 아래의 신규/미구현 표는 초기 조사 시점의 이력이다.
+
 상태: 전체 운영 구성은 제안이다. 아래 현재/신규 구분과 GAP 표는 조사 기준 `176880c`의 설계 입력이다. 후속으로 [로컬 조회 웹](../web-workbench.md)을 구현했으며 읽기 전용 adapter로 GAP-02의 조회 부작용을 피한다. 운영 인증·업무 쓰기·DB migration·다중 worker는 개방하지 않았다. 외부 계약 정본은 플랫폼 API reference, Harbor 소비 기준은 [platform-contract.md](../platform-contract.md)다.
 
 ## 1. 프로세스와 배포 경계

@@ -8,7 +8,8 @@ from django.views.decorators.http import require_http_methods
 from harbor_web import commands, services
 from harbor_web.auth import has_role, require_roles
 from harbor_web.models import Command, Plan
-from harbor_web.views import page, paginate, reason_text
+from harbor_web.pipeline import COMMAND_LABELS, pipeline_for
+from harbor_web.views import page, paginate, reason_text, selected_observation
 
 
 class CommandForm(forms.Form):
@@ -42,6 +43,7 @@ def gate_text(code):
 @require_http_methods(['GET', 'POST'])
 def plan_detail(request, pk):
     plan = get_object_or_404(Plan.objects.select_related('order__cargo', 'observation', 'condition'), pk=pk)
+    review_observation = selected_observation(request, default_latest=True)
     gate = commands.capability(plan)
     if request.method == 'POST':
         if not has_role(request.user, 'operator'):
@@ -57,7 +59,7 @@ def plan_detail(request, pk):
         return render(request, 'error.html', dict(reason='검토한 revision이 올바르지 않습니다.', return_url=f'/plans/{pk}/'), status=400)
     if plan.order.kind == 'OUTBOUND':
         from harbor_web.workspace import workspace_context
-        return page(request, 'workspace.html', section='outbound', **workspace_context(plan.order, plan))
+        return page(request, 'workspace.html', section='outbound', **workspace_context(plan.order, plan, review_observation=review_observation))
     observation_stage = None
     if plan.observation.payload.get('schema') == 'grid-placement-v1':
         from harbor_web.yard_view import spatial_yard_view
@@ -75,7 +77,10 @@ def work_list(request):
     items = Command.objects.select_related('plan__order__cargo').filter(Q(plan__order__cargo__code__icontains=q) | Q(mission_id__icontains=q)).order_by('-id')
     if state in dict(Command._meta.get_field('state').choices):
         items = items.filter(state=state)
-    return page(request, 'work.html', section='work', q=q, state=state, **paginate(request, items))
+    context = paginate(request, items)
+    for command in context['page']:
+        command.display_state = COMMAND_LABELS.get(command.state, '원래 실행 대조 필요')
+    return page(request, 'work.html', section='work', q=q, state=state, **context)
 
 
 @require_roles('viewer', 'operator', 'admin')
@@ -103,4 +108,6 @@ def work_detail(request, pk):
             return redirect(f'/work/{pk}/')
         return render(request, 'error.html', dict(reason='요청 형식이나 취소 사유가 올바르지 않습니다.', return_url=f'/work/{pk}/'), status=400)
     detail = commands.command_detail(command)
-    return page(request, 'work_detail.html', section='work', command=command, detail=detail, gate_reason=gate_text(detail['reason']))
+    return page(request, 'work_detail.html', section='work', command=command, detail=detail,
+                pipeline=pipeline_for(command.plan.order, command.plan, command, detail),
+                gate_reason=gate_text(detail['reason']))

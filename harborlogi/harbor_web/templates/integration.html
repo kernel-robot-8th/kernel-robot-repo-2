@@ -1,0 +1,15 @@
+{% extends 'base.html' %}{% block title %}ROSY 연동{% endblock %}{% block content %}
+<nav class="breadcrumbs" aria-label="현재 위치"><a href="/settings/">설정·계정</a><span>/</span><span>ROSY 연동</span></nav>
+<div class="page-head"><div><h1>ROSY 연동</h1><p>설정된 연결과 운영에 필요한 근거를 구분해 확인합니다.</p></div><a href="/workflow/">전체 업무 흐름</a></div>
+<div class="notice info"><strong>이 화면은 저장된 설정을 읽습니다.</strong><p>화면을 여는 것으로 Fleet에 명령이나 연결 시험을 보내지 않습니다. 주소 설정과 로그인 성공만으로 API 호환성이나 운영 준비를 확인할 수 없습니다.</p></div>
+<dl class="facts"><div><dt>Fleet 설정</dt><dd>{% if connection.configured %}설정 있음{% else %}미설정{% endif %}</dd></div><div><dt>Fleet 콘솔</dt><dd>{% if connection.links.console %}<a href="{{ connection.links.console }}" target="_blank" rel="noreferrer">ROSY Fleet 열기 ↗</a>{% else %}유효한 연결 주소 필요{% endif %}</dd></div><div><dt>ARM 승인 화면 설치 선언</dt><dd>{% if connection.arm_console_enabled %}선언됨 · 검증 별도{% else %}미선언{% endif %}</dd></div></dl>
+<div class="table-wrap"><table><caption>인계 단계별 책임과 수용 조건</caption><thead><tr><th scope="col">단계·담당</th><th scope="col">필요한 결과</th></tr></thead><tbody>
+<tr><td>관측·계획 · Harbor</td><td>같은 화물 크기·배치 revision, 유효 시각과 검증된 설치 대응</td></tr>
+<tr><td>제안 · Harbor → Fleet</td><td>저장된 요청 키·transfer digest·서비스 신원의 일치</td></tr>
+<tr><td>승인 · Fleet 독립 운영자</td><td>현재 proposal digest·generation 확인 후 명시적 승인</td></tr>
+<tr><td>수행 · ROSY</td><td>자원 배정·안전 조건·동작 결과와 실행 시도 식별</td></tr>
+<tr><td>물리 대조 · 독립 관측자 / Fleet</td><td>실행 전후 측정에 연결된 검증된 physical receipt</td></tr>
+<tr><td>업무 완료 · Harbor</td><td>반출 위치·재취급 복귀·관련 팔 퇴피의 인증된 근거</td></tr>
+</tbody></table></div>
+<p class="helptext">현재 다칸 실행 binding과 인증된 업무 근거 연결은 추가 수용이 필요합니다. 새 ARM 승인 화면을 설치한 Fleet에서만 해당 작업 바로가기를 사용합니다.</p>
+{% endblock %}

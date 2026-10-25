@@ -85,7 +85,7 @@ def _spatial_stages(order, plan, source):
     return stages, display_moves
 
 
-def workspace_context(order, plan=None, *, priority_form=None, plan_form=None):
+def workspace_context(order, plan=None, *, priority_form=None, plan_form=None, review_observation=None):
     from harbor_web.views import reason_text
     from harbor_web.planning_pages import gate_text
 
@@ -94,7 +94,8 @@ def workspace_context(order, plan=None, *, priority_form=None, plan_form=None):
     if plan is None:
         plan = command.plan if command else plans.first()
     latest = Observation.objects.select_related('condition').order_by('-id').first()
-    source = plan.observation if plan else latest
+    review_observation = review_observation or latest
+    source = plan.observation if plan else review_observation
     stages, moves = _yard_stages(order, plan, source)
     changes = plan_changes(order, plan)
     gate = commands.capability(plan) if plan else dict(enabled=False, reason='', fleet_url=None)
@@ -127,14 +128,18 @@ def workspace_context(order, plan=None, *, priority_form=None, plan_form=None):
         audit_scope |= Q(object_type='Command', object_id=str(command.pk))
     history = Audit.objects.filter(audit_scope).select_related('actor').order_by('-id')[:20]
     if plan_form is None:
-        plan_form = forms.PlanForm(initial=dict(expected_version=order.version, observation=latest.pk if latest else None))
+        plan_form = forms.PlanForm(review_observation=review_observation,
+            initial=dict(expected_version=order.version, observation=review_observation.pk if review_observation else None))
     if priority_form is None:
         priority_form = forms.PriorityForm(initial=dict(expected_version=order.version, priority_group=order.priority_group,
             sequence=order.sequence, tie_policy=order.tie_policy, note=order.note))
     completion_plan = command.plan if command else plan
     completion_moves = completion_plan.result['moves'] if completion_plan else []
     related_arms = sorted({arm for move in completion_moves for arm in [move['primary_arm'], *move['alternate_arms']]})
+    from harbor_web.pipeline import pipeline_for
     return dict(order=order, plan=plan, plans=plans, command=command, execution=detail,
+        pipeline=pipeline_for(order, plan, command, detail), review_observation=review_observation,
+        review_differs=bool(plan and review_observation and plan.observation_id != review_observation.pk),
         source=source, latest_source=latest, yard_stages=stages, display_moves=moves,
         plan_changes=changes, different_execution_plan=different, decision=decision,
         gate=gate, gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']) if plan else '',

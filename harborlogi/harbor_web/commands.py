@@ -340,6 +340,7 @@ def command_detail(command):
             if job['mission_id'] != row['mission_id'] or job.get('proposal_principal_id') != command.fleet_principal:
                 raise ValueError('Stored fact identity differs')
             receipt = binding.check_receipt(job, fact.receipt) if fact.receipt else None
-        return dict(ledger=dict(row) if row else None, job=job, receipt=receipt, reason=command.reason)
+        return dict(ledger=dict(row) if row else None, job=job, receipt=receipt, reason=command.reason,
+                    read_at=fact.read_at if job else None)
     except (ValidationError, Conflict, ValueError, sqlite3.Error):
-        return dict(ledger=None, job=None, receipt=None, reason='LEDGER_UNAVAILABLE')
+        return dict(ledger=None, job=None, receipt=None, reason='LEDGER_UNAVAILABLE', read_at=None)

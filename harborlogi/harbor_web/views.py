@@ -2,7 +2,7 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Q
-from django.http import HttpResponseBadRequest
+from django.http import Http404, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
@@ -19,6 +19,15 @@ def paginate(request, items):
     query = request.GET.copy()
     query.pop('page', None)
     return dict(page=Paginator(items, 25).get_page(request.GET.get('page')), query=query.urlencode())
+
+
+def selected_observation(request, *, default_latest=False):
+    if 'observation' in request.GET:
+        value = request.GET['observation']
+        if not value.isascii() or not value.isdigit():
+            raise Http404('Invalid observation.')
+        return get_object_or_404(Observation.objects.select_related('condition'), pk=value)
+    return Observation.objects.select_related('condition').order_by('-pk').first() if default_latest else None
 
 
 def form_error(form, error):
@@ -59,6 +68,18 @@ def overview(request):
         plan = plans.get(order.pk)
         action = '계획 확인' if plan else ('입고 인계 조건 확인' if order.kind == 'INBOUND' else '관측 선택·계획 검토')
         row = dict(order=order, plan=plan, action=action, reason=reason_text(plan.result['reason']) if plan else ('입고 실행 인계 조건을 확인하세요.' if order.kind == 'INBOUND' else '관측 원본과 반출 순서를 검토하세요.'), status=plan.result['status'] if plan else '', status_label=plan.result['status'] if plan else '계획 전', href=f'/requests/{order.pk}/')
+        if order.kind == 'INBOUND':
+            from harbor_web.field_pages import episode_status
+            episode = FieldEpisode.objects.filter(order=order).select_related('order__cargo', 'assigned_to').order_by('-pk').first()
+            if episode:
+                state = episode_status(episode)
+                row.update(action=state['action'], reason=state['reason'], href=state['href'],
+                           status=episode.state, status_label=state['status_label'])
+                if not has_role(request.user, 'operator', 'admin'):
+                    row.update(action='입고 진행 확인', href=f'/requests/{order.pk}/')
+            else:
+                row.update(action='현장 확인 배정', reason='차량과 담당자를 지정해 입고 확인 회차를 배정하세요.',
+                           status_label='배정 전', href=f'/requests/{order.pk}/')
         changes = plan_changes(order, plan, current_queue_digest=current_queue_digest)
         if changes:
             row.update(status='HOLD', status_label='계획 재검토', reason=changes[0]['message'], action='최신 기준으로 검토')
@@ -98,7 +119,8 @@ def cargo_footprint(request, pk):
     if request.method == 'POST' and not has_role(request.user, 'operator'):
         from django.core.exceptions import PermissionDenied
         raise PermissionDenied
-    form = forms.FootprintForm(request.POST or None)
+    current_footprint = CargoFootprint.objects.filter(cargo=cargo).order_by('-pk').first()
+    form = forms.FootprintForm(request.POST or None, initial={'length_cells': current_footprint.length_cells if current_footprint else 1})
     if request.method == 'POST' and form.is_valid():
         try:
             services.register_footprint(request.user, cargo_id=pk, **form.cleaned_data)
@@ -107,7 +129,7 @@ def cargo_footprint(request, pk):
         else:
             messages.success(request, '새 점유 크기를 기록했습니다. 과거 관측과 계획의 크기 원본은 유지됩니다.')
             return redirect(f'/cargo/{pk}/footprint/')
-    return page(request, 'cargo_footprint.html', section='cargo', cargo=cargo, form=form,
+    return page(request, 'cargo_footprint.html', section='cargo', cargo=cargo, form=form, current_footprint=current_footprint,
                 footprints=CargoFootprint.objects.filter(cargo=cargo).select_related('created_by').order_by('-pk'))
 
 
@@ -120,11 +142,13 @@ def cargo_new(request):
 @require_roles('viewer', 'operator', 'admin')
 @require_http_methods(['GET'])
 def order_list(request):
+    observation = selected_observation(request)
     q, kind = request.GET.get('q', '')[:200], request.GET.get('kind', '')
     items = Order.objects.select_related('cargo').filter(Q(cargo__code__icontains=q) | Q(cargo__name__icontains=q)).order_by('priority_group', 'sequence', 'id')
     if kind in {'INBOUND', 'OUTBOUND'}:
         items = items.filter(kind=kind)
-    return page(request, 'requests.html', section='cargo', q=q, kind=kind, **paginate(request, items))
+    return page(request, 'requests.html', section='cargo', q=q, kind=kind, review_observation=observation,
+                observation_query=f'observation={observation.pk}' if observation else '', **paginate(request, items))
 
 
 @require_roles('viewer', 'operator', 'admin')
@@ -155,16 +179,24 @@ def outbound_queue(request):
 @require_roles('operator')
 @require_http_methods(['GET', 'POST'])
 def order_new(request):
-    initial = {'kind': request.GET['kind']} if request.GET.get('kind') in {'INBOUND', 'OUTBOUND'} else None
-    return form_page(request, form_type=forms.OrderForm, title='업무 요청 등록', section='cargo', description='업무 지시와 우선순위를 저장합니다. 요청 등록으로 실제 화물 위치가 바뀌지 않습니다.', save=lambda data: services.create_order(request.user, **data), destination=lambda obj: f'/requests/{obj.pk}/', initial=initial)
+    observation = selected_observation(request)
+    initial = {'kind': request.GET['kind']} if request.GET.get('kind') in {'INBOUND', 'OUTBOUND'} else {}
+    if 'cargo' in request.GET:
+        if not request.GET['cargo'].isascii() or not request.GET['cargo'].isdigit():
+            raise Http404('Invalid cargo.')
+        initial['cargo'] = get_object_or_404(Cargo, pk=request.GET['cargo'])
+    suffix = f'?observation={observation.pk}' if observation else ''
+    return form_page(request, form_type=forms.OrderForm, title='업무 요청 등록', section='cargo', description='업무 지시와 우선순위를 저장합니다. 요청 등록으로 실제 화물 위치가 바뀌지 않습니다.', save=lambda data: services.create_order(request.user, **data), destination=lambda obj: f'/requests/{obj.pk}/{suffix}', initial=initial)
 
 
 @require_roles('viewer', 'operator', 'admin')
 @require_http_methods(['GET', 'POST'])
 def order_detail(request, pk):
     order = get_object_or_404(Order.objects.select_related('cargo'), pk=pk)
+    observation = selected_observation(request, default_latest=True)
+    suffix = f'?observation={observation.pk}' if observation else ''
     priority = forms.PriorityForm(initial=dict(expected_version=order.version, priority_group=order.priority_group, sequence=order.sequence, tie_policy=order.tie_policy, note=order.note))
-    plan_form = forms.PlanForm(initial={'expected_version': order.version})
+    plan_form = forms.PlanForm(initial={'expected_version': order.version, 'observation': observation}, review_observation=observation)
     if request.method == 'POST':
         if not has_role(request.user, 'operator'):
             from django.core.exceptions import PermissionDenied
@@ -175,7 +207,7 @@ def order_detail(request, pk):
         if action == 'priority':
             active = priority = forms.PriorityForm(request.POST)
         else:
-            active = plan_form = forms.PlanForm(request.POST)
+            active = plan_form = forms.PlanForm(request.POST, review_observation=observation)
         if active.is_valid():
             try:
                 if action == 'priority':
@@ -190,18 +222,23 @@ def order_detail(request, pk):
                 form_error(active, error)
             else:
                 messages.success(request, '요청 revision을 변경했습니다. 기존 계획은 원래 기준을 유지합니다.')
-                return redirect(f'/requests/{pk}/')
+                return redirect(f'/requests/{pk}/{suffix}')
     if order.kind == 'OUTBOUND':
         from harbor_web.workspace import workspace_context
-        return page(request, 'workspace.html', section='outbound', **workspace_context(order, priority_form=priority, plan_form=plan_form))
-    return page(request, 'request_detail.html', section='cargo', order=order, priority_form=priority, plan_form=plan_form, plans=Plan.objects.filter(order=order).order_by('-id'))
+        return page(request, 'workspace.html', section='outbound', **workspace_context(order, priority_form=priority, plan_form=plan_form, review_observation=observation))
+    from harbor_web.field_pages import episode_status
+    episode_rows = [dict(episode=episode, **episode_status(episode)) for episode in
+                    FieldEpisode.objects.filter(order=order).select_related('order__cargo', 'assigned_to').order_by('-pk')]
+    return page(request, 'request_detail.html', section='cargo', order=order, priority_form=priority, plan_form=plan_form,
+                plans=Plan.objects.filter(order=order).order_by('-id'), episode_rows=episode_rows,
+                review_observation=observation, observation_query=f'observation={observation.pk}' if observation else '')
 
 
 @require_roles('viewer', 'operator', 'admin')
 @require_http_methods(['GET'])
 def inventory(request):
     observations = Observation.objects.select_related('condition').order_by('-id')
-    selected = get_object_or_404(observations, pk=request.GET['observation']) if request.GET.get('observation', '').isdigit() else observations.first()
+    selected = selected_observation(request, default_latest=True)
     from harbor_web.yard_view import yard_view, spatial_yard_view
     view = (spatial_yard_view(services.spatial_snapshot(selected)) if selected.payload.get('schema') == 'grid-placement-v1'
             else yard_view(selected.payload['bays'], selected.condition.payload)) if selected else None

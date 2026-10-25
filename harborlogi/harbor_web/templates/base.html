@@ -14,11 +14,11 @@
 <a href="/outbound/" {% if section == 'outbound' %}aria-current="page"{% endif %}>반출 관제</a>
 <a href="/requests/" {% if section == 'cargo' %}aria-current="page"{% endif %}>화물·요청</a>
 <a href="/inventory/" {% if section == 'inventory' %}aria-current="page"{% endif %}>재고·관측</a>
-<a href="/work/" {% if section == 'work' %}aria-current="page"{% endif %}>작업</a>
+<a href="/work/" {% if section == 'work' %}aria-current="page"{% endif %}>실행·대조</a>
 <a href="/records/" {% if section == 'records' %}aria-current="page"{% endif %}>기록·검증</a>{% endif %}
 {% if can_field or can_operate or can_admin %}<a href="/field/" {% if section == 'field' %}aria-current="page"{% endif %}>현장 확인</a>{% endif %}
 {% if can_admin %}<a class="utility" href="/settings/" {% if section == 'settings' %}aria-current="page"{% endif %}>설정·계정</a>{% endif %}
-</nav><div class="sidebar-foot">{% for role in app_roles %}<span>{{ role }}</span>{% empty %}역할 미배정{% endfor %}<p>실행 승인·장치 운영은 ROSY Fleet에서 진행합니다.</p></div></aside>{% endif %}
+<a class="utility" href="/workflow/" {% if section == 'workflow' %}aria-current="page"{% endif %}>업무 안내</a></nav><div class="sidebar-foot">{% for role in app_roles %}<span>{{ role }}</span>{% empty %}역할 미배정{% endfor %}<p>실행 승인·장치 운영은 ROSY Fleet에서 진행합니다.</p></div></aside>{% endif %}
 <main id="main" tabindex="-1" class="{% if not user.is_authenticated %}signed-out{% endif %}">
 {% for message in messages %}<div role="status" class="notice">{{ message }}</div>{% endfor %}
 {% block content %}{% endblock %}</main>

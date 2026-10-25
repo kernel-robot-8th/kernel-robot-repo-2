@@ -95,7 +95,11 @@ def main():
             page.locator('[name=password]').fill(password)
             page.locator('main button[type=submit]').click()
             page.wait_for_load_state('networkidle')
-            page.goto(origin + f'/requests/{order.pk}/')
+            page.goto(origin + f'/inventory/?observation={observed.pk}')
+            page.locator(f'a[href="/requests/?kind=OUTBOUND&observation={observed.pk}"]').click()
+            page.locator(f'a[href="/requests/{order.pk}/?observation={observed.pk}"]').click()
+            assert page.locator('[name=observation]').input_value() == str(observed.pk)
+            result['checks'].append('Selected inventory source survives request list and workspace; no silent latest-source fallback')
             page.locator('[name=observation]').select_option(str(observed.pk))
             page.get_by_role('button', name='반출 계획 만들기', exact=True).click()
             page.wait_for_load_state('networkidle')
@@ -137,6 +141,10 @@ def main():
                 page.screenshot(path=str(output / f'{width}-expected.png'), full_page=True)
                 assert not page.evaluate('document.documentElement.scrollWidth > innerWidth'), width
                 result['viewports'].append(dict(width=width, height=height, overflow=False))
+                page.goto(origin + '/workflow/')
+                assert page.locator('.journey-list > li').count() == 5
+                assert not page.evaluate('document.documentElement.scrollWidth > innerWidth'), width
+                page.screenshot(path=str(output / f'{width}-workflow.png'), full_page=True)
             result['checks'].append('Four widths: merged 2x1 and3x1 identity, coverage9, keyboard layer retention, independent auxiliary layers, atomic outbound/restoration, no overflow')
             no_js_context = browser.new_context(java_script_enabled=False)
             no_js_context.add_cookies(page.context.cookies())

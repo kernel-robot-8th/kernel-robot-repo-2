@@ -1,5 +1,9 @@
 # Harbor 제품 웹 실행과 운영 경계
 
+현재 페이지별 업무 목적과 다음 조치는 [운영 흐름](design/17-operator-page-flow.md), 실제 ROSY 호출과 승인 화면 배포 기준은 [파이프라인](design/18-harbor-rosy-pipeline.md)을 따른다. 웹에서는 `/workflow/`로 역할별 안내, 관리자는 `/settings/integration/`로 설정·수용 조건을 확인한다. 실행 메뉴 이름은 ‘실행·대조’다.
+
+새 Fleet ARM 화면을 포함한 배포에서만 `HARBOR_FLEET_ARM_CONSOLE_ENABLED=1`을 설정한다(기본 미선언). 이 값은 설치 선언이며 API 호환성·승인·물리/업무 수용의 증거가 아니다. 미선언 상태에서는 작업 ID와 일반 Fleet 콘솔로 인계하고 지원되지 않는 승인 바로가기를 약속하지 않는다.
+
 상태: 지원된 웹 범위 구현·검증 완료. 운영 계약·실물 수용 게이트는 별도다. 기존 조회 preview와 달리 계정/역할과 영속 업무 입력을 가진 앱이다. [ADR0007](adr/0007-authenticated-harbor-web.md), [화면·동작 계약](design/13-product-web-surface.md), [완성 계획](design/12-web-product-completion.md)을 따른다. 실물 장치 수용/외부 게시를 의미하지 않는다.
 
 ## 로컬 화면 검토
