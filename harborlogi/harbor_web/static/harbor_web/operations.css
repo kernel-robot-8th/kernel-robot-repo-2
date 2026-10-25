@@ -1,0 +1,58 @@
+.operations-selector label {min-width:0;max-width:48rem;flex:1}
+.operations-selector select {width:100%;min-width:0}
+.operations-summary {background:var(--semantic-surface-panel);border:1px solid var(--semantic-border-divider);border-radius:12px;margin:var(--primitive-space-6) 0;overflow:hidden}
+.operations-heading {display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:var(--primitive-space-3);padding:var(--primitive-space-4) var(--primitive-space-6)}
+.operations-heading h2,.operations-heading p {margin:0}
+.operations-heading p {font-size:var(--primitive-font-label);color:var(--semantic-text-secondary)}
+.operations-strip {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));background:var(--primitive-color-teal-50);border-block:1px solid var(--semantic-border-divider)}
+.operations-strip>div {padding:var(--primitive-space-6) var(--primitive-space-6);min-width:0}
+.operations-strip>div+div {border-left:1px solid var(--semantic-border-divider)}
+.operations-strip span {display:block;font-size:var(--primitive-font-label);font-weight:600}
+.operations-strip strong {display:block;font-size:var(--primitive-font-page);font-variant-numeric:tabular-nums;line-height:1.5;margin-top:var(--primitive-space-2)}
+.operations-strip strong small {font-size:var(--primitive-font-label);font-weight:400}
+.operations-strip p {font-size:var(--primitive-font-caption);color:var(--semantic-text-secondary);margin:var(--primitive-space-2) 0 0}
+.operations-source {padding:0 var(--primitive-space-6);font-size:var(--primitive-font-caption);overflow-wrap:anywhere}
+.operations-source strong {color:var(--primitive-color-warning-ink);margin-left:var(--primitive-space-2)}
+.operations-detail {display:grid;grid-template-columns:1fr 1fr;gap:var(--primitive-space-8);padding:var(--primitive-space-2) var(--primitive-space-6) var(--primitive-space-6)}
+.operations-detail>section {min-width:0}
+.operations-detail h3 {font-size:var(--primitive-font-section);margin:0 0 var(--primitive-space-3)}
+.operations-detail p,.operations-detail li {font-size:var(--primitive-font-label)}
+.operations-detail section>ul:not(.operations-areas) {padding-left:var(--primitive-space-4);max-height:160px;overflow:auto}
+.operations-areas {list-style:none;padding:0;display:grid;gap:var(--primitive-space-3);max-height:220px;overflow:auto}
+.operations-areas li>div {display:flex;justify-content:space-between;gap:var(--primitive-space-3);flex-wrap:wrap}
+.operations-areas meter {width:100%;height:12px;accent-color:var(--primitive-color-teal-dark)}
+.operations-areas meter::-webkit-meter-bar {background:var(--semantic-surface-canvas);border:0}
+.operations-areas meter::-webkit-meter-optimum-value {background:var(--primitive-color-teal-dark)}
+.operations-handoffs {margin:0 var(--primitive-space-6) var(--primitive-space-4);font-size:var(--primitive-font-label)}
+.operations-unmeasured {margin:0;padding:var(--primitive-space-4) var(--primitive-space-6);background:var(--primitive-color-navy-soft);font-size:var(--primitive-font-label)}
+.workspace-explanation {margin:var(--primitive-space-6) 0}
+.plan-explanation {padding:var(--primitive-space-6);border:1px solid var(--semantic-border-divider);border-radius:12px;background:var(--semantic-surface-panel);margin:var(--primitive-space-6) 0;min-width:0}
+.plan-explanation h2 {margin:0 0 var(--primitive-space-3);font-size:var(--primitive-font-section)}
+.route-summary {font-weight:600;color:var(--primitive-color-teal-dark);margin:0 0 var(--primitive-space-2)}
+.route-summary span {color:var(--semantic-text-secondary);font-weight:400}
+.cargo-routes {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr));gap:var(--primitive-space-6);margin-top:var(--primitive-space-4)}
+.cargo-route {min-width:0;padding-top:var(--primitive-space-3);border-top:1px solid var(--semantic-border-divider);overflow-wrap:anywhere}
+.cargo-route h3 {margin:0 0 var(--primitive-space-2);font-size:var(--primitive-font-body)}
+.cargo-route-view {display:inline-flex;align-items:center;min-height:44px;font-size:var(--primitive-font-label)}
+.cargo-route p,.cargo-route li,.plan-comparison p {font-size:var(--primitive-font-label)}
+.cargo-route ol {padding-left:var(--primitive-space-6);margin:var(--primitive-space-3) 0}
+.cargo-route li+li {margin-top:var(--primitive-space-2)}
+.plan-comparison {margin-top:var(--primitive-space-6);padding-top:var(--primitive-space-4);border-top:1px solid var(--semantic-border-divider)}
+.plan-comparison h3 {font-size:var(--primitive-font-body);margin:0}
+.plan-comparison .table-scroll {overflow:auto;max-height:320px;border:1px solid var(--semantic-border-divider);border-radius:var(--primitive-radius-control)}
+.plan-comparison td {min-width:100px;overflow-wrap:anywhere}
+.plan-comparison details {font-size:var(--primitive-font-label);margin-top:var(--primitive-space-3)}
+.scene-playback {display:flex;align-items:center;flex-wrap:wrap;gap:var(--primitive-space-4);padding:var(--primitive-space-3) var(--primitive-space-4);border-top:1px solid var(--semantic-border-divider);background:var(--primitive-color-teal-50)}
+.scene-playback label {display:flex;align-items:center;gap:var(--primitive-space-2);font-size:var(--primitive-font-label);font-weight:600}
+.scene-playback select {width:auto;min-height:40px;font-size:var(--primitive-font-label)}
+.scene-playback p {margin:0;font-size:var(--primitive-font-label);color:var(--semantic-text-secondary)}
+@media(max-width:1000px) {.operations-strip {grid-template-columns:1fr 1fr}.operations-strip strong {font-size:var(--primitive-font-section)}.operations-detail {gap:var(--primitive-space-6)}}
+@media(max-width:650px) {
+  .operations-heading,.operations-strip>div,.operations-detail,.operations-unmeasured {padding:var(--primitive-space-4)}
+  .operations-strip,.operations-detail {grid-template-columns:1fr}
+  .operations-strip>div+div {border-left:0;border-top:1px solid var(--semantic-border-divider)}
+  .operations-source {padding:0 var(--primitive-space-4)}
+  .operations-handoffs {margin-inline:var(--primitive-space-4)}
+  .plan-explanation {padding:var(--primitive-space-4)}
+  .scene-playback label,.scene-playback select {width:100%}
+}

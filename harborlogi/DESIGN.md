@@ -224,7 +224,11 @@ H 아이콘은 `assets/brand/harbor-app-icon-20261023.png`를 `/assets/icon.png`
 - Don't present declared inventory, audit records or fixture comparisons as authenticated operational evidence or field performance acceptance.
 - Do label synthetic observed stacks and projected plan results separately; keep HOLD free of partial moves or projected completion.
 
-## 아이콘 중심 네비게이션 (2026-10-26)
+## 물량·경로·재계획을 읽는 관제 (2026-10-26)
+
+mode: Operate. [설계23](docs/design/23-operations-replan-playback.md). 첫 화면은 선택 관측의 화물/점유와 전체 등록 지시·계획 작업량을 읽는 단위를 먼저 구분한다. 실제 완료량은 근거가 없으면 미집계로 표시한다. 작업 공간은 화물별 출발→임시→반출/재적재와 이전/현재 제안을 나란히 보여준다. 경로에서 같은3D 개체로 이동할 수 있다. 기본4.5초의 이동과 로컬 편집 재생은 이해를 돕는 설명이며 실제 경로/작업 시간으로 표현하지 않는다. 기존 브랜드·의미 토큰을 재사용한다.
+
+### 아이콘 중심 네비게이션의 기존 적용
 
 mode: Operate. PC 주 메뉴는 76px 아이콘 레일을 기본으로 제공한다. 이름 펼치기 버튼으로 기존 폭과 이름을 복원하고 해당 브라우저의 선택을 보존한다. 메뉴 아이콘은 같은 24px·1.8px 선의 자체 SVG이며 이름·경로·역할별 표시·현재 위치를 유지한다. 마우스와 키보드 포커스로 용도 툴팁을 표시하고 Escape로 닫는다. 툴팁 위로 포인터를 옮겨도 읽을 수 있으며 화면 안에 배치한다.
 

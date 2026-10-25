@@ -70,6 +70,8 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     if (disposed || failed) return;
     const changed = orbit.update();
     renderer.render(scene, camera);
+    canvas.dataset.renderedPositions = JSON.stringify(Object.fromEntries([...models].map(([id, model]) =>
+      [id, {x:model.group.position.x, y:model.group.position.z, z:model.group.position.y}])));
     canvas.dataset.renderRevision = String(++renderRevision);
     if (changed) invalidate();
   }

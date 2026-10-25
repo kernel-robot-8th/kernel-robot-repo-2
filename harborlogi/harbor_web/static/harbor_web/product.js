@@ -1,4 +1,17 @@
 'use strict';
+document.querySelectorAll('[data-plan-cargo]').forEach(link => link.addEventListener('click', event => {
+  const figure = document.querySelector('[data-yard-3d][data-ready="true"]');
+  if (!figure) return;
+  if (figure.hidden) figure.closest('[data-yard-preview]')?.querySelector('[data-yard-view="3d"]')?.click();
+  const cargo = figure.querySelector('[data-scene-cargo]');
+  if (![...cargo.options].some(option => option.value === link.dataset.planCargo) && link.dataset.planKind === 'intake-recommendation') {
+    document.querySelector('[data-yard-stage="1"]')?.click();
+  }
+  if (![...cargo.options].some(option => option.value === link.dataset.planCargo)) return;
+  event.preventDefault();
+  cargo.value = link.dataset.planCargo; cargo.dispatchEvent(new Event('change', {bubbles:true}));
+  figure.scrollIntoView({block:'start'}); cargo.focus({preventScroll:true});
+}));
 document.documentElement.classList.add('js');
 const toggle = document.getElementById('nav-toggle');
 const navigation = document.getElementById('navigation');
