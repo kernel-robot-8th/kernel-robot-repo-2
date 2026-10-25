@@ -60,6 +60,9 @@ def plan_detail(request, pk):
     if plan.order.kind == 'OUTBOUND':
         from harbor_web.workspace import workspace_context
         return page(request, 'workspace.html', section='outbound', **workspace_context(plan.order, plan, review_observation=review_observation))
+    if plan.result.get('plan_kind') == 'inbound-placement':
+        from harbor_web.placement_view import placement_context
+        return page(request, 'placement_plan.html', section='cargo', **placement_context(plan))
     from harbor_web.yard_scene import present_stage, scene_for
     observation_stage = None
     if plan.observation.payload.get('schema') == 'grid-placement-v1':

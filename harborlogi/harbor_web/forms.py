@@ -50,6 +50,8 @@ class PriorityForm(forms.Form):
 class PlanForm(forms.Form):
     expected_version = forms.IntegerField(widget=forms.HiddenInput)
     observation = forms.ModelChoiceField(label='검토할 관측 원본', queryset=Observation.objects.none(), empty_label='관측을 선택하세요')
+    automatic = forms.BooleanField(label='지시·관측이 바뀌면 자동 재계획', required=False, initial=True,
+        help_text='선택한 출처와 설치 기준에 결속합니다. 계산 결과만 새 버전으로 보존하며 이미 인계한 실행은 바꾸지 않습니다. 해제 후 계산하면 자동 재계획을 끕니다.')
 
     def __init__(self, *args, **kwargs):
         review_observation = kwargs.pop('review_observation', None)

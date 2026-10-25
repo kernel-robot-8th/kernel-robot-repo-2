@@ -182,7 +182,7 @@ class MulticellServicesTests(TestCase):
             priority_group=1, sequence=1, tie_policy='FIXED')
         plan = services.make_plan(self.operator, order_id=order.pk, expected_version=1,
             observation_id=observation.pk, now=self.now)
-        self.assertEqual(plan.result['reason'], 'INBOUND_PLANNER_NOT_AVAILABLE')
+        self.assertEqual(plan.result['reason'], 'INBOUND_ALREADY_OBSERVED')
         self.assertEqual(plan.result['model'], 'grid-placement-v1')
         self.assertIsNone(plan.result['projected_placements'])
         self.assertIsNone(plan.result['projected_bays'])

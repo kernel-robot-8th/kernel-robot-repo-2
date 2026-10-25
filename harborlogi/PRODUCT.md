@@ -33,7 +33,7 @@ HarborLogi 프로젝트의 업무 앱 Harbor는 양하 이후 장치와 재취�
 ## Capabilities and Constraints
 
 - Python domain·계획·기존 SQLite 업무 장부·Fleet HTTP client를 유지하고 Django 계정/명시적 역할·화물/요청·관측 원본·불변 계획·실행 intent·현장 회차·감사/비교를 구현한다. 최종 수용은 실제 검증 기록과 남은 계약 게이트를 따른다.
-- 저장한 요청 우선순위 그룹/허용 순서와 관측 revision으로 기존 `plan_outbound`를 호출한다. 실제 인증 재고/업무 근거 producer·입고 planner와 모든 단계의 설치 binding은 남은 운영 게이트다. fixture 비교를 현장 성능 수용으로 표시하지 않는다.
+- 저장한 반출 우선순위·관측 revision으로 반출 계획과 입고 자동 배치를 계산한다. [ADR0010](docs/adr/0010-automatic-placement-and-replanning.md)에 따라 명시적으로 켠 미인계 요청은 지시·관측·크기·앞선 추천 변경에 새 계획을 계산하고, 앞선 입고 추천의 계획상 예약을 피한다. 실제 인증 재고/업무 근거 producer·모든 단계의 설치 binding·실행 중 단계 자동 교체와 시간표 최적화는 남은 게이트다. fixture 비교를 현장 성능 수용으로 표시하지 않는다.
 - 계획은 실행 허가가 아니며, Action 성공과 물리 receipt도 업무 완료 전체를 뜻하지 않는다.
 - 업무 완료는 반출대 내려놓기, 재취급 화물의 유효 위치 복귀, 관련 팔 퇴피를 모두 대조한다.
 - 공급암 S 퇴피 확인은 Pinky의 출발 업무 조건이다. 사람이 확인하는 초기 방식과 로봇의 실행·안전 허가는 구별한다.
