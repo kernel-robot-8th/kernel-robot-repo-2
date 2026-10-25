@@ -24,4 +24,6 @@ Three.js의 로컬 고정 배포본으로 WebGL 모델·면/골·조명·그림�
 
 각 뷰어는 독립된 `data-yard-preview`와 공통 `yard_3d.html`을 사용한다. 같은 페이지에 여러 개를 놓으면 include에 서로 다른 `yard_scene_id`를 준다. `destroy`는 해당 DOM 인스턴스 종료용이다. 정상 BFcache 복귀에서는 인스턴스를 보존하고 크기만 갱신한다. WebGL2를 만들 수 없거나 컨텍스트가 끊기면 renderer를 종료하고 원래 평면도로 복구하며 전체 화면도 종료한다. 입력은 source로부터 만든 메모리 사본이며 새로고침/원본 복원으로 버린다.
 
+`resize`는 같은 크기에서 drawing buffer를 지우지 않는다. 실제 크기 변경에서는 카메라 aspect를 갱신하고 그 프레임에 다시 그려 전체 화면/패널 크기 변경 때 빈 캔버스가 노출되지 않게 한다. 카메라 위치·선택은 유지한다. 여러 pointer가 참여한 카메라 제스처는 마지막 pointer가 끝날 때까지 박스 선택으로 해석하지 않는다.
+
 엔진은 npm `three@0.186.1`을 SHA512로 확인한 로컬 사본이다. MIT license와 출처/수정한 import 두 줄을 vendor README에 보존한다. [OrbitControls 공식 문서](https://threejs.org/docs/pages/OrbitControls.html)와 [TransformControls 공식 문서](https://threejs.org/docs/pages/TransformControls.html)의 인터페이스를 사용한다. 모델이 있는 페이지에서만 renderer/engine을 동적으로 읽으며 CDN이나 실행 시 npm 설치를 요구하지 않는다.
