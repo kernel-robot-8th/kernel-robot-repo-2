@@ -29,6 +29,8 @@ def main():
         page.goto(origin+'/accounts/login/')
         page.locator('[name=username]').fill(access['username']);page.locator('[name=password]').fill(access['password'])
         page.locator('button[type=submit]').click();page.wait_for_url(origin+'/')
+        # Waitress does not reload cached templates after source edits, even in this preview.
+        assert page.get_by_text('실제 완료량·처리율',exact=True).is_visible(), 'Restart the local preview before capturing the current operations template.'
         def capture(name,caption,selector=None):
             page.keyboard.press('Escape')
             if selector:page.locator(selector).scroll_into_view_if_needed()
