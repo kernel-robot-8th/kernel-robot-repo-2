@@ -10,6 +10,8 @@
 
 기존 Fleet work 화면은 Task/Mission/TRIP/Cell을 읽으며 중립 ARM을 목록에 넣지 않고 다른 admit API를 호출한다. 승인 API의 존재가 승인 UI의 존재를 뜻하지 않는다. 이번 작업은 Fleet 소유 화면에 알려진 ARM mission 조회·독립 승인·수행 상태 표시를 연결한다. 상세 physical receipt 조회·검증은 Harbor 원본 대조가 맡는다. Harbor에 승인 메서드나 Fleet 자격증명을 넘기지 않는다.
 
+새 UI의 검증된 코드 기준은 ROSY `bfa3872d0cb59bfba35384dce51836c065696bd2`다. 로그인 뒤에도 `arm_transfer`를 보존하며 프로토콜의192자 ID 한도를 따른다. 원격 브라우저9개(실제 HTTP 승인 포함)와 공통 UI·구조·feature matrix87개를 통과했다. 이것은 해당 기능 브랜치의 근거이며 공유 main 착지나 설치·실물 수용을 뜻하지 않는다. 전체 실행/실패/수정 범위는 [검증 기록](../validation/2026-10-25-operator-pipeline.md)을 따른다.
+
 기존 API에는 물리 observer와 receipt가 시뮬레이션 프로필로 이미 있다. 없다고 기록한 문서는 바로잡는다. 아직 없는 것은 운영 관측과 Harbor 업무용 배치/관련 팔 퇴피 근거의 인증된 연결, 다칸 설치 binding과 실물 수용이다. `/healthz` 성공은 liveness, `/api/fleet/session`은 인증 신원만 입증하며 중립 ARM/다칸 지원을 입증하지 않는다. 공개 버전/capability 협상 GET은 확인되지 않았다.
 
 ## 각 단계의 소유자와 실제 호출
