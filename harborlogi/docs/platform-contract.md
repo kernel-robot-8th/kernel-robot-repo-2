@@ -1,5 +1,7 @@
 # 플랫폼 연결 기준
 
+업무 운용과 플랫폼 실행의 독립 경계는 [ADR0013](adr/0013-independent-business-execution-and-platform.md)을 따른다. Harbor가 목표·업무 의존 관계·재계획·업무 완료를 소유하며, ROSY가 도메인 중립 작업의 admission·자원·실제 실행을 소유한다. 목표까지 후속 단계를 이어갈 상시 실행기는 설계 단계다.
+
 Harbor 사용자의 계획 확정은 준비·제출을 한 번에 이어서 수행한다([ADR 0012](adr/0012-user-confirmed-command-dispatch.md)). 제품 목표는 설치된 Fleet 승인 범위 안에서 별도 사람 클릭 없이 admission·실행으로 진행하는 것이다. 현재 ARM 계약은 별도 승인을 요구하며, 이번 앱 변경은 그 정책을 활성화하지 않는다. 아래의 현행 승인 서술을 영구적인 제품 UX 요구로 해석하지 않는다.
 
 페이지/API 인계의 현행 구현과 배포 구분은 [Harbor–ROSY 파이프라인](design/18-harbor-rosy-pipeline.md), 양 끝 SHA와 화면별 검증은 [2026-10-25 기록](validation/2026-10-25-operator-pipeline.md)을 따른다. 새 Fleet ARM 승인 UI는 `/console?view=work&arm_transfer=<encoded mission>`이며 구버전 콘솔에 있다고 가정하지 않는다. wire API 변경은 없고 기존 v1.312 계약을 소비한다.
