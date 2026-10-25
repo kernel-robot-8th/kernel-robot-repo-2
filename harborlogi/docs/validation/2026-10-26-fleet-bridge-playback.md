@@ -40,6 +40,6 @@ CE: 해당 없음. 실제 화면에서 놓친 preference/가상 편집 재생 �
 
 검증된 ARM producer 역시 설치를 제공하면 simulation profile을 요구한다. 설치가 없으면 공개 route를 등록할 수 있지만 조회는503 미준비로 응답하고 worker를 만들지 않는다. 따라서 API 코드를 배포하거나 합성 설치를 운영에 넣는 방식으로 실제 장치 연동을 완료했다고 표시할 수 없다. 정식 운영 설치 계약·서비스 발급/설치 도구·journal migration/복구 검증이 필요하다. 운영 배포 확대는 사용자 범위 확인 중이다.
 
-실제 HTTP 하네스의 token 별칭 `operator`는 Fleet 역할이 `service`이고, 별도 `approver`가 사람 operator 역할이다. 혼동을 막기 위해 앱 소비 시험이 실제 session 응답의 역할을 명시적으로 검사하도록 보강했다. 이전 테스트의 별칭만으로 사람 자격을 앱에 재사용했다고 해석하지 않는다. 이 보강 시험의 새 커밋 결과는 별도 기록한다.
+실제 HTTP 하네스의 token 별칭 `operator`는 Fleet 역할이 `service`이고, 별도 `approver`가 사람 operator 역할이다. 혼동을 막기 위해 앱 소비 시험이 실제 session 응답의 역할을 명시적으로 검사하도록 보강했다. 이전 테스트의 별칭만으로 사람 자격을 앱에 재사용했다고 해석하지 않는다. 이 명시 검사를 포함한 Harbor `d506fa10e72949ebf6fe9a87cfd20a8e8ca2b352`와 동일 ROSY pin의 원격 실제 HTTP 시험도1개 실행·skip0·exit0,4.108초로 통과했다.
 
 CE: 미해결 — 운영 API·설치 계약·정식 서비스 발급과 복구 경로는 선행 조건으로 남아 있다. 실제 서버 조사는 비공개 `fleet-live-discovery/`와 운영 연결 선행 기록에 보존한다.
