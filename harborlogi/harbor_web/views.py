@@ -44,6 +44,7 @@ def form_page(request, *, form_type, title, section, save, destination, descript
 @require_roles('viewer', 'operator', 'admin', 'field')
 @require_http_methods(['GET'])
 def overview(request):
+    from harbor_web.workspace import plan_changes
     if not has_role(request.user, 'viewer', 'operator', 'admin'):
         return redirect('/field/')
     issues = list(Command.objects.filter(state__in=['UNKNOWN', 'DISPATCHING', 'CANCEL_PENDING', 'BLOCKED']).select_related('plan__order__cargo').order_by('created_at')[:12])
@@ -53,10 +54,14 @@ def overview(request):
     executions = {command.plan.order_id: command for command in Command.objects.filter(plan__order_id__in=[order.pk for order in requests]).select_related('plan')}
     plans = {p.order_id: p for p in Plan.objects.filter(order_id__in=[o.pk for o in requests]).order_by('id')}
     rows = []
+    current_queue_digest = services.queue_digest()
     for order in requests:
         plan = plans.get(order.pk)
         action = '계획 확인' if plan else ('입고 인계 조건 확인' if order.kind == 'INBOUND' else '관측 선택·계획 검토')
-        row = dict(order=order, plan=plan, action=action, reason=reason_text(plan.result['reason']) if plan else ('입고 실행 인계 조건을 확인하세요.' if order.kind == 'INBOUND' else '관측 원본과 반출 순서를 검토하세요.'), status=plan.result['status'] if plan else '', status_label=plan.result['status'] if plan else '계획 전', href=f'/plans/{plan.pk}/' if plan else f'/requests/{order.pk}/')
+        row = dict(order=order, plan=plan, action=action, reason=reason_text(plan.result['reason']) if plan else ('입고 실행 인계 조건을 확인하세요.' if order.kind == 'INBOUND' else '관측 원본과 반출 순서를 검토하세요.'), status=plan.result['status'] if plan else '', status_label=plan.result['status'] if plan else '계획 전', href=f'/requests/{order.pk}/')
+        changes = plan_changes(order, plan, current_queue_digest=current_queue_digest)
+        if changes:
+            row.update(status='HOLD', status_label='계획 재검토', reason=changes[0]['message'], action='최신 기준으로 검토')
         command = executions.get(order.pk)
         if command:
             row.update(status=command.state, status_label={'UNKNOWN': '결과 불명', 'DISPATCHING': '제출 대조 필요', 'CANCEL_PENDING': '취소 대조 필요', 'BLOCKED': '인계 보류', 'PREPARED': '제안 검토 대기', 'RECONCILED': '원본 대조됨'}.get(command.state, command.state), action='원래 작업 대조', href=f'/work/{command.pk}/')
@@ -98,10 +103,36 @@ def order_list(request):
     return page(request, 'requests.html', section='cargo', q=q, kind=kind, **paginate(request, items))
 
 
+@require_roles('viewer', 'operator', 'admin')
+@require_http_methods(['GET'])
+def outbound_queue(request):
+    from harbor_web.workspace import COMMAND_LABELS, plan_changes
+    q = request.GET.get('q', '')[:200]
+    items = Order.objects.filter(kind='OUTBOUND').select_related('cargo').filter(
+        Q(cargo__code__icontains=q) | Q(cargo__name__icontains=q) | Q(note__icontains=q)
+    ).order_by('priority_group', 'sequence', 'id')
+    pagination = paginate(request, items)
+    orders = list(pagination['page'])
+    ids = [o.pk for o in orders]
+    plans = {p.order_id: p for p in Plan.objects.filter(order_id__in=ids).order_by('id')}
+    executions = {c.order_id: c for c in Command.objects.filter(order_id__in=ids)}
+    rows = []
+    current_queue_digest = services.queue_digest()
+    for order in orders:
+        command, plan = executions.get(order.pk), plans.get(order.pk)
+        changes = plan_changes(order, plan, current_queue_digest=current_queue_digest)
+        label = COMMAND_LABELS.get(command.state, command.state) if command else '계획 재검토' if changes else '계획 보류' if plan and plan.result['status'] == 'HOLD' else '계획 검토됨' if plan else '계획 전'
+        rows.append(dict(order=order, plan=plan, command=command, status_label=label,
+            status=command.state if command else 'HOLD' if changes else plan.result['status'] if plan else '',
+            reason='원래 실행의 상태와 업무 근거를 대조하세요.' if command else changes[0]['message'] if changes else reason_text(plan.result['reason']) if plan else '관측 재고를 선택해 재취급·반출·복귀를 검토하세요.'))
+    return page(request, 'outbound_queue.html', section='outbound', rows=rows, q=q, **pagination)
+
+
 @require_roles('operator')
 @require_http_methods(['GET', 'POST'])
 def order_new(request):
-    return form_page(request, form_type=forms.OrderForm, title='업무 요청 등록', section='cargo', description='업무 지시와 우선순위를 저장합니다. 요청 등록으로 실제 화물 위치가 바뀌지 않습니다.', save=lambda data: services.create_order(request.user, **data), destination=lambda obj: f'/requests/{obj.pk}/')
+    initial = {'kind': request.GET['kind']} if request.GET.get('kind') in {'INBOUND', 'OUTBOUND'} else None
+    return form_page(request, form_type=forms.OrderForm, title='업무 요청 등록', section='cargo', description='업무 지시와 우선순위를 저장합니다. 요청 등록으로 실제 화물 위치가 바뀌지 않습니다.', save=lambda data: services.create_order(request.user, **data), destination=lambda obj: f'/requests/{obj.pk}/', initial=initial)
 
 
 @require_roles('viewer', 'operator', 'admin')
@@ -136,6 +167,9 @@ def order_detail(request, pk):
             else:
                 messages.success(request, '요청 revision을 변경했습니다. 기존 계획은 원래 기준을 유지합니다.')
                 return redirect(f'/requests/{pk}/')
+    if order.kind == 'OUTBOUND':
+        from harbor_web.workspace import workspace_context
+        return page(request, 'workspace.html', section='outbound', **workspace_context(order, priority_form=priority, plan_form=plan_form))
     return page(request, 'request_detail.html', section='cargo', order=order, priority_form=priority, plan_form=plan_form, plans=Plan.objects.filter(order=order).order_by('-id'))
 
 

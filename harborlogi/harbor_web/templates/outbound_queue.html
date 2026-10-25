@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}반출 관제{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>반출 관제</h1><p>변경된 지시부터 재취급·반출·복귀와 완료 근거까지, 업무별로 이어서 판단합니다.</p></div>{% if can_operate %}<a class="button" href="/requests/new/?kind=OUTBOUND">반출 요청 등록</a>{% endif %}</div>
+<form method="get" class="toolbar"><label for="outbound-search">화물·지시 메모 검색<input id="outbound-search" name="q" value="{{ q }}" type="search" maxlength="200" placeholder="화물 ID, 이름 또는 지시 메모"></label><button class="quiet" type="submit">검색</button>{% if q %}<a href="/outbound/">검색 해제</a>{% endif %}</form>
+<p class="helptext">지시된 우선순위 그룹과 순서입니다. 같은 그룹에서 ‘선택 허용’인 경우에만 처리 순서를 선택할 수 있습니다.</p>
+{% if rows %}<div class="table-wrap"><table class="action-table"><caption>반출 업무 {{ page.paginator.count }}건 · 완료 수를 뜻하지 않음</caption><thead><tr><th scope="col">대상 화물·지시</th><th scope="col">검토 상태</th><th scope="col">필요한 판단</th><th scope="col">업무 열기</th></tr></thead><tbody>
+{% for row in rows %}<tr><td><a class="cargo-link" href="/requests/{{ row.order.pk }}/">{{ row.order.cargo.code }}</a><small>{{ row.order.cargo.name }} · 요청 #{{ row.order.pk }} · v{{ row.order.version }}</small><small>그룹 {{ row.order.priority_group }} / {{ row.order.sequence }}순위 · {% if row.order.tie_policy == 'ANY' %}그룹 안 선택 허용{% else %}순서 고정{% endif %}</small></td><td><span class="badge {{ row.status }}">{{ row.status_label }}</span></td><td>{{ row.reason }}</td><td><a href="/requests/{{ row.order.pk }}/">야드·계획·근거 확인</a></td></tr>{% endfor %}
+</tbody></table></div>{% include 'pagination.html' %}
+{% else %}<section class="empty"><h2>{% if q %}검색 결과가 없습니다{% else %}반출 지시를 등록하세요{% endif %}</h2><p>{% if q %}다른 화물 ID나 이름으로 찾아보세요.{% else %}등록된 화물에 반출 지시와 우선순위를 연결하면 야드 관측을 기준으로 재취급을 검토할 수 있습니다.{% endif %}</p>{% if can_operate and not q %}<div class="actions"><a class="button" href="/requests/new/?kind=OUTBOUND">반출 요청 등록</a><a href="/cargo/">화물 확인</a></div>{% endif %}</section>{% endif %}
+{% endblock %}

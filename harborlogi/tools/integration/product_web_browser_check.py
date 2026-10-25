@@ -142,10 +142,36 @@ def main():
             assert plan.result['projected_bays'][0]['cargo'] == ['C2']
             assert not Command.objects.exists()
             assert page.locator('main form[data-command]').count() == 0
-            assert page.locator('.comparison section').count() == 2
-            assert page.locator('.move-table tbody tr').count() == 3
-            assert all(page.locator('.move-table tbody tr').nth(i).locator('td').last.inner_text().strip() for i in range(3))
-            result['checks'].append('UI cargo registration, query-preserving pagination, OUTBOUND registration, READY three moves, arm labels, observed/projected separation, execution closed')
+            assert page.locator('.transfer-list > li').count() == 3
+            assert page.locator('[data-yard-stage]').count() == 4
+            assert all(page.locator('.transfer-list > li').nth(i).locator('.move-arm').inner_text().strip() for i in range(3))
+            page.locator('[data-yard-stage="3"]').focus()
+            page.keyboard.press('Enter')
+            assert page.locator('[data-yard-stage="3"]').get_attribute('aria-pressed') == 'true'
+            assert page.locator('[data-yard-panel="3"]').is_visible()
+            assert page.locator('[data-yard-panel="0"]').is_hidden()
+            assert page.locator('[data-yard-panel="3"] .outbound-zone .cargo-cell.target strong').inner_text() == 'C1'
+            assert page.locator('[data-yard-panel="3"] .yard-zone').first.locator('.cargo-cell strong').all_text_contents() == ['C2']
+            assert '예상 배치' in page.locator('[data-yard-status]').inner_text()
+            observed.refresh_from_db()
+            assert observed.payload['bays'][0]['cargo'] == ['C1', 'C2'] and not Command.objects.exists()
+            page.locator('[data-yard-stage="0"]').click()
+            assert page.locator('[data-yard-panel="0"]').is_visible()
+            visit(page, '/outbound/?q=C1')
+            assert page.locator('.action-table tbody tr').count() == 1
+            page.get_by_role('link', name='야드·계획·근거 확인', exact=True).click()
+            assert f'/requests/{outbound.pk}/' in page.url
+            result['checks'].append('Task workspace, filtered outbound queue, four keyboard-selectable yard stages, target outbound/blocker restoration, original observation unchanged, execution closed')
+            no_js_context = browser.new_context(java_script_enabled=False)
+            no_js = no_js_context.new_page()
+            login(no_js, 'viewer')
+            visit(no_js, f'/plans/{plan.pk}/')
+            assert no_js.locator('[data-yard-panel]:visible').count() == 4
+            assert no_js.locator('[data-yard-stage]:visible').count() == 0
+            assert no_js.locator('.transfer-list > li').count() == 3
+            assert no_js.get_by_role('heading', name='실행과 업무 완료 근거', exact=True).is_visible()
+            no_js_context.close()
+            result['checks'].append('No-JavaScript viewer can read original and all expected layouts, movement order and evidence requirements')
             visit(page, '/field/new/')
             submit(page, dict(order=inbound.pk, vehicle_id='browser-vehicle', assigned_to=users['field1'].pk))
             episode = FieldEpisode.objects.get(vehicle_id='browser-vehicle')
@@ -227,9 +253,17 @@ def main():
                     assert viewport.locator('h1').count() >= 1
                     assert not viewport.evaluate('document.documentElement.scrollWidth > innerWidth'), (name, path)
                 visit(viewport, f'/plans/{plan.pk}/')
+                assert not viewport.evaluate('document.documentElement.scrollWidth > innerWidth'), (name, 'workspace')
                 capture(viewport, name + '-plan.png')
+                viewport.locator('[data-yard-stage="3"]').click()
+                assert viewport.locator('[data-yard-panel="3"]').is_visible()
+                capture(viewport, name + '-expected.png')
+                viewport.get_by_role('link', name='실행·근거', exact=True).click()
+                assert viewport.locator('#execution-title').is_visible()
+                capture(viewport, name + '-evidence.png')
                 viewport.reload()
-                assert viewport.locator('.move-table tbody tr').count() == 3
+                assert viewport.locator('.transfer-list > li').count() == 3
+                assert viewport.locator('[data-yard-panel="0"]').is_visible()
                 visit(viewport, '/requests/')
                 viewport.go_back()
                 assert f'/plans/{plan.pk}/' in viewport.url

@@ -11,8 +11,9 @@
 {% if user.is_authenticated %}<button id="nav-toggle" class="nav-toggle" type="button" aria-controls="navigation" aria-expanded="false" hidden>메뉴 열기</button>
 <aside class="sidebar" id="navigation"><nav aria-label="주 메뉴">
 {% if can_read %}<a href="/" {% if section == 'overview' %}aria-current="page"{% endif %}>운영 현황</a>
+<a href="/outbound/" {% if section == 'outbound' %}aria-current="page"{% endif %}>반출 관제</a>
 <a href="/requests/" {% if section == 'cargo' %}aria-current="page"{% endif %}>화물·요청</a>
-<a href="/inventory/" {% if section == 'inventory' %}aria-current="page"{% endif %}>재고·반출</a>
+<a href="/inventory/" {% if section == 'inventory' %}aria-current="page"{% endif %}>재고·관측</a>
 <a href="/work/" {% if section == 'work' %}aria-current="page"{% endif %}>작업</a>
 <a href="/records/" {% if section == 'records' %}aria-current="page"{% endif %}>기록·검증</a>{% endif %}
 {% if can_field or can_operate or can_admin %}<a href="/field/" {% if section == 'field' %}aria-current="page"{% endif %}>현장 확인</a>{% endif %}

@@ -4,6 +4,7 @@ from harbor_web import views, planning_pages, field_pages, record_pages
 
 urlpatterns = [
     path('', views.overview, name='overview'),
+    path('outbound/', views.outbound_queue, name='outbound'),
     path('cargo/', views.cargo_list, name='cargo'),
     path('cargo/new/', views.cargo_new, name='cargo_new'),
     path('requests/', views.order_list, name='requests'),

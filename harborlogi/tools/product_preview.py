@@ -46,9 +46,9 @@ def main():
         for code, name in [('C1', '우선 반출 화물'), ('C2', '상단 재취급 화물'), ('C3', '공급 인계 확인 화물')]:
             if not Cargo.objects.filter(code=code).exists():
                 services.register_cargo(user, code=code, name=name, weight_kg=2, volume_m3='0.012', destination='반출대 · 합성 시험')
-        condition = Condition.objects.filter(name='합성 야드 · 화면 검토용').first()
+        condition = Condition.objects.filter(name='합성 야드 · A/B 반출 검토용').first()
         if condition is None:
-            condition = services.register_condition(user, name='합성 야드 · 화면 검토용', calibration_ref='synthetic-only-not-field-calibration', payload=dict(outbound_stand='반출대', temporary_bays=['임시 칸'], allowed_moves=[['보관 칸', '임시 칸'], ['임시 칸', '보관 칸'], ['보관 칸', '반출대']], max_observation_age_seconds=1800, conveyor='컨베이어', arm_reach=[['A', '보관 칸'], ['A', '임시 칸'], ['A', '반출대']]))
+            condition = services.register_condition(user, name='합성 야드 · A/B 반출 검토용', calibration_ref='synthetic-only-not-field-calibration', payload=dict(outbound_stand='반출대', temporary_bays=['임시 칸'], allowed_moves=[['보관 칸', '임시 칸'], ['임시 칸', '보관 칸'], ['보관 칸', '반출대']], max_observation_age_seconds=1800, conveyor='컨베이어', arm_reach=[['A', '보관 칸'], ['A', '임시 칸'], ['B', '보관 칸'], ['B', '반출대']]))
         now = timezone.now()
         observation = services.record_observation(user, source_id='synthetic-preview-camera', source_revision=now.isoformat(), observed_at=now, provenance='SYNTHETIC', condition=condition, payload=dict(bays=[dict(bay_id='보관 칸', cargo=['C1', 'C2'], capacity=3), dict(bay_id='임시 칸', cargo=[], capacity=2), dict(bay_id='반출대', cargo=[], capacity=1)], holdings=[]))
         order = Order.objects.filter(cargo__code='C1', kind='OUTBOUND').first()

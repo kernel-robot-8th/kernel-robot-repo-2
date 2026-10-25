@@ -28,3 +28,22 @@ window.addEventListener('pageshow', () => {
     if (button) { button.disabled = false; button.textContent = button.dataset.label; delete button.dataset.label; }
   });
 });
+
+document.querySelectorAll('[data-yard-preview]').forEach(preview => {
+  const controls = [...preview.querySelectorAll('[data-yard-stage]')];
+  const panels = [...preview.querySelectorAll('[data-yard-panel]')];
+  const status = preview.querySelector('[data-yard-status]');
+  if (!controls.length || !panels.length) return;
+  const select = selected => {
+    controls.forEach(button => button.setAttribute('aria-pressed', String(button === selected)));
+    panels.forEach(panel => { panel.hidden = panel.id !== selected.getAttribute('aria-controls'); });
+    if (status) status.textContent = selected.dataset.yardStage === '0'
+      ? '계획 기준 관측 · 저장된 원본 배치입니다.'
+      : `${selected.textContent.trim()} 후 예상 배치 · 실제 관측·실행 상태는 바뀌지 않습니다.`;
+  };
+  controls.forEach(button => {
+    button.hidden = false;
+    button.addEventListener('click', () => select(button));
+  });
+  select(controls[0]);
+});

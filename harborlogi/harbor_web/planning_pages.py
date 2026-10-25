@@ -53,10 +53,11 @@ def plan_detail(request, pk):
                 return render(request, 'error.html', dict(heading='실행 인계 조건이 달라졌습니다', reason='요청 revision·원본 관측·설치 대응과 연결 상태를 다시 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
             return redirect(f'/work/{command.pk}/')
         return render(request, 'error.html', dict(reason='검토한 revision이 올바르지 않습니다.', return_url=f'/plans/{pk}/'), status=400)
-    moves = plan.result['moves']
-    outbound = next((i for i, move in enumerate(moves) if move['cargo_id'] == plan.order.cargo.code), -1)
-    display_moves = [dict(move, phase_label='재취급' if i < outbound else '반출' if i == outbound else '복귀') for i, move in enumerate(moves)]
-    return page(request, 'plan.html', section='inventory', plan=plan, display_moves=display_moves, gate=gate, gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']), command=Command.objects.filter(plan__order=plan.order).first())
+    if plan.order.kind == 'OUTBOUND':
+        from harbor_web.workspace import workspace_context
+        return page(request, 'workspace.html', section='outbound', **workspace_context(plan.order, plan))
+    return page(request, 'plan.html', section='inventory', plan=plan, display_moves=[], gate=gate,
+                gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']), command=None)
 
 
 @require_roles('viewer', 'operator', 'admin')
