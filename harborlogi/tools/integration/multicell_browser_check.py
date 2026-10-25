@@ -45,7 +45,7 @@ def main():
     operator.groups.add(Group.objects.get(name='operator'))
     admin.groups.add(Group.objects.get(name='admin'))
     shapes = {}
-    for code, length in [('C1', 2), ('C2', 1), ('C4', 1), ('C5', 3), ('C6', 1), ('C7', 1)]:
+    for code, length in [('C1', 2), ('C2', 1), ('C3', 1), ('C4', 1), ('C5', 3), ('C6', 1), ('C7', 1)]:
         cargo = services.register_cargo(operator, code=code, name='합성 점유 화물 ' + code,
             length_cells=length, weight_kg=1, volume_m3=1, destination='합성 반출대')
         shapes[code] = CargoFootprint.objects.get(cargo=cargo)
@@ -223,7 +223,19 @@ def main():
             reduced_page.locator('[data-yard-stage="1"]').click()
             assert reduced_page.locator('canvas').get_attribute('data-frame') == '1'
             assert reduced_page.locator('canvas').get_attribute('data-moving') == 'false'
+            from tools.integration.workbench_browser_checks import exercise_reduced_playback
+            result['checks'].extend(exercise_reduced_playback(reduced_page, output))
             reduced_context.close()
+            incoming = services.create_order(operator, cargo=Cargo.objects.get(code='C3'), kind='INBOUND',
+                priority_group=9, sequence=1, tie_policy='FIXED')
+            inbound_plan = services.make_plan(operator, order_id=incoming.pk, expected_version=1,
+                observation_id=observed.pk, automatic=True)
+            assert inbound_plan.result['status'] == 'READY', inbound_plan.result
+            page.goto(origin + f'/plans/{inbound_plan.pk}/')
+            page.locator('[data-yard-3d][data-ready=true]').wait_for()
+            from tools.integration.workbench_browser_checks import exercise_inbound_comparison
+            result['checks'].extend(exercise_inbound_comparison(page, output))
+            page.goto(origin + plan_path)
             unsupported = browser.new_context()
             unsupported.add_cookies(page.context.cookies())
             unsupported.add_init_script('HTMLCanvasElement.prototype.getContext = () => null;')

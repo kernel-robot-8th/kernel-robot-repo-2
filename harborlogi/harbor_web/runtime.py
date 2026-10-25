@@ -97,6 +97,7 @@ def backup_product(output, web, ledger, mode):
     if ledger == web:
         raise ValueError('Web and ledger must be distinct.')
     origin = os.environ.get('HARBOR_FLEET_ORIGIN', '')
+    principal = os.environ.get('HARBOR_FLEET_PRINCIPAL', '')
     parsed = urlsplit(origin)
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError('Fleet origin must not contain credentials or query data.')
@@ -104,6 +105,16 @@ def backup_product(output, web, ledger, mode):
         for path in sorted([web] + ([ledger] if ledger else []), key=str):
             stack.enter_context(WriterLease(path))
         require_profile(web, mode)
+        if not origin:
+            with closing(sqlite3.connect(web.as_uri() + '?mode=ro', uri=True)) as source:
+                tables = {row[0] for row in source.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                if 'harbor_web_fleetconnection' in tables:
+                    row = source.execute('SELECT origin,principal FROM harbor_web_fleetconnection WHERE id=1').fetchone()
+                    if row:
+                        origin, principal = row
+                        parsed = urlsplit(origin)
+                        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+                            raise ValueError('Fleet origin must not contain credentials or query data.')
         if ledger:
             _ledger_owned(ledger)
         output.mkdir(mode=0o700)
@@ -115,7 +126,7 @@ def backup_product(output, web, ledger, mode):
         manifest = dict(schema=1, mode=mode, created_at=datetime.now(timezone.utc).isoformat(), files=files,
                         ledger_present=bool(ledger), ledger_identity=_original_identity(web, ledger_identity(ledger)) if ledger else None,
                         backup_ledger_identity=ledger_identity(ledger) if ledger else None, fleet_origin=origin,
-                        fleet_principal=os.environ.get('HARBOR_FLEET_PRINCIPAL', ''))
+                        fleet_principal=principal)
         (output / 'manifest.json').write_text(json.dumps(manifest, sort_keys=True), encoding='utf-8')
         os.chmod(output / 'manifest.json', 0o600)
 

@@ -10,7 +10,7 @@ from harbor_web import commands
 from harbor_web.models import Audit, CommandFact
 
 
-class PipelineTests(SimpleTestCase):
+class PipelineTests(TestCase):
     def context(self, state='RECONCILED', status=None, receipt=None, reason='', ledger_state='WAITING'):
         order = SimpleNamespace(pk=1)
         plan = SimpleNamespace(pk=2, result={'status': 'READY'})

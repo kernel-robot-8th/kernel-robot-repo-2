@@ -23,12 +23,14 @@ export async function mountYardViewer(figure) {
   const play = figure.querySelector('[data-scene-play]');
   const motion = figure.querySelector('[data-scene-motion]');
   const speed = figure.querySelector('[data-scene-speed]');
+  const animateMotion = figure.querySelector('[data-scene-animate]');
   const progress = figure.querySelector('[data-scene-progress]');
   const editor = figure.querySelector('[data-scene-editor]');
   const editButton = figure.querySelector('[data-scene-action="edit"]');
   const draftState = figure.querySelector('[data-scene-draft]');
   const error = figure.querySelector('[data-scene-error]');
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  animateMotion.checked = !reduced.matches;
   const events = new AbortController();
   const on = (node, type, fn) => node.addEventListener(type, fn, {signal: events.signal});
   const palette = getComputedStyle(document.documentElement);
@@ -141,23 +143,23 @@ export async function mountYardViewer(figure) {
     }
     error.textContent = ''; fillCargo(); select(selected);
   }
-  function advance() {
+  function advance(delay = 550) {
     if (!playing) return;
-    if (draft) {
-      if (replayIndex >= draftHistory.length - 1) { stop(); status('로컬 가상 변경 재생 완료 · 서버에 저장되지 않음'); return; }
-      startTransition(draftHistory[++replayIndex]);
-      return;
-    }
-    if (index === scene.frames.length - 1) { stop(); status('계획 재생 완료 · 실제 실행 상태는 바뀌지 않았습니다.'); return; }
     timer = setTimeout(() => {
       if (!playing || document.hidden || figure.hidden) return;
+      if (draft) {
+        if (replayIndex >= draftHistory.length - 1) { stop(); status('로컬 가상 변경 재생 완료 · 서버에 저장되지 않음'); return; }
+        startTransition(draftHistory[++replayIndex]);
+        return;
+      }
+      if (index === scene.frames.length - 1) { stop(); status('계획 재생 완료 · 실제 실행 상태는 바뀌지 않았습니다.'); return; }
       internalStep = true; controls[index + 1].click(); internalStep = false;
-    }, reduced.matches ? 0 : 550);
+    }, delay);
   }
   function describeMove(segment, t) {
     const {from, to} = segment;
     const location = box => box.area + ' ' + box.row + '행 ' + box.column + '열 ' + box.level + '층';
-    const phase = !from ? '배치 비교 · 새 화물 즉시 표시' : segment.instant ? '방향 비교 · 즉시 전환' : t < .25 ? '들어 올림' : t < .75 ? '이동' : t < 1 ? '내려놓기' : '완료';
+    const phase = !from ? '배치 비교 · 관측 출발 위치 없음' : segment.instant ? '방향 비교 · 즉시 전환' : t < .25 ? '들어 올림' : t < .75 ? '이동' : t < 1 ? '내려놓기' : '완료';
     Object.assign(progress.dataset, {cargo:to.id, source:from ? location(from) : '관측 출발 위치 없음',
       destination:location(to), phase, progress:String(Math.round(t * 100)), mode:draft ? 'local-draft' : 'plan'});
     progress.textContent = (draft ? '로컬 가상 변경' : '계획 설명') + ' · ' + to.id + ' · ' + progress.dataset.source + ' → ' + location(to) +
@@ -177,15 +179,15 @@ export async function mountYardViewer(figure) {
         instant:initial && ['x','y','z'].every(key => initial[key] === to[key])});
       working[working.findIndex(box => box.id === to.id)] = cloneBoxes([to])[0];
     }
-    if (!segments.length || reduced.matches || figure.hidden || document.hidden) {
+    if (!segments.length || !animateMotion.checked || figure.hidden || document.hidden) {
       paint(target); canvas.dataset.moving = 'false';
       if (segments.length) describeMove(segments.at(-1), 1);
       status(draft ? '로컬 가상 배치 비교 · 즉시 전환' : scene.frames[index].label + ' · 예상 배치');
-      advance(); return;
+      advance(!animateMotion.checked ? 4500 / Number(speed.value) : 550); return;
     }
     animation = {segments, segment:0, target, elapsed:0, last:performance.now()};
     play.textContent = '재생 중지'; play.setAttribute('aria-pressed', 'true');
-    canvas.dataset.moving = 'true';
+    canvas.dataset.moving = String(Boolean(segments[0].from && !segments[0].instant));
     describeMove(segments[0], 0);
     status('배치 이동 설명 · 실제 로봇 경로·작업 시간이 아님');
     raf = requestAnimationFrame(tick);
@@ -195,12 +197,15 @@ export async function mountYardViewer(figure) {
     if (!animation || destroyed) return;
     animation.elapsed += (now - animation.last) * Number(speed.value); animation.last = now;
     const segment = animation.segments[animation.segment];
-    const t = segment.from && !segment.instant ? Math.min(1, animation.elapsed / 4500) : 1;
-    paint(segment.boxes.map(box => box.id === segment.to.id ? transit(segment.from || segment.to, segment.to, t, ceiling) : box));
+    const t = segment.instant ? 1 : Math.min(1, animation.elapsed / 4500);
+    paint(segment.boxes.map(box => box.id === segment.to.id && segment.from ? transit(segment.from, segment.to, t, ceiling) : box));
     describeMove(segment, t);
     if (t < 1) raf = requestAnimationFrame(tick);
     else if (++animation.segment < animation.segments.length) {
-      animation.elapsed = 0; describeMove(animation.segments[animation.segment], 0); raf = requestAnimationFrame(tick);
+      animation.elapsed = 0;
+      const next = animation.segments[animation.segment];
+      canvas.dataset.moving = String(Boolean(next.from && !next.instant));
+      describeMove(next, 0); raf = requestAnimationFrame(tick);
     } else {
       paint(animation.target); animation = null; canvas.dataset.moving = 'false';
       if (!playing) { play.textContent = draft ? '가상 변경 재생' : '계획 재생'; play.setAttribute('aria-pressed', 'false'); }
@@ -268,7 +273,8 @@ export async function mountYardViewer(figure) {
   on(document, 'fullscreenchange', () => { renderer.resize(); figure.querySelector('[data-scene-action="fullscreen"]').setAttribute('aria-pressed', String(document.fullscreenElement === figure)); });
   on(preview, 'yardstagechange', event => selectFrame(Number(event.detail.index), event.detail.animate !== false));
   on(document, 'visibilitychange', () => { if (document.hidden) { stop(); if (!draft) selectFrame(index, false); } });
-  on(reduced, 'change', () => { stop(); if (!draft) selectFrame(index, false); });
+  on(animateMotion, 'change', () => { stop(); if (!draft) selectFrame(index, false); });
+  on(reduced, 'change', () => { animateMotion.checked = !reduced.matches; stop(); if (!draft) selectFrame(index, false); });
   on(window, 'pagehide', event => { stop(); if (!draft) selectFrame(index, false); if (!event.persisted) destroy(); });
   on(window, 'pageshow', () => renderer.resize());
   on(canvas, 'webglcontextlost', event => { event.preventDefault(); destroy(); fallback(figure); });

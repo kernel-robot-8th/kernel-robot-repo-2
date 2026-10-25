@@ -35,12 +35,16 @@ def fleet_links(origin, mission_id=None, robot_id=None, arm_console_enabled=Fals
 
 
 def connection_summary():
-    links = fleet_links(os.environ.get('HARBOR_FLEET_ORIGIN'))
-    declared = os.environ.get('HARBOR_FLEET_ARM_CONSOLE_ENABLED') == '1'
-    configured = bool(links['console']) and all(os.environ.get('HARBOR_' + key) for key in (
-        'LEDGER_PATH', 'FLEET_TOKEN', 'FLEET_PRINCIPAL', 'BINDINGS_PATH'))
-    return dict(configured=configured, verified=False, links=links, arm_console_enabled=declared,
-        origin=os.environ.get('HARBOR_FLEET_ORIGIN', '') if links['console'] else '',
+    from harbor_web.fleet_connection import connection_settings, last_check
+    config = connection_settings()
+    check = last_check()
+    links = fleet_links(config['origin'])
+    declared = config['arm_console_enabled']
+    configured = bool(links['console']) and config['allowed'] and bool(config['principal']) and all(
+        os.environ.get('HARBOR_' + key) for key in ('LEDGER_PATH', 'FLEET_TOKEN', 'BINDINGS_PATH'))
+    return dict(configured=configured, verified=bool(check and check.detail['status'] == 'VERIFIED'),
+        links=links, arm_console_enabled=declared,
+        origin=config['origin'] if links['console'] else '',
         requirements=[
             dict(label='접속 설정', status='설정 있음' if configured else '설정 필요',
                  note='설정 유무만 확인합니다. 인증·API 호환성을 조회하지 않았습니다.'),
@@ -59,8 +63,10 @@ def pipeline_for(order, plan=None, command=None, detail=None):
     state = command.state if command else ''
     status = job.get('status', '')
     uncertain = state in {'UNKNOWN', 'DISPATCHING', 'CANCEL_PENDING'} or bool(detail.get('reason') == 'LEDGER_UNAVAILABLE')
+    from harbor_web.fleet_connection import connection_settings
+    config = connection_settings()
     links = fleet_links(command.fleet_origin, command.mission_id,
-        arm_console_enabled=os.environ.get('HARBOR_FLEET_ARM_CONSOLE_ENABLED') == '1') if command else fleet_links(None)
+        arm_console_enabled=config['arm_console_enabled'] and (not config['origin'] or config['origin'] == command.fleet_origin)) if command else fleet_links(None)
     submitted = bool(command and command.mission_id and state != 'PREPARED')
     approved = status in {'READY', 'RUNNING', 'ACTION_SUCCEEDED', 'GOAL_CONFIRMED'}
     executed = status in {'ACTION_SUCCEEDED', 'GOAL_CONFIRMED'}

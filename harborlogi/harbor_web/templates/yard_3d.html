@@ -3,7 +3,7 @@
 {{ yard_scene|json_script:scene_id }}
 <section class="yard-3d model-workbench" data-yard-3d data-scene="{{ scene_id }}" hidden aria-label="컨테이너 모델 작업 공간">
   <header class="scene-heading"><div><p class="eyebrow">컨테이너 모델 뷰어</p><strong data-scene-step>관측한 배치</strong><span>논리 배치 · 실측 모델 아님</span></div><div class="actions"><button class="quiet" type="button" data-scene-action="fullscreen" aria-pressed="false">전체 화면</button><button type="button" data-scene-play aria-pressed="false">계획 재생</button></div></header>
-  <div class="scene-playback"><label>설명 속도 <select data-scene-speed aria-label="배치 설명 재생 속도"><option value="0.5">0.5배 · 9초/이동</option><option value="1" selected>1배 · 4.5초/이동</option><option value="2">2배 · 2.25초/이동</option></select></label><p data-scene-progress>화물별 출발·도착과 들어 올림·이동·내려놓기를 표시합니다.</p></div>
+  <div class="scene-playback"><label><input type="checkbox" data-scene-animate> 이동 애니메이션 표시</label><label>설명 속도 <select data-scene-speed aria-label="배치 설명 재생 속도"><option value="0.5">0.5배 · 9초/이동</option><option value="1" selected>1배 · 4.5초/이동</option><option value="2">2배 · 2.25초/이동</option></select></label><p data-scene-progress>화물별 출발·도착을 표시합니다. 동작 줄이기 설정에서는 배치를 차례로 보여 줍니다. 이동을 보려면 애니메이션을 켜세요.</p></div>
   <div class="model-draft" data-scene-draft role="status" hidden></div>
   <div class="model-layout">
     <div class="model-viewport">

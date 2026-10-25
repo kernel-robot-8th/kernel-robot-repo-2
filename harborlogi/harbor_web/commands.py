@@ -33,8 +33,12 @@ def _digest(value):
 
 
 def _config():
-    values = [os.environ.get('HARBOR_' + name, '') for name in (
-        'LEDGER_PATH', 'FLEET_ORIGIN', 'FLEET_TOKEN', 'FLEET_PRINCIPAL', 'BINDINGS_PATH')]
+    from harbor_web.fleet_connection import connection_settings
+    connection = connection_settings()
+    if connection['origin'] and not connection['allowed']:
+        raise ValidationError('ORIGIN_NOT_ALLOWED')
+    values = [os.environ.get('HARBOR_LEDGER_PATH', ''), connection['origin'],
+        os.environ.get('HARBOR_FLEET_TOKEN', ''), connection['principal'], os.environ.get('HARBOR_BINDINGS_PATH', '')]
     if not all(values):
         raise ValidationError('EXECUTION_CONFIGURATION_REQUIRED')
     path, origin, token, principal, bindings = values
@@ -99,7 +103,7 @@ def capability(plan):
     except ValidationError as error:
         safe = {'SPATIAL_EXECUTION_BINDINGS_REQUIRED', 'SPATIAL_OBSERVATION_REQUIRED',
                 'EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION', 'RESTORE_RECONCILIATION_REQUIRED', 'DEPLOYMENT_PROFILE_REQUIRED',
-                'EXECUTION_CONFIGURATION_REQUIRED', 'INVALID_FLEET_PRINCIPAL', 'PLAN_NOT_READY', 'PLAN_QUEUE_CHANGED',
+                'EXECUTION_CONFIGURATION_REQUIRED', 'ORIGIN_NOT_ALLOWED', 'INVALID_FLEET_PRINCIPAL', 'PLAN_NOT_READY', 'PLAN_QUEUE_CHANGED',
                 'OBSERVATION_NOT_FRESH', 'OBSERVATION_REVISION_CHANGED', 'AUTHENTICATED_OBSERVATION_AND_EVIDENCE_PRODUCER_REQUIRED'}
         reason = error.messages[0] if error.messages and error.messages[0] in safe else 'EXECUTION_INPUTS_UNAVAILABLE'
     except (ValueError, KeyError, TypeError, OSError):

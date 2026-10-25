@@ -52,7 +52,8 @@ def exercise_workbench(page, output):
     def wait_progress(low, high):
         page.wait_for_function('''([low,high]) => {
           const p=document.querySelector('[data-scene-progress]');
-          return Number(p.dataset.progress)>=low && Number(p.dataset.progress)<high;
+          return document.querySelector('canvas').dataset.moving === 'true' &&
+            Number(p.dataset.progress)>=low && Number(p.dataset.progress)<high;
         }''', arg=[low, high])
 
     def rendered_positions():
@@ -141,6 +142,7 @@ def exercise_workbench(page, output):
     wait_rendered(final_draft)
     assert rendered_positions() == final_draft
     assert page.locator('#yard-scene-data').text_content() == source
+    motionless_draft = exercise_motionless_draft(page)
     speed.select_option('1')
     move('C1', 'stand', 1, 1, 1, 90)
     assert page.locator('[data-scene-error]').inner_text()
@@ -237,4 +239,113 @@ def exercise_workbench(page, output):
     return ['WebGL camera pan/presets/zoom, selection focus/isolation and fullscreen work; two-finger motion does not select cargo',
             'Local drafts enforce footprint boundaries, overlaps, full support and restoration; original JSON and server stay unchanged',
             'Actual rendered translation handle moves and snaps one cargo; no injected transform or mocked renderer',
-            'Default 4.5-second moves visibly lift/travel/lower; speed changes actual rendered motion; accepted local draft history replays and stop restores its final state']
+            'Default 4.5-second moves visibly lift/travel/lower; speed changes actual rendered motion; accepted local draft history replays and stop restores its final state',
+            motionless_draft]
+
+
+def exercise_motionless_draft(page):
+    """Two accepted local changes must retain their pacing when animation is disabled."""
+    toggle = page.locator('[data-scene-animate]')
+    toggle.uncheck()
+    page.locator('[data-scene-speed]').select_option('1')
+    play = page.locator('[data-scene-play]')
+    started = time.monotonic()
+    play.click()
+    page.wait_for_timeout(900)
+    assert play.get_attribute('aria-pressed') == 'true', 'Motionless local draft replay must not finish synchronously'
+    assert page.locator('canvas').get_attribute('data-moving') == 'false'
+    page.wait_for_function('() => document.querySelector("[data-scene-play]").getAttribute("aria-pressed") === "false"')
+    elapsed = time.monotonic() - started
+    assert elapsed >= 9, elapsed
+    toggle.check()
+    return f'Motionless two-change local draft playback lasts {elapsed:.2f}s instead of recursing synchronously'
+
+
+def exercise_reduced_playback(page, output=None):
+    """Reduced motion keeps manual snapshots instant and full playback readable."""
+    toggle = page.locator('[data-scene-animate]')
+    assert not toggle.is_checked()
+    play = page.locator('[data-scene-play]')
+    canvas = page.locator('canvas')
+    writes = []
+    def observe(request):
+        if request.method != 'GET':
+            writes.append(request.method)
+    page.on('request', observe)
+    page.locator('[data-yard-stage="0"]').click()
+    started = time.monotonic()
+    play.click()
+    page.wait_for_timeout(900)
+    assert canvas.get_attribute('data-frame') == '1', 'Reduced motion must hold each snapshot instead of finishing immediately'
+    assert canvas.get_attribute('data-moving') == 'false'
+    assert play.get_attribute('aria-pressed') == 'true'
+    page.wait_for_function('() => document.querySelector("[data-scene-play]").getAttribute("aria-pressed") === "false"')
+    snapshot_elapsed = time.monotonic() - started
+    assert snapshot_elapsed >= 13.5, snapshot_elapsed
+    play.click()
+    page.wait_for_timeout(900)
+    assert canvas.get_attribute('data-frame') == '1'
+    assert play.get_attribute('aria-pressed') == 'true'
+    play.click()
+    toggle.check()
+    page.locator('[data-yard-stage="0"]').click()
+    page.locator('[data-scene-speed]').select_option('0.5')
+    scene = json.loads(page.locator('#' + page.locator('[data-yard-3d]').get_attribute('data-scene')).text_content())
+    page.wait_for_function('''boxes => {
+      const actual=JSON.parse(document.querySelector('canvas').dataset.renderedPositions || '{}');
+      return boxes.every(b => actual[b.id] && ['x','y','z'].every(k => actual[b.id][k] === b[k]));
+    }''', arg=scene['frames'][0]['boxes'])
+    source = json.loads(canvas.get_attribute('data-rendered-positions'))
+    started = time.monotonic()
+    play.click()
+    page.wait_for_function('() => Number(document.querySelector("[data-scene-progress]").dataset.progress) >= 25 && document.querySelector("canvas").dataset.moving === "true"')
+    elapsed = time.monotonic() - started
+    assert elapsed >= 2.5, elapsed
+    progress = page.locator('[data-scene-progress]')
+    moving = progress.get_attribute('data-cargo')
+    rendered = json.loads(canvas.get_attribute('data-rendered-positions'))
+    assert rendered[moving]['z'] > source[moving]['z'], rendered
+    if output:
+        page.screenshot(path=str(output / 'reduced-opt-in-half-speed.png'), full_page=True)
+    play.click()
+    toggle.uncheck()
+    page.locator('[data-yard-stage="2"]').click()
+    assert canvas.get_attribute('data-moving') == 'false'
+    page.remove_listener('request', observe)
+    assert not writes, writes
+    return [f'Reduced-motion playback holds snapshots for {snapshot_elapsed:.2f}s and replays; explicit half-speed reaches 25% after {elapsed:.2f}s with rendered {moving} z={rendered[moving]["z"]:.2f} above source z={source[moving]["z"]:.2f}; manual reduced-motion steps stay instant; no server writes']
+
+
+def exercise_inbound_comparison(page, output):
+    """An unobserved inbound origin permits a paced placement comparison, never a fabricated path."""
+    canvas = page.locator('canvas')
+    progress = page.locator('[data-scene-progress]')
+    play = page.locator('[data-scene-play]')
+    scene = json.loads(page.locator('#' + page.locator('[data-yard-3d]').get_attribute('data-scene')).text_content())
+    incoming = next(b for b in scene['frames'][-1]['boxes'] if b['id'] not in {v['id'] for v in scene['frames'][0]['boxes']})
+    writes = []
+    def observe(request):
+        if request.method != 'GET':
+            writes.append(request.method)
+    page.on('request', observe)
+    started = time.monotonic()
+    play.click()
+    page.wait_for_function('() => Number(document.querySelector("[data-scene-progress]").dataset.progress) >= 25')
+    assert play.get_attribute('aria-pressed') == 'true'
+    assert progress.get_attribute('data-source') == '관측 출발 위치 없음'
+    assert '배치 비교' in progress.get_attribute('data-phase')
+    assert canvas.get_attribute('data-moving') == 'false'
+    actual = json.loads(canvas.get_attribute('data-rendered-positions'))[incoming['id']]
+    assert actual == {key: incoming[key] for key in ('x', 'y', 'z')}, actual
+    page.screenshot(path=str(output / 'inbound-paced-comparison.png'), full_page=True)
+    page.wait_for_function('() => document.querySelector("[data-scene-play]").getAttribute("aria-pressed") === "false"')
+    elapsed = time.monotonic() - started
+    assert elapsed >= 4.5, elapsed
+    play.click()
+    page.wait_for_timeout(900)
+    assert play.get_attribute('aria-pressed') == 'true'
+    assert float(progress.get_attribute('data-progress')) < 100
+    play.click()
+    page.remove_listener('request', observe)
+    assert not writes, writes
+    return [f'Inbound comparison lasts {elapsed:.2f}s, replays, keeps its rendered destination fixed, labels its unobserved source and makes no server writes']

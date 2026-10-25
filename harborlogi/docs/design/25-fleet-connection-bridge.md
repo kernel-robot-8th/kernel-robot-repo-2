@@ -1,0 +1,50 @@
+# Fleet 연결 설정과 계약 확인
+
+2026-10-26. [ADR0013](../adr/0013-independent-business-execution-and-platform.md)의 책임 분리를 적용한 설정·조회 어댑터 구현이다. 상시 업무 실행기는 [설계24](24-business-execution-boundary.md)의 별도 구현 대상이다.
+
+## 사용자 흐름
+
+관리자는 설정·계정에서 ROSY 연동으로 이동해 서버가 허용한 Fleet 주소와 서비스 principal ID를 저장한다. ‘Fleet 연결 확인’을 누르면 서버가 공개 API를 GET으로 조회한다. 성공/실패와 확인 시각을 저장하고, 현재 설정·토큰에 대응하는 결과만 표시한다. 페이지 GET은 네트워크나 장부 상태를 바꾸지 않는다.
+
+토큰·장부·설치 binding은 배포 서버에서 관리한다. 브라우저·설정 DB·감사 로그에 서비스 토큰을 저장하지 않는다. 화면의 서비스 신원은 토큰의 principal ID와 정확히 일치해야 한다. 로그인 계정의 Harbor 역할과 Fleet 서비스 역할은 별개다.
+
+## 설정 소유와 적용
+
+| 값 | 소유·적용 |
+|---|---|
+| `HARBOR_FLEET_ALLOWED_ORIGINS` | 서버가 정한 UI 선택 가능 주소, 쉼표 구분. HTTPS 또는 기존 client가 허용한 loopback HTTP. 화면에서 임의 주소를 추가하지 않음 |
+| `HARBOR_FLEET_ORIGIN`·`HARBOR_FLEET_PRINCIPAL` | 기존 배포 관리 방식. origin을 설정하면 이 방식이 UI 프로필보다 우선하고 화면에서 연결 신원을 바꾸지 않음 |
+| FleetConnection | 서버 origin이 없는 경우 Harbor DB에 주소·서비스 신원·ARM 화면 설치 선언·version 저장. 서비스 토큰 없음 |
+| `HARBOR_FLEET_TOKEN` | 서버에 설치한 서비스 자격. UI 입력·응답·공개 문서에 실제 값을 넣지 않음 |
+| `HARBOR_LEDGER_PATH`·`HARBOR_BINDINGS_PATH` | 기존 업무 장부와 검토된 물리 참조 대응. 경로는 서버에서 관리하고 화면에는 설정 유무만 표시 |
+| ARM 화면 설치 선언 | 해당 Fleet 콘솔의 설치 확인. API 지원·승인 성공의 근거로 사용하지 않음 |
+
+예를 들어 설치 담당자가 허용 주소에 `https://fleet.example`을 등록하고 서비스 토큰을 서버에 설치하면, 관리자가 UI에서 그 주소와 발급된 서비스 신원을 선택·저장한다. 실제 주소·토큰·운영 DB는 공개 저장소에 넣지 않는다. 파일 DB는 migration0011 적용 후 시작한다.
+
+같은 resolver가 실행 요청 제출·원래 실행 대조·Fleet 콘솔 링크에 사용된다. UI 프로필을 저장해도 토큰이 없으면 전송하지 않는다. 설정 save는 버전을 검사하고 감사하며, 토큰이나 설정이 바뀌면 이전 검사 성공을 재사용하지 않는다. 기존 Command가 있으면 origin/principal 변경을 거절해 원래 실행 identity를 보존한다. 이력 삭제나 새 identity로의 자동 이관은 제공하지 않는다.
+
+업무 실행 장부의 writer와 웹 DB writer는 기존 단일 프로세스/WriterLease 제약을 따른다. 설정 변경은 제출과 같은 직렬화 경계를 사용한다. 이미 생성된 Command의 원본 key·body·Fleet origin/principal을 새 설정으로 덮어쓰지 않는다. 백업은 해당 웹 DB의 프로필 신원도 manifest에 보존하고 토큰은 포함하지 않는다. 복원 후 실행 대조 차단은 유지한다.
+
+## 실제로 검사하는 계약
+
+소비 기준은 기존 ARM API v1.312와 검증된 producer pin이다. `healthz`나 OpenAPI 앱 버전은 ARM 지원 협상이 아니다. 현재 ROSY 공유 main에 필요한 ARM 경로가 없을 수 있으므로 최신 main이라는 이유로 지원을 가정하지 않는다.
+
+| 요청 | 검사 결과 |
+|---|---|
+| `GET /api/fleet/session` | principal 정확한 일치, 역할 `operator` 또는 `service`. 역할은 리소스별 proposal grant 전체를 증명하지 않음 |
+| `GET /api/fleet/arm-transfers/jobs?request_key=harbor-probe-…` | 새로운 임의 key로 읽기만 수행. 구조화된404 `ARM_TRANSFER_JOB_NOT_FOUND`가 설치된 조회 surface의 응답임을 확인 |
+| ARM503 `ARM_TRANSFER_JOB_UNAVAILABLE` | ARM 설치 미준비 |
+| 일반404·잘못된 schema·예상하지 못한200 | 호환 조회 계약 미확인. 일반 서버의404를 지원으로 오인하지 않음 |
+| 인증/권한 실패·timeout | 해당 실패로 기록. 원본 오류 본문이나 자격을 사용자 화면에 반사하지 않음 |
+
+연결 확인은 POST 사용자 조작이지만 Fleet에는 GET만 보낸다. 작업 생성·승인·취소·owner preflight를 보내지 않는다. 서비스 신원과 ARM 읽기 API가 확인돼도 proposal 권한, 설치 binding, 자원 가용성, 물리 관측·업무 완료 producer, 실물 수용이 준비됐다는 뜻은 아니다. 성공 표시는 ‘조회 연동 확인’이다.
+
+## 실행과 업무의 경계
+
+이 연결은 기존 plan 확정→Command→ROSY 제출/조회 어댑터의 설정을 일치시킨다. 실제 제출은 기존 관측·revision·설치·권한 검사에 따른다. 승인·claim·장치 제어는 ROSY가 담당한다. 다칸 binding·인증된 업무 근거가 없는 실행을 이 설정 화면에서 활성화하지 않는다. 연속 업무 운용과 confirm/finish 근거 연결도 이번 연결 확인과 구별한다.
+
+실행 모니터 화면의 대조는 원래 요청 key·mission·본문·신원을 검증한다. receipt는 물리 근거이고 전체 업무 완료와 다르다. 현재 상태와 부족한 조건은 원래 업무 화면에서 확인한다. LLM이나 UI의 다른 진입점도 동일한 설정·권한·명령 경계를 사용해야 한다.
+
+## 검증
+
+프로필 버전 충돌, allowlist 거절, 배포 설정 우선, 기존 Command identity 변경 거절, 현재 설정/토큰과 검사 fingerprint 결속, GET 무통신·무쓰기, 역할·CSRF·비밀 비노출을 Django 시험으로 확인한다. 격리 HTTP double+실제 브라우저 시험과 고정된 실제 Fleet HTTP 시험은 별도 근거로 기록한다. 둘 다 합성 장치로 실행하면 실물 수용은 아니다.
