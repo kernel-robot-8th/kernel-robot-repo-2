@@ -18,6 +18,8 @@ class CommandForm(forms.Form):
 
 def gate_text(code):
     return {
+        'SPATIAL_EXECUTION_BINDINGS_REQUIRED': '공간 계획의 전체 점유 크기·방향·위치에 맞는 설치 대응 검증이 필요합니다.',
+        'SPATIAL_OBSERVATION_REQUIRED': '다칸 화물이 등록되었습니다. 전체 점유 위치와 크기 원본을 포함한 공간 관측으로 다시 검토하세요.',
         'EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION': '이 요청에는 이미 실행 인계가 있습니다. 새로 제출하지 말고 원래 작업을 대조하세요.',
         'RESTORE_RECONCILIATION_REQUIRED': '복원한 자료입니다. 원래 실행과 복구 검토가 끝나기 전 새 제출을 보류합니다.',
         'DEPLOYMENT_PROFILE_REQUIRED': '배포 환경과 데이터베이스 기준을 먼저 확인해야 합니다.',
@@ -56,8 +58,14 @@ def plan_detail(request, pk):
     if plan.order.kind == 'OUTBOUND':
         from harbor_web.workspace import workspace_context
         return page(request, 'workspace.html', section='outbound', **workspace_context(plan.order, plan))
+    observation_stage = None
+    if plan.observation.payload.get('schema') == 'grid-placement-v1':
+        from harbor_web.yard_view import spatial_yard_view
+        observation_stage = dict(spatial_yard_view(services.spatial_snapshot(plan.observation), target=plan.order.cargo.code),
+            panel_id=f'held-plan-{plan.pk}', label='관측한 배치', index=0)
     return page(request, 'plan.html', section='inventory', plan=plan, display_moves=[], gate=gate,
-                gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']), command=None)
+                gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']), command=None,
+                observation_stage=observation_stage)
 
 
 @require_roles('viewer', 'operator', 'admin')

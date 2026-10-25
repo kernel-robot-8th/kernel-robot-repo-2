@@ -4,7 +4,13 @@ from django.contrib.auth import get_user_model
 from harbor_web.models import Cargo, Condition, Measurement, Observation, Order
 
 
+class FootprintForm(forms.Form):
+    length_cells = forms.TypedChoiceField(label='점유 크기', coerce=int,
+        choices=[(n, f'{n} × 1칸') for n in (1, 2, 3)], initial=1)
+
+
 class CargoForm(forms.ModelForm):
+    length_cells = FootprintForm.base_fields['length_cells']
     def clean_code(self):
         code = self.cleaned_data['code']
         if Cargo.objects.filter(code=code).exists():

@@ -8,7 +8,7 @@ from django.views.decorators.http import require_http_methods
 
 from harbor_web import forms, services
 from harbor_web.auth import has_role, require_roles
-from harbor_web.models import Audit, Cargo, Command, Condition, FieldEpisode, Observation, Order, Plan
+from harbor_web.models import Audit, Cargo, CargoFootprint, Command, Condition, FieldEpisode, Observation, Order, Plan
 
 
 def page(request, template, **context):
@@ -84,7 +84,31 @@ def overview(request):
 def cargo_list(request):
     q = request.GET.get('q', '')[:200]
     items = Cargo.objects.filter(Q(code__icontains=q) | Q(name__icontains=q) | Q(destination__icontains=q)).order_by('-id')
-    return page(request, 'cargo.html', section='cargo', q=q, **paginate(request, items))
+    pagination = paginate(request, items)
+    footprints = {f.cargo_id: f for f in CargoFootprint.objects.filter(cargo_id__in=[c.pk for c in pagination['page']]).order_by('pk')}
+    for cargo in pagination['page']:
+        cargo.current_footprint = footprints.get(cargo.pk)
+    return page(request, 'cargo.html', section='cargo', q=q, **pagination)
+
+
+@require_roles('viewer', 'operator', 'admin')
+@require_http_methods(['GET', 'POST'])
+def cargo_footprint(request, pk):
+    cargo = get_object_or_404(Cargo, pk=pk)
+    if request.method == 'POST' and not has_role(request.user, 'operator'):
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+    form = forms.FootprintForm(request.POST or None)
+    if request.method == 'POST' and form.is_valid():
+        try:
+            services.register_footprint(request.user, cargo_id=pk, **form.cleaned_data)
+        except ValidationError as error:
+            form_error(form, error)
+        else:
+            messages.success(request, '새 점유 크기를 기록했습니다. 과거 관측과 계획의 크기 원본은 유지됩니다.')
+            return redirect(f'/cargo/{pk}/footprint/')
+    return page(request, 'cargo_footprint.html', section='cargo', cargo=cargo, form=form,
+                footprints=CargoFootprint.objects.filter(cargo=cargo).select_related('created_by').order_by('-pk'))
 
 
 @require_roles('operator')
@@ -178,8 +202,10 @@ def order_detail(request, pk):
 def inventory(request):
     observations = Observation.objects.select_related('condition').order_by('-id')
     selected = get_object_or_404(observations, pk=request.GET['observation']) if request.GET.get('observation', '').isdigit() else observations.first()
-    from harbor_web.yard_view import yard_view
-    stage = dict(yard_view(selected.payload['bays'], selected.condition.payload), panel_id='inventory-yard', label='관측한 배치', index=0) if selected else None
+    from harbor_web.yard_view import yard_view, spatial_yard_view
+    view = (spatial_yard_view(services.spatial_snapshot(selected)) if selected.payload.get('schema') == 'grid-placement-v1'
+            else yard_view(selected.payload['bays'], selected.condition.payload)) if selected else None
+    stage = dict(view, panel_id='inventory-yard', label='관측한 배치', index=0) if view else None
     return page(request, 'inventory.html', section='inventory', observation=selected, observations=observations[:100], yard_stage=stage)
 
 
@@ -203,6 +229,9 @@ def condition_new(request):
 
 def reason_text(code):
     return {
+        'SPATIAL_OBSERVATION_REQUIRED': '이 화물의 다칸 점유 크기를 확인할 수 있는 공간 관측 원본이 필요합니다.',
+        'NO_LEGAL_SPATIAL_PLAN': '전체 점유 면적과 지지 조건을 만족하는 임시 배치·반출·복귀 계획을 찾지 못했습니다.',
+        'SPATIAL_SEARCH_LIMIT_REACHED': '공간 계획의 검토 한도에 도달했습니다. 공간이 없다고 단정하지 않고 보류합니다.',
         'PROPOSAL_REQUIRES_ADMISSION_AND_EVIDENCE': '계획을 만들었습니다. 실행 전 설치 대응과 승인·근거 조건을 확인하세요.',
         'PRIORITY_ORDER_BLOCKED': '앞선 반출 지시가 있습니다. 우선순위와 그룹 안 허용 순서를 확인하세요.',
         'INBOUND_PLANNER_NOT_AVAILABLE': '입고 계획은 아직 연결되지 않았습니다. 입력한 요청은 보존됩니다.',

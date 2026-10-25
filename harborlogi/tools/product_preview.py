@@ -33,7 +33,7 @@ def main():
     from django.contrib.auth.models import Group
     from django.utils import timezone
     from harbor_web import services
-    from harbor_web.models import Cargo, Condition, FieldEpisode, Order
+    from harbor_web.models import Cargo, CargoFootprint, Condition, FieldEpisode, Order
     from harbor.ownership import WriterLease
     with WriterLease(folder / 'product.sqlite3'):
         call_command('migrate', interactive=False, verbosity=0)
@@ -45,21 +45,30 @@ def main():
             user.groups.add(*Group.objects.filter(name__in=['viewer', 'operator', 'field', 'admin']))
         for code, name in [('C1', '우선 반출 화물'), ('C2', '상단 재취급 화물'), ('C3', '공급 인계 확인 화물'),
                            ('C4', '중앙 보관 화물'), ('C5', '하단 보관 화물'), ('C6', '중단 보관 화물'), ('C7', '상단 보관 화물')]:
+            length = 2 if code == 'C1' else 3 if code == 'C5' else 1
             if not Cargo.objects.filter(code=code).exists():
-                services.register_cargo(user, code=code, name=name, weight_kg=2, volume_m3='0.012', destination='반출대 · 합성 시험')
+                services.register_cargo(user, code=code, name=name, weight_kg=2, volume_m3='0.012', destination='반출대 · 합성 시험', length_cells=length)
+            cargo = Cargo.objects.get(code=code)
+            footprint = CargoFootprint.objects.filter(cargo=cargo).order_by('-pk').first()
+            if footprint is None or footprint.length_cells != length:
+                services.register_footprint(user, cargo_id=cargo.pk, length_cells=length)
         layout = json.loads((root / 'config/yard-layout.json').read_text(encoding='utf-8'))
-        policy = json.loads((root / 'config/yard-grid.example.json').read_text(encoding='utf-8'))
+        policy = json.loads((root / 'config/spatial-policy.example.json').read_text(encoding='utf-8'))
         policy['yard_layout'] = layout
-        condition = Condition.objects.filter(name='3×3×3 논리 야드 · 합성 관측 검토용').order_by('-id').first()
+        condition = Condition.objects.filter(name='3×3×3 다칸 점유 · 합성 관측 검토용').order_by('-id').first()
         if condition is None:
-            condition = services.register_condition(user, name='3×3×3 논리 야드 · 합성 관측 검토용', calibration_ref='synthetic-only-not-field-calibration', payload=policy)
+            condition = services.register_condition(user, name='3×3×3 다칸 점유 · 합성 관측 검토용', calibration_ref='synthetic-only-not-field-calibration', payload=policy)
         elif condition.payload != policy:
-            condition = services.register_condition(user, name='3×3×3 논리 야드 · 합성 관측 검토용', calibration_ref='synthetic-only-not-field-calibration', payload=policy)
+            condition = services.register_condition(user, name='3×3×3 다칸 점유 · 합성 관측 검토용', calibration_ref='synthetic-only-not-field-calibration', payload=policy)
         now = timezone.now()
-        contents = {'Y11': ['C1', 'C2'], 'Y22': ['C4'], 'Y33': ['C5', 'C6', 'C7']}
-        bays = [dict(bay_id=cell['bay_id'], cargo=contents.get(cell['bay_id'], []), capacity=3) for cell in layout['cells']]
-        bays += [dict(bay_id=policy['temporary_bays'][0], cargo=[], capacity=3), dict(bay_id=policy['outbound_stand'], cargo=[], capacity=1)]
-        observation = services.record_observation(user, source_id='synthetic-preview-camera', source_revision=now.isoformat(), observed_at=now, provenance='SYNTHETIC', condition=condition, payload=dict(bays=bays, holdings=[]))
+        placements = []
+        for code, row, column, level in [('C1', 1, 1, 1), ('C2', 1, 1, 2), ('C4', 2, 3, 1),
+                                         ('C5', 3, 1, 1), ('C6', 3, 2, 2), ('C7', 3, 2, 3)]:
+            footprint = CargoFootprint.objects.filter(cargo__code=code).order_by('-pk').first()
+            placements.append(dict(cargo_id=code, area_id='yard', row=row, column=column, level=level,
+                                   orientation=0, footprint_revision=footprint.pk))
+        observation = services.record_observation(user, source_id='synthetic-preview-camera', source_revision=now.isoformat(), observed_at=now, provenance='SYNTHETIC', condition=condition,
+            payload=dict(schema='grid-placement-v1', observed_areas=['yard', 'temp', 'stand'], placements=placements, holdings=[]))
         order = Order.objects.filter(cargo__code='C1', kind='OUTBOUND').first()
         if order is None:
             order = services.create_order(user, cargo=Cargo.objects.get(code='C1'), kind='OUTBOUND', priority_group=1, sequence=1, tie_policy='FIXED', note='변경된 반출 지시를 검토하는 합성 사례')

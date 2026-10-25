@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from harbor_web import commands, forms, services
 from harbor_web.models import Audit, Command, Observation, Plan
-from harbor_web.yard_view import yard_view
+from harbor_web.yard_view import yard_view, spatial_yard_view
 
 
 COMMAND_LABELS = {
@@ -34,6 +34,8 @@ def plan_changes(order, plan, *, current_queue_digest=None):
 def _yard_stages(order, plan, source):
     if not source:
         return [], []
+    if source.payload.get('schema') == 'grid-placement-v1':
+        return _spatial_stages(order, plan, source)
     target = order.cargo.code
     blockers = set()
     for bay in source.payload['bays']:
@@ -59,6 +61,27 @@ def _yard_stages(order, plan, source):
         by_id[move['source']]['cargo'].remove(move['cargo_id'])
         by_id[move['destination']]['cargo'].append(move['cargo_id'])
         stages.append(stage(i + 1, phase, f'{i + 1}단계 후 예상 · {phase}', display))
+    return stages, display_moves
+
+
+def _spatial_stages(order, plan, source):
+    from harbor.spatial import Placement
+    current = services.spatial_snapshot(source)
+    moves = plan.result['moves'] if plan and plan.result['status'] == 'READY' else []
+    blockers = {m['cargo_id'] for m in moves if m['phase_label'] == '재취급'}
+
+    def stage(index, phase, label, move=None):
+        view = spatial_yard_view(current, target=order.cargo.code, blockers=blockers)
+        return dict(view, index=index, phase=phase, label=label, move=move, panel_id=f'yard-{order.pk}-{index}')
+
+    stages, display_moves = [stage(0, '관측', '관측한 배치')], []
+    for i, move in enumerate(moves):
+        destination = Placement(**move['destination_placement'])
+        current = current.with_placements(tuple(destination if p.cargo_id == move['cargo_id'] else p for p in current.placements))
+        display = dict(move, number=i + 1, source_level=move['source_placement']['level'],
+                       destination_level=destination.level, spatial=True)
+        display_moves.append(display)
+        stages.append(stage(i + 1, move['phase_label'], f"{i + 1}단계 후 예상 · {move['phase_label']}", display))
     return stages, display_moves
 
 

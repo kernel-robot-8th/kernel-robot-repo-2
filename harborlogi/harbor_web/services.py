@@ -14,7 +14,7 @@ from harbor.layout import YardLayout
 from harbor.outbound import plan_outbound, OutboundProposal
 from harbor_web.auth import has_role
 from harbor_web.coordination import serialized
-from harbor_web.models import (clean_text, Cargo, Condition, Observation, Order, Plan, Audit,
+from harbor_web.models import (clean_text, Cargo, CargoFootprint, Condition, Observation, Order, Plan, Audit,
                                FieldEpisode, FieldConfirmation, DepartureIntent, Measurement)
 
 
@@ -44,7 +44,7 @@ def _domain(call):
 def constraints(payload):
     def build():
         required = {'outbound_stand', 'temporary_bays', 'allowed_moves', 'max_observation_age_seconds', 'conveyor', 'arm_reach'}
-        if not isinstance(payload, dict) or not required <= set(payload) <= required | {'yard_layout'}:
+        if not isinstance(payload, dict) or not required <= set(payload) <= required | {'yard_layout', 'spatial_areas', 'spatial_moves'}:
             raise ValueError('Condition requires exactly the documented keys.')
         for name in ('temporary_bays', 'allowed_moves', 'arm_reach'):
             if not isinstance(payload[name], list):
@@ -73,6 +73,8 @@ def constraints(payload):
             referenced = {p for edge in payload['allowed_moves'] for p in edge} | {edge[1] for edge in payload['arm_reach']}
             if not referenced <= known:
                 raise ValueError('Moves and reach must reference configured grid or auxiliary locations.')
+        if 'spatial_areas' in payload or 'spatial_moves' in payload:
+            spatial_policy(payload)
         return PortConstraints(payload['outbound_stand'], tuple(payload['temporary_bays']),
                                frozenset(tuple(e) for e in payload['allowed_moves']), timedelta(seconds=age),
                                payload['conveyor'], frozenset(tuple(e) for e in payload['arm_reach']))
@@ -80,6 +82,8 @@ def constraints(payload):
 
 
 def snapshot(observation):
+    if isinstance(observation.payload, dict) and observation.payload.get('schema') == 'grid-placement-v1':
+        return spatial_snapshot(observation)
     def build():
         payload = observation.payload
         if not isinstance(payload, dict) or set(payload) != {'bays', 'holdings'}:
@@ -113,15 +117,107 @@ def snapshot(observation):
     return _domain(build)
 
 
+def _spatial_areas(payload):
+    from harbor.spatial import Area
+    layout = YardLayout.from_dict(payload['yard_layout'])
+    items = payload['spatial_areas']
+    if not isinstance(items, list) or any(not isinstance(a, dict) or
+            set(a) != {'area_id', 'rows', 'columns', 'levels'} for a in items):
+        raise ValueError('Spatial areas require explicit dimensions.')
+    areas = (Area('yard', layout.rows, layout.columns, layout.levels), *(Area(**a) for a in items))
+    identifiers = [a.area_id for a in areas]
+    if len(set(identifiers)) != len(identifiers):
+        raise ValueError('Spatial areas must be unique; yard is configured by yard_layout.')
+    if set(identifiers) != {'yard', payload['outbound_stand'], *payload['temporary_bays']}:
+        raise ValueError('Every temporary and outbound area requires explicit dimensions.')
+    for identifier in identifiers:
+        clean_text(identifier)
+    return layout, areas
+
+
+def spatial_policy(payload):
+    from harbor.spatial import SpatialPolicy
+    def build():
+        if not isinstance(payload, dict):
+            raise ValueError('Expected a condition object.')
+        legacy = constraints({k: v for k, v in payload.items() if k not in {'spatial_areas', 'spatial_moves'}})
+        _, areas = _spatial_areas(payload)
+        pairs = payload['spatial_moves']
+        if not isinstance(pairs, list) or any(not isinstance(p, list) or len(p) != 2 or
+                any(not isinstance(v, str) for v in p) for p in pairs):
+            raise ValueError('Spatial moves require area pairs.')
+        if len({tuple(p) for p in pairs}) != len(pairs):
+            raise ValueError('Duplicate spatial moves.')
+        known = {a.area_id for a in areas}
+        if any(v not in known for pair in pairs for v in pair):
+            raise ValueError('Spatial moves must reference configured areas.')
+        return SpatialPolicy(legacy.outbound_stand, legacy.temporary_bays,
+            frozenset(tuple(p) for p in pairs), legacy.arm_reach, legacy.max_observation_age)
+    return _domain(build)
+
+
+def spatial_snapshot(observation):
+    from harbor.spatial import CargoShape, Placement, SpatialSnapshot
+    def build():
+        payload = observation.payload
+        if not isinstance(payload, dict) or set(payload) != {'schema', 'observed_areas', 'placements', 'holdings'} or payload['schema'] != 'grid-placement-v1':
+            raise ValueError('Spatial observation requires exactly the documented fields.')
+        constraints(observation.condition.payload)
+        layout, areas = _spatial_areas(observation.condition.payload)
+        observed = payload['observed_areas']
+        if not isinstance(observed, list) or any(not isinstance(a, str) for a in observed) or len(set(observed)) != len(observed) or set(observed) != {a.area_id for a in areas}:
+            raise ValueError('Spatial observation must cover every configured area exactly once.')
+        if not isinstance(payload['placements'], list) or not isinstance(payload['holdings'], list):
+            raise ValueError('Expected observation lists.')
+        placements, shapes, holdings = [], [], []
+        fields = {'cargo_id', 'area_id', 'row', 'column', 'level', 'orientation', 'footprint_revision'}
+        for item in payload['placements']:
+            if not isinstance(item, dict) or set(item) != fields or type(item['footprint_revision']) is not int:
+                raise ValueError('Each placement requires a pinned footprint revision and complete address.')
+            for key in ('cargo_id', 'area_id'):
+                if not isinstance(item[key], str):
+                    raise ValueError('Expected text identifiers.')
+                clean_text(item[key])
+            footprint = CargoFootprint.objects.filter(pk=item['footprint_revision'], cargo__code=item['cargo_id']).first()
+            if footprint is None:
+                raise ValueError('Footprint revision must belong to the observed cargo.')
+            shapes.append(CargoShape(item['cargo_id'], footprint.length_cells, footprint.pk))
+            placements.append(Placement(**{k: v for k, v in item.items() if k != 'footprint_revision'}))
+        for item in payload['holdings']:
+            if not isinstance(item, dict) or set(item) != {'cargo_id', 'holder_id'}:
+                raise ValueError('Invalid holding fields.')
+            holdings.append(CargoHolding(**item))
+            clean_text(item['cargo_id'])
+            if item['holder_id'] is not None:
+                clean_text(item['holder_id'])
+        codes = {h.cargo_id for h in holdings}
+        if codes != set(Cargo.objects.filter(code__in=codes).values_list('code', flat=True)):
+            raise ValueError('Every held cargo must be registered.')
+        return SpatialSnapshot(observation.pk or 0, observation.observed_at, layout, areas,
+            tuple(shapes), tuple(placements), tuple(holdings))
+    return _domain(build)
+
+
 def _provenance(provenance):
     if provenance == 'SYNTHETIC' and settings.MODE == 'live':
         raise ValidationError('Synthetic records are forbidden in live mode.')
 
 
 @transaction.atomic
-def register_cargo(actor, **validated_fields):
+def register_cargo(actor, length_cells=1, **validated_fields):
     _role(actor, 'operator')
-    return _save(actor, Cargo(created_by=actor, **validated_fields), 'cargo.register')
+    cargo = _save(actor, Cargo(created_by=actor, **validated_fields), 'cargo.register')
+    register_footprint(actor, cargo_id=cargo.pk, length_cells=length_cells)
+    return cargo
+
+
+@transaction.atomic
+def register_footprint(actor, *, cargo_id, length_cells):
+    _role(actor, 'operator')
+    if type(length_cells) is not int or length_cells not in (1, 2, 3):
+        raise ValidationError('Footprint length must be 1, 2 or 3 cells.')
+    return _save(actor, CargoFootprint(created_by=actor, cargo=Cargo.objects.get(pk=cargo_id),
+        length_cells=length_cells), 'footprint.register')
 
 
 @transaction.atomic
@@ -221,11 +317,19 @@ def make_plan(actor, *, order_id, expected_version, observation_id, now=None):
     current = timezone.now() if now is None else now
     _domain(lambda: aware_time(current))
     yard = snapshot(observation)
+    spatial = observation.payload.get('schema') == 'grid-placement-v1'
     if order.kind == 'INBOUND':
         proposal = OutboundProposal('HOLD', 'INBOUND_PLANNER_NOT_AVAILABLE', yard.revision)
     elif Order.objects.filter(kind='OUTBOUND', priority_group__lt=order.priority_group).exists() or (
             order.tie_policy == 'FIXED' and Order.objects.filter(kind='OUTBOUND', priority_group=order.priority_group, sequence__lt=order.sequence).exists()):
         proposal = OutboundProposal('HOLD', 'PRIORITY_ORDER_BLOCKED', yard.revision)
+    elif spatial:
+        from harbor.spatial import plan_spatial
+        proposal = _domain(lambda: plan_spatial(yard, OutboundRequest(order.cargo.code, yard.revision),
+            spatial_policy(observation.condition.payload), now=current))
+    elif CargoFootprint.objects.filter(length_cells__gt=1).filter(
+            cargo__code__in={order.cargo.code, *(c for b in yard.bays for c in b.cargo), *(h.cargo_id for h in yard.holdings)}).exists():
+        proposal = OutboundProposal('HOLD', 'SPATIAL_OBSERVATION_REQUIRED', yard.revision)
     else:
         proposal = _domain(lambda: plan_outbound(yard, OutboundRequest(order.cargo.code, yard.revision), constraints(observation.condition.payload), now=current))
     result = asdict(proposal)
@@ -233,12 +337,21 @@ def make_plan(actor, *, order_id, expected_version, observation_id, now=None):
     result = json.loads(json.dumps(result))
     result['request_snapshot'] = request_snapshot(order)
     result['queue_snapshot'] = queue_snapshot()
-    projected = {bay.bay_id: list(bay.cargo) for bay in yard.bays}
-    for move in proposal.moves:
-        projected[move.source].remove(move.cargo_id)
-        projected[move.destination].append(move.cargo_id)
-    result['projected_bays'] = ([{'bay_id': b.bay_id, 'cargo': projected[b.bay_id], 'capacity': b.capacity} for b in yard.bays]
-                                if proposal.status == 'READY' else None)
+    if spatial:
+        result['model'] = 'grid-placement-v1'
+        result['source_shapes'] = [asdict(shape) for shape in yard.shapes]
+        projected = {p.cargo_id: p for p in yard.placements}
+        for move in proposal.moves:
+            projected[move.cargo_id] = move.destination_placement
+        result['projected_placements'] = [asdict(p) for p in projected.values()] if proposal.status == 'READY' else None
+        result['projected_bays'] = None
+    else:
+        projected = {bay.bay_id: list(bay.cargo) for bay in yard.bays}
+        for move in proposal.moves:
+            projected[move.source].remove(move.cargo_id)
+            projected[move.destination].append(move.cargo_id)
+        result['projected_bays'] = ([{'bay_id': b.bay_id, 'cargo': projected[b.bay_id], 'capacity': b.capacity} for b in yard.bays]
+                                    if proposal.status == 'READY' else None)
     return _save(actor, Plan(created_by=actor, order=order, order_version=order.version,
                             observation=observation, condition=observation.condition,
                             queue_digest=queue_digest(), result=result), 'plan.create')

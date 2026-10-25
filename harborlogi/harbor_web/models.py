@@ -76,6 +76,14 @@ class Cargo(Immutable):
         return self.code
 
 
+class CargoFootprint(Immutable):
+    cargo = models.ForeignKey(Cargo, on_delete=models.PROTECT, related_name='footprints')
+    length_cells = models.PositiveSmallIntegerField(choices=[(n, f'{n} × 1') for n in (1, 2, 3)])
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=models.Q(length_cells__in=(1, 2, 3)), name='footprint_valid_length')]
+
+
 class Condition(Immutable):
     name = models.CharField(max_length=120)
     calibration_ref = models.CharField(max_length=192)

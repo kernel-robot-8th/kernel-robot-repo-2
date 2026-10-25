@@ -10,7 +10,7 @@ from harbor_web import services
 class ProductPagesTests(TestCase):
     def test_duplicate_cargo_shows_one_business_recovery_error(self):
         self.client.force_login(self.operator)
-        data = dict(code='C1', name='화물', weight_kg='1', volume_m3='1', destination='반출대')
+        data = dict(code='C1', name='화물', weight_kg='1', volume_m3='1', destination='반출대', length_cells=1)
         self.assertEqual(self.client.post('/cargo/new/', data).status_code, 302)
         response = self.client.post('/cargo/new/', data)
         self.assertContains(response, '이미 등록된 화물 ID입니다.')
@@ -35,7 +35,7 @@ class ProductPagesTests(TestCase):
 
     def test_persistent_cargo_and_request_round_trip(self):
         self.client.force_login(self.operator)
-        response = self.client.post('/cargo/new/', dict(code='C1', name='시험 화물', weight_kg='12.3', volume_m3='0.12', destination='부산'))
+        response = self.client.post('/cargo/new/', dict(code='C1', name='시험 화물', weight_kg='12.3', volume_m3='0.12', destination='부산', length_cells=1))
         self.assertEqual(response.status_code, 302)
         cargo = Cargo.objects.get(code='C1')
         self.assertEqual(self.client.get('/cargo/?q=C1').status_code, 200)

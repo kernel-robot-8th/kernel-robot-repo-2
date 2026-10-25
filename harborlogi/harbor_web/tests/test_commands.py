@@ -399,5 +399,6 @@ class CommandLineageMigrationTests(TransactionTestCase):
         finally:
             # Test cleanup only; production migration never chooses a surviving execution.
             OldCommand.objects.filter(pk=duplicate.pk).delete()
-            MigrationExecutor(connection).migrate(new_target)
+            cleanup = MigrationExecutor(connection)
+            cleanup.migrate(cleanup.loader.graph.leaf_nodes())
         self.assertEqual(Command.objects.get(pk=first.pk).order_id, plan.order_id)

@@ -52,16 +52,17 @@ document.querySelectorAll('[data-yard-preview]').forEach(preview => {
   const controls = [...preview.querySelectorAll('[data-yard-level]')];
   const layers = [...preview.querySelectorAll('[data-yard-layer]')];
   if (!controls.length || !layers.length) return;
-  const selectLevel = level => {
-    controls.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.yardLevel === level)));
-    layers.forEach(layer => { layer.hidden = layer.dataset.yardLayer !== level; });
-    preview.querySelectorAll('[data-layer-status]').forEach(status => {
+  const areaOf = element => element.closest('[data-yard-grid]').dataset.gridArea;
+  const selectLevel = (level, area) => {
+    controls.filter(button => areaOf(button) === area).forEach(button => button.setAttribute('aria-pressed', String(button.dataset.yardLevel === level)));
+    layers.filter(layer => areaOf(layer) === area).forEach(layer => { layer.hidden = layer.dataset.yardLayer !== level; });
+    [...preview.querySelectorAll('[data-layer-status]')].filter(status => areaOf(status) === area).forEach(status => {
       status.textContent = `현재 ${level}층 · 칸의 행·열 주소와 원본 관측은 유지됩니다. 1층은 바닥층입니다.`;
     });
   };
   controls.forEach(button => {
     button.hidden = false;
-    button.addEventListener('click', () => selectLevel(button.dataset.yardLevel));
+    button.addEventListener('click', () => selectLevel(button.dataset.yardLevel, areaOf(button)));
   });
-  selectLevel('1');
+  new Set(controls.map(areaOf)).forEach(area => selectLevel('1', area));
 });

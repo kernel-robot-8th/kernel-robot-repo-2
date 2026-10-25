@@ -67,6 +67,15 @@ def capability(plan):
         blocked = execution_block_reason()
         if blocked:
             raise ValidationError(blocked)
+        if plan.result.get('model') == 'grid-placement-v1':
+            raise ValidationError('SPATIAL_EXECUTION_BINDINGS_REQUIRED')
+        from harbor_web.models import CargoFootprint
+        source_codes = {plan.order.cargo.code}
+        for bay in plan.observation.payload.get('bays', []):
+            source_codes.update(bay['cargo'])
+        source_codes.update(h['cargo_id'] for h in plan.observation.payload.get('holdings', []))
+        if CargoFootprint.objects.filter(cargo__code__in=source_codes, length_cells__gt=1).exists():
+            raise ValidationError('SPATIAL_OBSERVATION_REQUIRED')
         config = _config()
         origin = config['origin']
         if plan.result.get('status') != 'READY':
@@ -88,7 +97,8 @@ def capability(plan):
             raise ValidationError('AUTHENTICATED_OBSERVATION_AND_EVIDENCE_PRODUCER_REQUIRED')
         _bound(plan, config)
     except ValidationError as error:
-        safe = {'EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION', 'RESTORE_RECONCILIATION_REQUIRED', 'DEPLOYMENT_PROFILE_REQUIRED',
+        safe = {'SPATIAL_EXECUTION_BINDINGS_REQUIRED', 'SPATIAL_OBSERVATION_REQUIRED',
+                'EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION', 'RESTORE_RECONCILIATION_REQUIRED', 'DEPLOYMENT_PROFILE_REQUIRED',
                 'EXECUTION_CONFIGURATION_REQUIRED', 'INVALID_FLEET_PRINCIPAL', 'PLAN_NOT_READY', 'PLAN_QUEUE_CHANGED',
                 'OBSERVATION_NOT_FRESH', 'OBSERVATION_REVISION_CHANGED', 'AUTHENTICATED_OBSERVATION_AND_EVIDENCE_PRODUCER_REQUIRED'}
         reason = error.messages[0] if error.messages and error.messages[0] in safe else 'EXECUTION_INPUTS_UNAVAILABLE'
