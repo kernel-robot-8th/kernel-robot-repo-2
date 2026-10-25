@@ -46,6 +46,9 @@ class RosyClient:
             raise ValueError("Expected a Fleet response object")
         return value
 
+    def session(self):
+        return self._request('GET', '/api/fleet/session', None)
+
     def compile(self, binding):
         result = self._request("POST", "/api/fleet/cell-app/compile", binding.compile_request())
         candidate, summary = result.get("candidate", {}), result.get("summary", {})

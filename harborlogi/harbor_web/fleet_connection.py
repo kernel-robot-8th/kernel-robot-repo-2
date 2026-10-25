@@ -1,0 +1,132 @@
+"""Harbor-owned connection settings and explicit read-only public-contract checks."""
+import hashlib
+import json
+import os
+import uuid
+from urllib.error import HTTPError, URLError
+
+from django.core.exceptions import ValidationError
+from django.db import transaction
+
+from harbor.rosy_http import RosyClient
+from harbor_web.coordination import queue_lock, serialized
+from harbor_web.models import Audit, Command, FleetConnection
+from harbor_web.services import _role
+
+
+def allowed_origins():
+    values = os.environ.get('HARBOR_FLEET_ALLOWED_ORIGINS', '').split(',')
+    origins = []
+    for value in values:
+        value = value.strip().rstrip('/')
+        if value:
+            try:
+                RosyClient(value, 'validation-only')
+                if any(c.isspace() or ord(c) < 32 for c in value):
+                    continue
+                origins.append(value)
+            except ValueError:
+                continue
+    return list(dict.fromkeys(origins))
+
+
+def connection_settings():
+    origin = os.environ.get('HARBOR_FLEET_ORIGIN', '').rstrip('/')
+    if origin:
+        return dict(origin=origin, principal=os.environ.get('HARBOR_FLEET_PRINCIPAL', ''),
+            arm_console_enabled=os.environ.get('HARBOR_FLEET_ARM_CONSOLE_ENABLED') == '1',
+            version=0, source='deployment', allowed=True)
+    profile = FleetConnection.objects.first()
+    return dict(origin=profile.origin if profile else '', principal=profile.principal if profile else '',
+        arm_console_enabled=profile.arm_console_enabled if profile else os.environ.get('HARBOR_FLEET_ARM_CONSOLE_ENABLED') == '1',
+        version=profile.version if profile else 0, source='web',
+        allowed=bool(profile and profile.origin in allowed_origins()))
+
+
+def fingerprint(config):
+    return hashlib.sha256(json.dumps(dict(config, token=os.environ.get('HARBOR_FLEET_TOKEN', '')),
+                                    sort_keys=True).encode()).hexdigest()
+
+
+@serialized
+def save_connection(actor, *, origin, principal, arm_console_enabled, expected_version):
+    _role(actor, 'admin')
+    config = connection_settings()
+    if config['source'] == 'deployment':
+        raise ValidationError('DEPLOYMENT_MANAGED_CONNECTION')
+    if config['version'] != expected_version:
+        raise ValidationError('CONNECTION_CHANGED')
+    origin = origin.rstrip('/')
+    if origin not in allowed_origins():
+        raise ValidationError('ORIGIN_NOT_ALLOWED')
+    if not isinstance(principal, str) or not principal.strip() or len(principal) > 192 or any(ord(c) < 32 for c in principal):
+        raise ValidationError('INVALID_FLEET_PRINCIPAL')
+    if Command.objects.exists() and (origin, principal) != (config['origin'], config['principal']):
+        raise ValidationError('EXISTING_EXECUTION_IDENTITY_LOCKED')
+    from harbor_web.commands import registry_close
+    with transaction.atomic():
+        profile, _ = FleetConnection.objects.update_or_create(pk=1, defaults=dict(origin=origin, principal=principal,
+            arm_console_enabled=arm_console_enabled, version=config['version'] + 1))
+        Audit.objects.create(actor=actor, action='fleet.configure', object_type='FleetConnection', object_id='1',
+            detail=dict(version=profile.version, source='web'))
+    registry_close()
+    return profile
+
+
+def last_check():
+    return Audit.objects.filter(action='fleet.check', detail__fingerprint=fingerprint(connection_settings())).order_by('-pk').first()
+
+
+def check_connection(actor, *, expected_version):
+    _role(actor, 'admin')
+    config = connection_settings()
+    if config['version'] != expected_version:
+        raise ValidationError('CONNECTION_CHANGED')
+    original = fingerprint(config)
+    result = dict(status='FAILED', session='NOT_CHECKED', arm='NOT_CHECKED', reason='CONNECTION_INCOMPLETE')
+    token = os.environ.get('HARBOR_FLEET_TOKEN', '')
+    if config['origin'] and config['principal'] and token and config['allowed']:
+        stage = 'session'
+        try:
+            client = RosyClient(config['origin'], token, timeout=5)
+            session = client.session()
+            if not isinstance(session.get('principal_id'), str) or not isinstance(session.get('role'), str):
+                result['reason'] = 'SESSION_SCHEMA_UNCONFIRMED'
+            elif session['principal_id'] != config['principal']:
+                result['reason'] = 'PRINCIPAL_MISMATCH'
+            elif session['role'] not in {'operator', 'service'}:
+                result['reason'] = 'ROLE_NOT_SUITABLE'
+            else:
+                result['session'] = 'MATCHED'
+                stage = 'arm'
+                # A new scoped key cannot create or advance a job through this GET.
+                client.arm_request('harbor-probe-' + uuid.uuid4().hex)
+                result['reason'] = 'ARM_API_UNCONFIRMED'
+        except HTTPError as error:
+            status = error.code
+            try:
+                with error:
+                    raw = error.read(4097)
+                detail = json.loads(raw).get('detail', {}) if len(raw) <= 4096 else {}
+                code = detail.get('code') if isinstance(detail, dict) else None
+            except (OSError, ValueError, TypeError, AttributeError):
+                code = None
+            if stage == 'arm' and status == 404 and code == 'ARM_TRANSFER_JOB_NOT_FOUND':
+                result.update(status='VERIFIED', arm='READABLE', reason='READ_API_VERIFIED')
+            else:
+                result['reason'] = ('AUTHENTICATION_FAILED' if status == 401 else
+                    'AUTHORIZATION_FAILED' if status == 403 else
+                    'ARM_NOT_INSTALLED' if stage == 'arm' and status == 503 and code == 'ARM_TRANSFER_JOB_UNAVAILABLE' else
+                    'ARM_API_UNCONFIRMED' if stage == 'arm' else 'SESSION_API_UNCONFIRMED')
+        except (URLError, TimeoutError, OSError):
+            result['reason'] = 'FLEET_UNREACHABLE'
+        except (ValueError, TypeError, AttributeError):
+            result['reason'] = 'INVALID_FLEET_RESPONSE'
+    elif not config['allowed'] and config['origin']:
+        result['reason'] = 'ORIGIN_NOT_ALLOWED'
+    with queue_lock:
+        if original != fingerprint(connection_settings()):
+            raise ValidationError('CONNECTION_CHANGED')
+        Audit.objects.create(actor=actor, action='fleet.check', object_type='FleetConnection', object_id='1',
+                             detail=dict(result, fingerprint=original))
+    return result

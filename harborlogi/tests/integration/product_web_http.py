@@ -38,8 +38,8 @@ class ProductWebHttpTests(unittest.TestCase):
             os.environ.update(DJANGO_SETTINGS_MODULE='harbor_web.settings', HARBOR_WEB_MODE='test',
                 HARBOR_WEB_SECRET_KEY=secrets.token_urlsafe(64), HARBOR_WEB_DATABASE=str(root / 'web.sqlite3'),
                 HARBOR_LEDGER_PATH=str(root / 'business.sqlite3'), HARBOR_BINDINGS_PATH=str(bindings),
-                HARBOR_FLEET_ORIGIN=config['origin'], HARBOR_FLEET_TOKEN=config['operator'],
-                HARBOR_FLEET_PRINCIPAL='operator', HARBOR_WEB_ALLOW_SIMULATION='1')
+                HARBOR_FLEET_ORIGIN='', HARBOR_FLEET_ALLOWED_ORIGINS=config['origin'], HARBOR_FLEET_TOKEN=config['operator'],
+                HARBOR_FLEET_PRINCIPAL='', HARBOR_WEB_ALLOW_SIMULATION='1')
             import django
             django.setup()
             from django.core.management import call_command
@@ -49,7 +49,7 @@ class ProductWebHttpTests(unittest.TestCase):
             from django.utils import timezone
             from harbor.web import QuietHandler
             from harbor_web import commands
-            from harbor_web.models import Cargo, Command, CommandFact, Condition, Observation, Order, Plan
+            from harbor_web.models import Audit, Cargo, Command, CommandFact, Condition, FleetConnection, Observation, Order, Plan
             call_command('migrate', verbosity=0)
             call_command('bootstrap_roles', verbosity=0)
             passwords = {}
@@ -84,6 +84,15 @@ class ProductWebHttpTests(unittest.TestCase):
                     return request
                 try:
                     admin, operator, viewer = (browser(role) for role in ('admin', 'operator', 'viewer'))
+                    admin('/settings/integration/')
+                    admin('/settings/integration/', dict(action='save', expected_version=0,
+                        origin=config['origin'], principal='operator'))
+                    self.assertEqual(FleetConnection.objects.get().version, 1)
+                    checked = admin('/settings/integration/', dict(action='check', expected_version=1))
+                    self.assertNotIn(config['operator'], checked)
+                    self.assertEqual(Audit.objects.filter(action='fleet.check').latest('pk').detail['status'], 'VERIFIED')
+                    self.assertEqual(Command.objects.count(), 0)
+                    operator('/settings/integration/', dict(action='check', expected_version=1), expected=403)
                     cargo_code = config['binding']['cargo_id']
                     operator('/cargo/new/')
                     operator('/cargo/new/', dict(code=cargo_code, name='Synthetic HTTP cargo', length_cells=1,
@@ -105,14 +114,15 @@ class ProductWebHttpTests(unittest.TestCase):
                     command = Command.objects.get()
                     key, digest = command.key, command.body_digest
                     path = f'/work/{command.pk}/'
-                    # Publish the original identity before submission; approval remains outside the app.
+                    self.assertEqual(command.state, 'RECONCILED')
+                    # Confirmation submitted immediately; the external harness retains approval authority.
                     key_path = Path(config['request_key_path'])
                     key_path.write_text('harbor:' + str(key) + ':0', encoding='utf-8')
                     key_path.chmod(0o600)
                     viewer(path)
                     viewer(path, dict(action='submit', expected_version=command.version), expected=403)
                     operator(path, dict(action='submit', expected_version=command.version), expected=403, csrf=False)
-                    operator(path, dict(action='submit', expected_version=command.version))
+                    operator(path, dict(action='submit', expected_version=command.version), expected=409)
                     deadline = time.monotonic() + 45
                     while True:
                         command.refresh_from_db()

@@ -25,6 +25,7 @@ def gate_text(code):
         'RESTORE_RECONCILIATION_REQUIRED': '복원한 자료입니다. 원래 실행과 복구 검토가 끝나기 전 새 제출을 보류합니다.',
         'DEPLOYMENT_PROFILE_REQUIRED': '배포 환경과 데이터베이스 기준을 먼저 확인해야 합니다.',
         'EXECUTION_CONFIGURATION_REQUIRED': 'ROSY 연동 설정과 설치된 이동 대응이 필요합니다.',
+        'ORIGIN_NOT_ALLOWED': 'Fleet 주소가 배포 서버의 허용 목록에 없습니다. 설정·연동 담당자가 확인해야 합니다.',
         'PLAN_NOT_READY': '계획의 보류 사유를 먼저 해결해야 합니다.',
         'PLAN_QUEUE_CHANGED': '요청 또는 우선순위가 변경되었습니다. 최신 지시로 다시 검토하세요.',
         'OBSERVATION_NOT_FRESH': '검토한 관측이 오래되었습니다. 최신 원본으로 계획을 다시 만드세요.',

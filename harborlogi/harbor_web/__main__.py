@@ -13,8 +13,7 @@ def main():
     from django.conf import settings
     from harbor_web.commands import acquire_registry, registry_close
     from harbor_web.wsgi import application
-    configured = any(os.environ.get('HARBOR_' + key) for key in (
-        'LEDGER_PATH', 'FLEET_ORIGIN', 'FLEET_TOKEN', 'FLEET_PRINCIPAL', 'BINDINGS_PATH'))
+    from harbor_web.fleet_connection import connection_settings
     from harbor.ownership import WriterLease
     from harbor_web.runtime import require_profile
     from pathlib import Path
@@ -25,6 +24,9 @@ def main():
     lease = WriterLease(path)
     lease.__enter__()
     try:
+        connection = connection_settings()
+        configured = bool(connection['origin'] and connection['principal'] and connection['allowed']) and all(
+            os.environ.get('HARBOR_' + key) for key in ('LEDGER_PATH', 'FLEET_TOKEN', 'BINDINGS_PATH'))
         if configured:
             acquire_registry()
         from waitress import serve

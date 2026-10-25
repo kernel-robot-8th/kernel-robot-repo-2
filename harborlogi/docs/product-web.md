@@ -1,5 +1,7 @@
 # Harbor 제품 웹 실행과 운영 경계
 
+Fleet의 UI 연결 프로필·서버 토큰·명시적 신원/ARM 조회 검사는 [연결 설정](design/25-fleet-connection-bridge.md)을 따른다. schema migration0011 적용 후 서버를 시작한다. 기존 배포 origin은 우선하며 UI에서 바꿀 수 없다. 운영 Fleet 주소·서비스 principal은 해당 설치 담당자가 제공해야 한다.
+
 현재 페이지별 업무 목적과 다음 조치는 [운영 흐름](design/17-operator-page-flow.md), 실제 ROSY 호출과 승인 화면 배포 기준은 [파이프라인](design/18-harbor-rosy-pipeline.md)을 따른다. 웹에서는 `/workflow/`로 역할별 안내, 관리자는 `/settings/integration/`로 설정·수용 조건을 확인한다. 실행 메뉴 이름은 ‘실행·대조’다.
 
 새 Fleet ARM 화면을 포함한 배포에서만 `HARBOR_FLEET_ARM_CONSOLE_ENABLED=1`을 설정한다(기본 미선언). 이 값은 설치 선언이며 API 호환성·승인·물리/업무 수용의 증거가 아니다. 미선언 상태에서는 작업 ID와 일반 Fleet 콘솔로 인계하고 지원되지 않는 승인 바로가기를 약속하지 않는다.
