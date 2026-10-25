@@ -15,7 +15,7 @@
 - [x] Web worker: footprint model/migration, forms/services/commands/planning pages/tests only as specifically assigned. Consume the domain interface, preserve legacy actions and gates. Tests precede changes; data must not be backfilled as declared facts.
 - [x] Root: workspace/yard presentation, templates/styles/JS, synthetic preview, browser regression, public docs and integration. Display one entity across cells; preserve layer selection and original execution/plan/source lineage.
 - [x] Run domain/Django/browser and package/asset checks, review integrated branch, resolve material findings with regression tests.
-- [ ] Verify UR/SR readback and traceability, record real evidence and remaining physical gates, evaluate CE, commit/local integrate and serve the updated isolated preview.
+- [x] Verify UR/SR readback and traceability, record real evidence and remaining physical gates, evaluate CE, commit/local integrate and serve the updated isolated preview.
 
 ## Review focus
 
@@ -32,3 +32,4 @@
 - Planner preserves declared orientation. Automatic reorientation is not added.
 - Held cargo may lack a declared shape revision; placed cargo must always have one. Holdings force HOLD and are never given a guessed latest shape.
 - Reviews: domain and data tasks independently approved; integrated branch Ship. A nonblocking inbound HOLD source-display gap was reproduced RED and fixed by the shared spatial view; final107-test Django run GREEN. Domain131(skip2), legacy and spatial browser4width runs passed. UI also verifies90degree rowspan plus fit-HOLD with no partial plan.
+- Evidence: `docs/validation/2026-10-25-multicell-cargo.md`. CE not applicable. Preserve this existing checkout and isolated preview; local integration only, no remote publication or actual-device execution.
