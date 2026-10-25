@@ -25,6 +25,10 @@ class YardSceneTests(SimpleTestCase):
         self.assertEqual((boxes['C5']['width'], boxes['C5']['depth']), (3, 1))
         self.assertEqual((boxes['C2']['x'], boxes['C2']['y'], boxes['C2']['z']), (0, 0, 1))
         self.assertEqual(boxes['C1']['positions'], ['Y11-L1', 'Y12-L1'])
+        addresses = scene['areas'][0]['addresses']
+        self.assertEqual(addresses['1,2,1'], 'Y12-L1')
+        self.assertEqual(addresses['1,1,2'], 'Y11-L2')
+        self.assertEqual(addresses['3,3,1'], 'Y33-L1')
         self.assertEqual(boxes['C1']['footprint_revision'], 11)
         self.assertEqual(boxes['C1']['role'], 'target')
         boxes['C1']['positions'].append('presentation-only')

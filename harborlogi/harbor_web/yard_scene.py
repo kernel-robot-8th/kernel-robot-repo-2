@@ -42,6 +42,25 @@ def scene_for(stages):
     for area in areas:
         area.update(first.get('area_presentation', {}).get(area['id'], {}))
     by_id = {area['id']: area for area in areas}
+    # Preserve configured position IDs, including cells hidden by a merged footprint.
+    for area in areas:
+        area['addresses'] = {}
+    for stage in stages:
+        for source in [stage, *stage.get('auxiliary_areas', [])]:
+            area = by_id[source.get('area_id', 'yard')]
+            for layer in source['layers']:
+                for row in layer['rows']:
+                    for cell in row['cells']:
+                        positions = cell.get('covered_positions') or [cell['position_id']]
+                        coordinates = [(r, c) for r in range(cell['row'], cell['row'] + cell.get('rowspan', 1))
+                                       for c in range(cell['column'], cell['column'] + cell.get('colspan', 1))]
+                        for (r, c), position in zip(coordinates, positions):
+                            area['addresses'][f"{r},{c},{cell['level']}"] = position
+        for bay in stage.get('auxiliary_bays', []):
+            area = by_id[bay['bay_id']]
+            for level in range(1, area['levels'] + 1):
+                area['addresses'][f'1,1,{level}'] = f"{bay['bay_id']}-L{level}"
+
     frames = []
     for stage in stages:
         boxes = []
@@ -54,5 +73,5 @@ def scene_for(stages):
             boxes.extend(_box(dict(cell, row=1, column=1, position_id=f"{bay['bay_id']}-L{cell['level']}"), area)
                 for cell in bay['cells'] if cell['code'])
         frames.append(dict(index=stage['index'], label=stage['label'], boxes=boxes, move=deepcopy(stage.get('move'))))
-    return dict(areas=[{k: a[k] for k in ('id', 'label', 'rows', 'columns', 'levels', 'x', 'y')} for a in areas],
+    return dict(areas=[{k: a[k] for k in ('id', 'label', 'rows', 'columns', 'levels', 'x', 'y', 'addresses')} for a in areas],
         frames=frames)

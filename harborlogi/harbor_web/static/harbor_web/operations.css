@@ -59,3 +59,6 @@
 .route-step-play {display:inline-flex;align-items:center;min-height:40px;font-size:var(--primitive-font-caption);margin:var(--primitive-space-2) 0}
 .route-step-play[hidden],.plan-comparison tr[hidden],.plan-comparison [data-no-changes][hidden] {display:none}
 .plan-comparison .actions {margin-bottom:var(--primitive-space-3);flex-wrap:wrap}
+.planning-recommendation {padding:var(--primitive-space-4);margin-block:var(--primitive-space-4);border:1px solid var(--semantic-border-divider);border-radius:var(--primitive-radius-panel);background:var(--semantic-surface-panel)}
+.planning-recommendation .section-heading {flex-wrap:wrap;gap:var(--primitive-space-2)}
+.recommendation-candidate + .recommendation-candidate {border-top:1px solid var(--semantic-border-divider);padding-top:var(--primitive-space-3);margin-top:var(--primitive-space-3)}

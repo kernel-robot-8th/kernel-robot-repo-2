@@ -1,3 +1,4 @@
+import {mountLinkedGrid, selectionFor, atPosition} from './yard-selection.mjs';
 import {cloneBoxes, transit, moveBox, placementFromWorld} from './yard-model.mjs';
 
 function fallback(figure) {
@@ -5,6 +6,8 @@ function fallback(figure) {
   if (document.fullscreenElement === figure) document.exitFullscreen().catch(() => {});
   figure.dataset.ready = 'false'; figure.dataset.renderer = 'unavailable';
   figure.hidden = true;
+  preview.querySelector('[data-yard-linked-flat]')?.remove();
+  preview.classList.remove('yard-linked');
   preview.querySelector('[data-yard-flat]').hidden = false;
   preview.querySelector('[data-yard-views]').hidden = true;
   preview.querySelector('[data-yard-3d-fallback]').hidden = false;
@@ -41,6 +44,7 @@ export async function mountYardViewer(figure) {
     floor: token('--semantic-surface-panel'), white: token('--primitive-color-white'),
     canvas: token('--semantic-surface-canvas')};
   let index = Number(controls.find(b => b.getAttribute('aria-pressed') === 'true')?.dataset.yardStage || 0);
+  let location = null, linked = null;
   let selected = '', current = cloneBoxes(scene.frames[index].boxes), draft = null;
   let playing = false, internalStep = false, isolated = false, timer = 0, raf = 0, animation = null;
   let destroyed = false, draftHistory = [], replayIndex = 0;
@@ -81,13 +85,22 @@ export async function mountYardViewer(figure) {
     figure.dataset.editing = String(Boolean(draft));
     figure.dataset.draftChanges = String(changedCount());
   }
+  const selection = () => selectionFor(boxes().find(b => b.id === selected)) || location;
+  const mode = () => scene.kind === 'map-definition' ? 'map-definition' : draft ? 'local-draft' : index ? 'predicted' : 'original';
+  function syncLinked() {
+    linked?.update(boxes(), mode(), selection());
+    renderer.selectLocation(location);
+    preview.dispatchEvent(new CustomEvent('yardselectionchange', {detail:{selection:selection(), source:mode(), index}}));
+  }
   function details() {
     const box = boxes().find(b => b.id === selected);
     const base = scene.frames[index].boxes.find(b => b.id === selected);
     cargo.value = box ? box.id : '';
     info.textContent = box ? box.id + ' · ' + box.label + ' · ' + box.size + ' · ' + box.orientation + '도 · ' +
       (draft ? '가상: ' + box.area + ' / ' + box.row + '행 ' + box.column + '열 ' + box.level + '층 · 기준: ' + base.positions.join(' / ') : box.positions.join(' / '))
-      : '박스나 화물 목록을 선택해 크기·위치를 확인하세요.';
+      : location ? `${scene.kind === 'map-definition' ? '미관측 위치 · 점유 확인 안 됨' : '빈 위치'} · ${location.area} · ${location.row}행 ${location.column}열 ${location.level}층 · 화물 아님`
+        : '박스나 화물 목록을 선택해 크기·위치를 확인하세요.';
+    if (location && scene.kind === 'map-definition') status(info.textContent);
     for (const name of ['area','row','column','level','orientation']) editor.elements[name].value = box ? box[name] : '';
     editor.querySelector('fieldset').disabled = !box || playing;
     figure.querySelector('[data-scene-action="focus"]').disabled = !box;
@@ -95,12 +108,13 @@ export async function mountYardViewer(figure) {
     updateDraftState();
   }
   function select(id) {
+    location = null;
     selected = id || ''; renderer.select(selected);
     if (!selected && isolated) {
       isolated = false; figure.querySelector('[data-scene-action="isolate"]').setAttribute('aria-pressed', 'false'); renderer.isolate(null);
     }
     if (isolated) renderer.isolate(selected || null);
-    details();
+    details(); syncLinked();
   }
   function fillCargo() {
     cargo.replaceChildren(new Option('화물 선택', ''));
@@ -127,7 +141,6 @@ export async function mountYardViewer(figure) {
     play.disabled = value && draftHistory.length < 2;
     play.hidden = scene.kind === 'map-definition' || (!value && scene.frames.length < 2);
     play.textContent = value ? '가상 변경 재생' : '계획 재생';
-    views.querySelector('[data-yard-view="flat"]').disabled = value;
     editButton.setAttribute('aria-pressed', String(value));
     editButton.textContent = value ? '원본 복원·편집 끝내기' : '가상 배치 편집';
     editor.hidden = !value; renderer.setEditable(value);
@@ -216,7 +229,10 @@ export async function mountYardViewer(figure) {
     if (draft || !scene.frames[next]) return;
     if (!internalStep) stop();
     cancelAnimationFrame(raf); raf = 0; animation = null;
-    index = next; fillCargo();
+    index = next;
+    if (selected && !boxes().some(box => box.id === selected)) selected = '';
+    if (location) { const occupant = atPosition(boxes(), location); if (occupant) { selected = occupant.id; location = null; } }
+    renderer.select(selected); fillCargo(); syncLinked();
     figure.querySelector('[data-scene-step]').textContent = scene.frames[index].label;
     if (animate && next) startTransition(scene.frames[index].boxes);
     else {
@@ -224,13 +240,30 @@ export async function mountYardViewer(figure) {
       status(scene.kind === 'map-definition' ? scene.frames[index].label : next ? scene.frames[index].label + ' · 예상 배치' : '원본 관측 배치'); advance();
     }
   }
+  const desktop = matchMedia('(min-width: 1200px)');
+  let flatView = false;
   function showFlat(value) {
-    if (draft) return;
-    stop(); selectFrame(index, false);
-    figure.hidden = value; flat.hidden = !value;
+    flatView = value;
+    if (!desktop.matches) {
+      stop();
+      if (!draft) selectFrame(index, false);
+    }
+    figure.hidden = !desktop.matches && value;
+    if (linked) linked.grid.hidden = !desktop.matches && !value;
+    flat.hidden = true;
     views.querySelectorAll('[data-yard-view]').forEach(button => button.setAttribute('aria-pressed', String((button.dataset.yardView === 'flat') === value)));
-    if (!value) renderer.resize();
+    if (!figure.hidden) renderer.resize();
   }
+  on(desktop, 'change', () => showFlat(flatView));
+  linked = mountLinkedGrid(preview, scene, value => {
+    if (animation || playing) { stop(); selectFrame(index, false); }
+    if (value.cargoId) { select(value.cargoId); renderer.fit(value.cargoId); }
+    else {
+      selected = ''; location = value; renderer.select(null); renderer.isolate(null);
+      isolated = false; figure.querySelector('[data-scene-action="isolate"]').setAttribute('aria-pressed', 'false');
+      details(); syncLinked(); renderer.fitLocation(value);
+    }
+  });
   scene.areas.forEach(area => editor.elements.area.add(new Option(area.label + ' · ' + area.id, area.id)));
   on(editor, 'submit', event => {
     event.preventDefault();
@@ -292,7 +325,8 @@ export async function mountYardViewer(figure) {
     status(scene.frames[index].label);
   }
   figure.querySelector('[data-scene-action="fullscreen"]').hidden = !document.fullscreenEnabled;
-  paint(current); fillCargo(); views.hidden = false; figure.hidden = false; flat.hidden = true;
+  preview.classList.add('yard-linked');
+  paint(current); fillCargo(); syncLinked(); views.hidden = false; showFlat(false);
   canvas.dataset.moving = 'false'; figure.dataset.ready = 'true'; figure.dataset.renderer = 'webgl'; renderer.resize(); renderer.fit();
   return {destroy};
 }
