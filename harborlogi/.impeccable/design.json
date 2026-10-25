@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-10-25T00:00:00+09:00",
-  "title": "Design System: Harbor",
+  "title": "Design System: HarborLogi",
   "extensions": {
     "colorMeta": {
       "navy": {
@@ -34,7 +34,7 @@
       },
       "paper": {
         "role": "neutral",
-        "displayName": "Ivory Paper"
+        "displayName": "Cool White Canvas"
       },
       "white": {
         "role": "neutral",
@@ -75,6 +75,30 @@
       "unknown-soft": {
         "role": "neutral",
         "displayName": "Unverified Surface"
+      },
+      "teal-dark": {
+        "role": "primary",
+        "displayName": "HarborLogi teal-dark"
+      },
+      "teal-50": {
+        "role": "primary",
+        "displayName": "HarborLogi teal-50"
+      },
+      "teal-hover": {
+        "role": "primary",
+        "displayName": "HarborLogi teal-hover"
+      },
+      "orange-dark": {
+        "role": "secondary",
+        "displayName": "HarborLogi orange-dark"
+      },
+      "cream": {
+        "role": "secondary",
+        "displayName": "HarborLogi cream"
+      },
+      "navy-soft": {
+        "role": "secondary",
+        "displayName": "HarborLogi navy-soft"
       }
     },
     "typographyMeta": {

@@ -1,25 +1,37 @@
 ---
-name: Harbor
+name: HarborLogi
 description: Authenticated Harbor product web for business requests, planning and execution evidence.
 colors:
-  navy: "#102e40"
-  ink: "#183748"
-  muted: "#526775"
-  teal: "#116974"
-  teal-soft: "#e2efed"
-  orange: "#b84413"
-  orange-soft: "#fff0e4"
-  paper: "#f5f2eb"
+  navy: "#112C3F"
+  ink: "#17364B"
+  muted: "#506878"
+  teal: "#2CBBB7"
+  teal-soft: "#DAF5F2"
+  orange: "#FE6D08"
+  orange-soft: "#FFF1DA"
+  paper: "#F4F8FB"
   white: "#ffffff"
-  line: "#d6dedc"
-  focus: "#a53709"
-  warning-ink: "#81320f"
-  control-border: "#83959c"
-  success-ink: "#226345"
-  success-soft: "#e5f2e9"
-  danger-ink: "#a52c31"
-  danger-soft: "#fcebec"
-  unknown-soft: "#e8edef"
+  line: "#D7E3E9"
+  focus: "#B94D00"
+  warning-ink: "#873C0A"
+  control-border: "#6B8292"
+  success-ink: "#167044"
+  success-soft: "#E1F7EA"
+  danger-ink: "#B72D43"
+  danger-soft: "#FFF0F2"
+  unknown-soft: "#E7EEF6"
+  teal-dark: "#087C80"
+
+  teal-50: "#EFFBFA"
+
+  teal-hover: "#08636B"
+
+  orange-dark: "#B94D00"
+
+  cream: "#FCF1D9"
+
+  navy-soft: "#EAF1F6"
+
 typography:
   headline:
     fontFamily: '"Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif'
@@ -57,17 +69,17 @@ spacing:
   "16": "4rem"
 components:
   button-primary:
-    backgroundColor: "{colors.teal}"
+    backgroundColor: "{colors.teal-dark}"
     textColor: "{colors.white}"
     rounded: "{rounded.control}"
     padding: "0.5rem 1rem"
     height: "44px"
   button-primary-hover:
-    backgroundColor: "{colors.navy}"
+    backgroundColor: "{colors.teal-hover}"
     textColor: "{colors.white}"
   button-quiet:
     backgroundColor: "{colors.white}"
-    textColor: "{colors.teal}"
+    textColor: "{colors.teal-dark}"
     rounded: "{rounded.control}"
     padding: "0.5rem 1rem"
   input-search:
@@ -76,8 +88,8 @@ components:
     rounded: "{rounded.control}"
     padding: "0.5rem 0.75rem"
   navigation-current:
-    backgroundColor: "{colors.teal-soft}"
-    textColor: "{colors.teal}"
+    backgroundColor: "{colors.teal}"
+    textColor: "{colors.ink}"
     rounded: "{rounded.control}"
     padding: "0.75rem"
   task-current:
@@ -86,7 +98,7 @@ components:
     rounded: "{rounded.small}"
     padding: "1rem 0.75rem"
   tab-current:
-    textColor: "{colors.teal}"
+    textColor: "{colors.teal-dark}"
     height: "48px"
   badge-hold:
     backgroundColor: "{colors.orange-soft}"
@@ -107,7 +119,7 @@ components:
 
 ---
 
-# Design System: Harbor
+# Design System: HarborLogi
 
 ## Overview
 
@@ -123,7 +135,7 @@ Harbor는 사용자가 맡은 화물의 진행, 막힌 이유, 필요한 근거�
 - 전역 메뉴·업무 선택·업무 탭의 세 층 탐색.
 - 상태 색과 문구, 출처와 조회 범위를 함께 표시.
 
-**적용 상태와 정본:** 이 문서는 인증된 Django 제품 웹과 별도로 유지하는 로컬 조회 preview의 구현 기록이다. [design/tokens.json](design/tokens.json)의 124개 primitive→semantic→component 토큰이 런타임 값의 정본이며, [생성 도구](tools/design_tokens.py)가 [tokens.css](harbor/web_assets/tokens.css)를 만든다. Frontmatter는 DESIGN.md 도구를 위한 현재 값의 기록이며 별도 편집 원본이 아니다. 토큰을 변경하면 생성 CSS와 이 기록을 함께 갱신한다. Sidecar는 확장 메타데이터와 현재 CSS 변수에 연결한 패널 예제를 담는다.
+**적용 상태와 정본:** 이 문서는 인증된 Django 제품 웹과 별도로 유지하는 로컬 조회 preview의 구현 기록이다. [design/tokens.json](design/tokens.json)의 147개 primitive→semantic→component 토큰이 런타임 값의 정본이며, [생성 도구](tools/design_tokens.py)가 [tokens.css](harbor/web_assets/tokens.css)를 만든다. Frontmatter는 DESIGN.md 도구를 위한 현재 값의 기록이며 별도 편집 원본이 아니다. 토큰을 변경하면 생성 CSS와 이 기록을 함께 갱신한다. Sidecar는 확장 메타데이터와 현재 CSS 변수에 연결한 패널 예제를 담는다.
 
 - [디자인 철학](docs/design/07-design-foundation.md), [네비게이션](docs/design/08-navigation.md), [토큰·패턴 계약](docs/design/09-tokens-and-patterns.md): 제품 기준과 후속 범위.
 - [페이지 구현 계획](docs/design/10-navigation-pages-plan.md), [재고·반출 계획 페이지](docs/design/11-retrieval-planning-page.md), [PRODUCT.md](PRODUCT.md), [브랜드 자산](assets/brand/README.md): 맥락과 범위.
@@ -136,7 +148,7 @@ Harbor는 사용자가 맡은 화물의 진행, 막힌 이유, 필요한 근거�
 
 ### Primary
 
-청록은 링크·주요 조회 조작·현재 선택을, 연한 청록은 선택 면을 나타낸다. 네이비는 전역 탐색의 배경과 주요 버튼 hover에 사용한다. 기존 브랜드 색상을 유지한다.
+로고 청록은 현재 메뉴 선택, 짙은 청록은 주요 조작·링크, 연한 파생 청록은 선택·행 hover 면을 나타낸다. 네이비는 전역 탐색 배경, 버튼 hover는 짙은 청록 파생 톤을 사용한다. 로고의 실제 대표색에서 기능별 대비를 확장한다.
 
 ### Secondary
 
@@ -144,7 +156,7 @@ Harbor는 사용자가 맡은 화물의 진행, 막힌 이유, 필요한 근거�
 
 ### Neutral
 
-아이보리는 페이지 바탕, 흰색은 목록·입력·보조 헤더 면이다. ink는 주본문, muted는 보조 설명, line은 구분선, control-border는 입력과 보조 버튼 경계다. 밝은 면의 키보드 포커스는 focus, 네이비 면에서는 paper를 사용한다. PNG에서 새 색상을 추출하거나 패널 미리보기를 런타임 토큰으로 복사하지 않는다.
+밝은 쿨화이트는 페이지 바탕, 흰색은 목록·입력·보조 헤더 면이다. 로고의 크림은 보조 팔레트에 보존하며 전체 바탕을 베이지로 채우지 않는다. ink는 주본문, muted는 보조 설명, line은 구분선, control-border는 입력과 보조 버튼 경계다. 밝은 면의 키보드 포커스는 focus, 네이비 면에서는 paper를 사용한다. 2026-10-25 사용자 요청으로 로고 원본의 영역별 대표색을 샘플링해 브랜드 앵커를 맞췄다. 래스터 질감이 있으므로 수치는 단일 벡터 원색의 주장 대신 대표색이다.
 
 ## Typography
 
@@ -158,7 +170,7 @@ Harbor는 사용자가 맡은 화물의 진행, 막힌 이유, 필요한 근거�
 
 900px 이하에서는 메뉴를 본문 위에서 펼치고 접으며 비교 배치는 한 열이다. JavaScript가 없으면 메뉴가 보인다. 제품 웹 메뉴는 modal drawer가 아니다. 600px 이하에서는 본문 여백 16px, 제목·조작의 상하 배치, 전체 폭 검색 필드를 사용한다. 조치 필요 표는 사유와 후속 링크가 있는 행으로 재배치한다. 이동 표는 내부 가로 스크롤을 유지하고 facts는 두 열이다. 버튼·입력은 최소 44px, 현장 결과 버튼은 최소 56px다. 화면 폭은 역할을 바꾸지 않는다.
 
-기존 조회 preview는 별도 768/1280px 토큰 breakpoint와 업무 목록/상세, modal drawer 구성을 유지한다. 이 값은 제품 웹의 900/600px 실제 CSS 규칙을 대체하지 않는다. 채택된 124개 토큰과 간격 scale을 재사용하며 제품 웹 breakpoint는 추가 토큰이 아니다.
+기존 조회 preview는 별도 768/1280px 토큰 breakpoint와 업무 목록/상세, modal drawer 구성을 유지한다. 이 값은 제품 웹의 900/600px 실제 CSS 규칙을 대체하지 않는다. 채택된 147개 토큰과 간격 scale을 재사용하며 제품 웹 breakpoint는 추가 토큰이 아니다.
 
 ## Elevation & Depth
 
@@ -192,7 +204,7 @@ Harbor는 사용자가 맡은 화물의 진행, 막힌 이유, 필요한 근거�
 
 칸의 stack은 위에서 아래로 표시하며 화물 ID·단·대상 설명을 붙인다. 반출 대상은 기존 선택 면, 위의 재취급 대상은 기존 주의 면을 사용한다. 이 도식은 논리 배치이며 실제 위치 지도나 도달성 증거가 아니다. 예상 배치는 ‘관측 아님’으로 표시하고 원래 관측 배치는 바꾸지 않는다.
 
-READY 결과는 재취급→반출→복귀의 단계와 주/대체 팔을 보여 준다. 임시 공간 부족·오래된 관측 등의 HOLD 결과는 이유를 표시하고 부분 이동이나 예상 완료 배치를 만들지 않는다. 필요한 반출대 내려놓기·재취급 화물 복귀·관련 팔 퇴피는 확인 전 조건으로 제시한다. 이 화면은 실행 배정·허가·완료 판정, 순위 지시 접수·입고 등록·실제 관측·양팔 성능 비교 또는 전체 UR/SR 수용을 제공하지 않는다. 기존 124개 토큰만 재사용한다.
+READY 결과는 재취급→반출→복귀의 단계와 주/대체 팔을 보여 준다. 임시 공간 부족·오래된 관측 등의 HOLD 결과는 이유를 표시하고 부분 이동이나 예상 완료 배치를 만들지 않는다. 필요한 반출대 내려놓기·재취급 화물 복귀·관련 팔 퇴피는 확인 전 조건으로 제시한다. 이 화면은 실행 배정·허가·완료 판정, 순위 지시 접수·입고 등록·실제 관측·양팔 성능 비교 또는 전체 UR/SR 수용을 제공하지 않는다. 기존 147개 토큰만 재사용한다.
 
 ### Evidence and brand
 
@@ -211,3 +223,11 @@ H 아이콘은 `assets/brand/harbor-app-icon-20261023.png`를 `/assets/icon.png`
 - Don't equate implemented login and roles with deployment security or field acceptance.
 - Don't present declared inventory, audit records or fixture comparisons as authenticated operational evidence or field performance acceptance.
 - Do label synthetic observed stacks and projected plan results separately; keep HOLD free of partial moves or projected completion.
+
+## HarborLogi 로고 기반 팔레트 조정
+
+로고 대표색: navy #112C3F, teal #2CBBB7, orange #FE6D08, cream #FCF1D9. 청록 홈의 #087C80은 조작·링크용 짙은 톤, #DAF5F2/#EFFBFA는 선택/hover 면의 파생 톤이다. 오렌지 #B94D00은 포커스 등 대비가 필요한 용도에 쓴다. 로고와 아이콘은 교체하지 않는다.
+
+primitive → semantic → component 연결을 유지한다. 버튼 기본/hover/disabled/focus, 메뉴 선택, 표 header/row-hover/border, 입력 background/text/placeholder/border/focus를 색상 토큰으로 분리했다. 메뉴·본문 구조·크기·업무 의미는 유지한다. 색만으로 상태를 구분하지 않는다.
+
+참고: [Atlassian 색상 역할](https://atlassian.design/foundations/color/)처럼 브랜드 원색과 기능·상태별 역할을 구분하되, 실제 색상은 HarborLogi 로고를 따른다.
