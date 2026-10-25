@@ -67,7 +67,7 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 
 장치 칸의 화물 목록은 아래 단부터 위 단 순서다. 장치의 하중·형상·충돌은 이 재고 모델의 범위가 아니다. `allowed_moves`는 업무 계획에서 허용한 칸 사이 이동 방향일 뿐 실행 능력을 만들지 않는다.
 
-[설치 예제](config/site.example.json)는 합성 ID와 개념 위치다. 셀 위치는 공급 작업대·컨베이어·장치 칸·임시 장치 칸·반출대이고, 업무 위치(본선·야드·반출 지점)와 구분한다. 재취급 화물은 컨베이어나 반출대에 두지 않는다. ADR 0005 이전 키(`transport_ids`·`slots`·`waiting_slots`·`charging_slots`·`transfers`, `arms`의 `S`)를 쓰면 새 키 이름을 알려 주는 오류로 거절한다. 특정 Pinky 번호에 입고·출고·충전 역할을 고정하지 않는다. 수동 `available`은 앱의 제외 조건을 푸는 것일 뿐 실제 가용성이나 자동 충전 확인이 아니다. 운영 상태는 호출할 때 명시적으로 전달하고, 누락된 차량은 제외한다.
+[설치 예제](config/site.example.json)는 합성 ID와 개념 위치다. 셀 위치는 공급 작업대·컨베이어·장치 칸·임시 장치 칸·반출대이고, 업무 위치(본선·야드·반출 지점)와 구분한다. 재취급 화물은 컨베이어나 반출대에 두지 않는다. ADR 0005 이전 키(`transport_ids`·`slots`·`waiting_slots`·`charging_slots`·`transfers`, `arms`의 `S`)를 쓰면 새 키 이름을 알려 주는 오류로 거절한다. 특정 Pinky 번호에 이송·충전 역할을 고정하지 않는다. 수동 `available`은 앱의 제외 조건을 푸는 것일 뿐 실제 가용성이나 자동 충전 확인이 아니다. 운영 상태는 호출할 때 명시적으로 전달하고, 누락된 차량은 제외한다.
 
 ## ROSY와 실제로 연결할 때
 
@@ -87,9 +87,11 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 | [docs/execution.md](docs/execution.md) | 공정 제안과 업무 장부 사용법 |
 | [docs/observation-acceptance.md](docs/observation-acceptance.md) | 물리 관측 연동의 수용 조건 |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | 실행 연결 계획 |
-| [docs/adr/](docs/adr/) | 설계 결정 기록 (0001 공정 binding과 완료 근거, 0002 고정 소스 Fleet 계약 시험, 0004 도메인 중립 ROSY 위의 항만 앱 경계(제안), 0005 Harbor·ROSY 책임 지도) |
-
+| [docs/adr/](docs/adr/) | 설계 결정 기록 (0001 공정 binding과 완료 근거, 0002 고정 소스 Fleet 계약 시험, 0003 Harbor가 가진 Fleet 계약 시험 하네스, 0004 도메인 중립 ROSY 위의 항만 앱 경계(제안), 0005 Harbor·ROSY 책임 지도) |
+| [docs/plans/](docs/plans/) | 작업 계획 (2026-10-21 항만 앱 분할) |
 | [docs/validation/](docs/validation/) | 날짜별 검증 기록 |
+
+코드와 함께 바뀌는 문서(용어 · ADR · 사용법 · 검증 기록)는 이 폴더에 둔다. 팀 기획 · 설계 본문과 회의록은 팀 Confluence(SP) 위키, 할 일은 Jira가 정본이다. GitHub 저장소 위키는 쓰지 않는다.
 
 ## 데이터와 라이선스
 
