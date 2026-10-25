@@ -43,7 +43,7 @@
 5. 물리 결과와 업무 근거가 갖춰지면 해당 단계를 완료한다. 후속 단계는 동일한 확정 범위 안에서 자동 진행한다. 전체 목표 배치 검증이 끝나야 업무가 완료된다.
 6. 서비스 재시작·복원·버전 변경 시 저장 의도·원래 실행부터 대조한다. 기존 restore reconciliation 차단과 WriterLease를 유지한다. 네트워크 단절에서 실행기를 계속 바쁘게 재시도하거나 불명을 성공으로 바꾸지 않는다.
 
-현재 `BusinessLedger.refresh()`는 수행 조회와 장부 상태를 갱신한다. `finish()`는 업무 근거 검증 후 완료를 판단한다. 웹 `commands.py`의 대조가 호출한다고 해서 상시 후속 단계 운용이 이미 구현된 것은 아니다. 현재 Command가 Order당 하나이며 binding이 불변이므로 재계획을 원래 Command에 덮어쓰는 방식도 불가하다.
+현재 `BusinessLedger.refresh()`는 수행 조회와 장부 상태를 갱신한다. `confirm()`은 단계 근거를, `finish()`는 최종 업무 근거를 검증한다. 웹은 이 두 업무 근거 적용을 연결하지 않으며 Registry의 placement/retreat 출처도 미수용 placeholder다. 업무 근거 어댑터와 confirm/finish 연결은 실행기 구현에 포함해야 한다. Fleet 조회만으로 다음 단계가 열리지 않는다. 현재 Command가 Order당 하나이며 binding이 불변이므로 재계획을 원래 Command에 덮어쓰는 방식도 불가하다.
 
 ## 상태와 변경 정책
 

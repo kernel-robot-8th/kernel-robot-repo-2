@@ -39,9 +39,12 @@
 
 대상: `harbor_web/commands.py`, `harbor_web/runtime.py`, `harbor_web/__main__.py`의 실제 lifecycle 진입점 확인 후 통합; 새 `harbor_web/execution_runner.py`, 필요한 모델과 versioned migration·시험. 기존 `command_models.py`·`runtime_models.py`의 제약을 먼저 조사한다.
 
+업무 근거 연결도 이 작업의 소유다. 필요 최소한의 `harbor_web/business_evidence.py`를 두어 허용된 producer의 근거를 읽고 검증한다. 현행 Registry의 `web-unconfigured-placement`/`web-unconfigured-retreat`는 운영 producer 수용을 뜻하지 않으며 이름을 바꾸는 것만으로 활성화하지 않는다.
+
 - [ ] 확정 의도 저장 직후/전송 직전/전송 직후/결과 저장 전 crash, 중복 tick, 브라우저 미접속의 실패 시험을 작성한다.
 - [ ] 사용자 확정의 내구 의도와 단계별 안정 key를 보존한다. 실행기 tick은 제한된 수의 업무만 처리하고 lock/version과 기존 WriterLease를 사용한다. 네트워크 호출을 DB transaction 밖에서 수행한다.
 - [ ] 기존 서비스의 시작·종료와 runner를 결속한다. 자동 실행은 명시적인 환경 설정으로 구분하고 수용되지 않은 preview/live에서 켜지 않는다. 주기·backoff·복구 대조를 제한한다. 웹 GET의 조회 부작용을 추가하지 않는다.
+- [ ] 업무 근거 어댑터에서 허용된 출처·mission/attempt·화물/위치·revision·시각과 관련 팔 퇴피 근거를 검증하고 기존 `BusinessLedger.confirm()`·`finish()`에 연결한다. 근거 중복·늦은 다른 attempt·오래된 근거·인증되지 않은 출처를 거절하는 시험을 추가한다. 합성 3단계 시험은 명시적인 합성 producer를 사용하고, 운영 producer 수용 전 live 실행 차단은 유지한다. Fleet 성공 조회만으로 단계를 완료하지 않는다.
 - [ ] 복원 차단·재시작·응답 불명 후 동일 key 대조·오래된 worker 결과 저장 거절·정상 3단계 합성 진행 시험을 통과시킨다. 스키마 변경은 기존 DB migration·백업/복원 시험을 포함한다.
 - [ ] 계정·역할·Command 회귀와 브라우저 GET 무쓰기 검사를 실행하고 검토 후 커밋한다.
 
