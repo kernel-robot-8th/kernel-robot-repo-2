@@ -106,6 +106,8 @@ class Observation(Immutable):
 
 
 class Order(Authored):
+    auto_replan = models.BooleanField(default=False)
+    planning_observation = models.ForeignKey(Observation, null=True, blank=True, on_delete=models.PROTECT, related_name='+')
     cargo = models.ForeignKey(Cargo, on_delete=models.PROTECT)
     kind = models.CharField(max_length=8, choices=[('INBOUND', 'Inbound'), ('OUTBOUND', 'Outbound')])
     priority_group = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])

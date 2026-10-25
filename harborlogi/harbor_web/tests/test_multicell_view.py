@@ -105,7 +105,7 @@ class MulticellPagesTests(TestCase):
         order = services.create_order(self.operator, cargo=cargo, kind='INBOUND',
             priority_group=1, sequence=1, tie_policy='FIXED')
         plan = services.make_plan(self.operator, order_id=order.pk, expected_version=1, observation_id=observed.pk)
-        self.assertEqual(plan.result['reason'], 'INBOUND_PLANNER_NOT_AVAILABLE')
+        self.assertEqual(plan.result['reason'], 'INBOUND_ALREADY_OBSERVED')
         self.client.force_login(self.operator)
         response = self.client.get(f'/plans/{plan.pk}/')
         self.assertContains(response, 'data-cargo-id="C1"')
