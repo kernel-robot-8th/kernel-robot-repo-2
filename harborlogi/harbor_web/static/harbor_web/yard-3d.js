@@ -184,6 +184,7 @@ export async function mountYardViewer(figure) {
       advance(); return;
     }
     animation = {segments, segment:0, target, elapsed:0, last:performance.now()};
+    play.textContent = '재생 중지'; play.setAttribute('aria-pressed', 'true');
     canvas.dataset.moving = 'true';
     describeMove(segments[0], 0);
     status('배치 이동 설명 · 실제 로봇 경로·작업 시간이 아님');
@@ -202,6 +203,7 @@ export async function mountYardViewer(figure) {
       animation.elapsed = 0; describeMove(animation.segments[animation.segment], 0); raf = requestAnimationFrame(tick);
     } else {
       paint(animation.target); animation = null; canvas.dataset.moving = 'false';
+      if (!playing) { play.textContent = draft ? '가상 변경 재생' : '계획 재생'; play.setAttribute('aria-pressed', 'false'); }
       status(draft ? '로컬 가상 변경 · 서버에 저장되지 않음' : scene.frames[index].label + ' · 예상 배치'); advance();
     }
   }
@@ -234,7 +236,7 @@ export async function mountYardViewer(figure) {
   });
   on(cargo, 'change', () => { error.textContent = ''; select(cargo.value); });
   on(play, 'click', () => {
-    if (playing) { stop(); if (!draft) selectFrame(index, false); return; }
+    if (playing || animation) { stop(); if (!draft) selectFrame(index, false); return; }
     playing = true; play.textContent = '재생 중지'; play.setAttribute('aria-pressed', 'true');
     if (draft) {
       replayIndex = 0; paint(draftHistory[0]); renderer.setEditable(false);
@@ -264,7 +266,7 @@ export async function mountYardViewer(figure) {
     }
   }));
   on(document, 'fullscreenchange', () => { renderer.resize(); figure.querySelector('[data-scene-action="fullscreen"]').setAttribute('aria-pressed', String(document.fullscreenElement === figure)); });
-  on(preview, 'yardstagechange', event => selectFrame(Number(event.detail.index)));
+  on(preview, 'yardstagechange', event => selectFrame(Number(event.detail.index), event.detail.animate !== false));
   on(document, 'visibilitychange', () => { if (document.hidden) { stop(); if (!draft) selectFrame(index, false); } });
   on(reduced, 'change', () => { stop(); if (!draft) selectFrame(index, false); });
   on(window, 'pagehide', event => { stop(); if (!draft) selectFrame(index, false); if (!event.persisted) destroy(); });

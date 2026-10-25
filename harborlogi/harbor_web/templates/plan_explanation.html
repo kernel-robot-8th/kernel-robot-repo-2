@@ -14,7 +14,7 @@
       {% else %}<p>{{ route.route_label }}</p>{% endif %}
       {% if route.footprint_revision %}<p class="muted">크기 원본 #{{ route.footprint_revision }}{% if route.shape.length_cells %} · {{ route.shape.length_cells }}칸 화물 1개{% endif %}</p>{% endif %}
       {% if route.steps %}
-      <ol>{% for step in route.steps %}<li>{{ step.number }}단계 · {{ step.phase }} · {{ step.source.label }} → {{ step.destination.label }} · 담당 팔 {{ step.primary_arm|default:'미지정' }}{% if step.alternate_arms %} · 대안 팔 {{ step.alternate_arms|join:', ' }}{% endif %}</li>{% endfor %}</ol>
+      <ol>{% for step in route.steps %}<li>{{ step.number }}단계 · {{ step.phase }} · {{ step.source.label }} → {{ step.destination.label }} · 담당 팔 {{ step.primary_arm|default:'미지정' }}{% if step.alternate_arms %} · 대안 팔 {{ step.alternate_arms|join:', ' }}{% endif %} <button class="quiet route-step-play" type="button" data-plan-step="{{ step.number }}" hidden>{{ step.number }}단계 재생</button></li>{% endfor %}</ol>
       {% endif %}
     </article>
   {% empty %}<p>제안된 이동이 없습니다. 보류된 계획의 부분 작업이나 예상 완료를 표시하지 않습니다.</p>{% endfor %}
@@ -24,8 +24,10 @@
     <h3>이전 계획 #{{ explanation.comparison.previous_plan.pk }}과 비교</h3>
     <p>추가 {{ explanation.comparison.counts.added }} · 제외 {{ explanation.comparison.counts.removed }} · 경로 변경 {{ explanation.comparison.counts.route_changed }} · 유지 {{ explanation.comparison.counts.unchanged }}</p>
     <p class="muted">제외는 새 제안에 포함되지 않음을 뜻합니다. 기존 실행의 취소를 뜻하지 않습니다.</p>
-    <div class="table-scroll"><table><caption>화물별 이전·현재 제안</caption><thead><tr><th scope="col">화물</th><th scope="col">차이</th><th scope="col">이전</th><th scope="col">현재</th></tr></thead><tbody>
-    {% for change in explanation.comparison.changes %}<tr><th scope="row">{{ change.cargo_id }}</th><td>{{ change.label }}</td><td>{{ change.before.route_label|default:'제안 없음' }}{% for step in change.before.steps %}<br>{{ step.number }}단계 {{ step.phase }} · {{ step.primary_arm }}{% endfor %}</td><td>{{ change.after.route_label|default:'제안 없음' }}{% for step in change.after.steps %}<br>{{ step.number }}단계 {{ step.phase }} · {{ step.primary_arm }}{% endfor %}</td></tr>{% endfor %}
+    <div class="actions"><button class="quiet" type="button" data-changes-only aria-pressed="false" aria-controls="plan-changes-{{ explanation.pins.plan_id }}" hidden>변경 항목만 보기</button><span data-change-status role="status"></span></div>
+    <p data-no-changes hidden>변경된 화물이 없습니다. 전체 보기로 유지된 경로를 확인할 수 있습니다.</p>
+    <div class="table-scroll" id="plan-changes-{{ explanation.pins.plan_id }}"><table><caption>화물별 이전·현재 제안</caption><thead><tr><th scope="col">화물</th><th scope="col">차이</th><th scope="col">이전</th><th scope="col">현재</th></tr></thead><tbody>
+    {% for change in explanation.comparison.changes %}<tr data-plan-change="{{ change.status }}"><th scope="row">{{ change.cargo_id }}</th><td>{{ change.label }}</td><td>{{ change.before.route_label|default:'제안 없음' }}{% for step in change.before.steps %}<br>{{ step.number }}단계 {{ step.phase }} · {{ step.primary_arm }}{% endfor %}</td><td>{{ change.after.route_label|default:'제안 없음' }}{% for step in change.after.steps %}<br>{{ step.number }}단계 {{ step.phase }} · {{ step.primary_arm }}{% endfor %}</td></tr>{% endfor %}
     </tbody></table></div>
     <details><summary>비교에 고정된 원본</summary>
       {% with pins=explanation.comparison.before_pins %}<p>이전 #{{ pins.plan_id }} · 지시 revision {{ pins.order_version }} · 관측 #{{ pins.observation_id }} {{ pins.source_id }} / {{ pins.source_revision }} · Condition #{{ pins.condition_id }}</p><ul>{% for shape in pins.footprints %}<li>{{ shape.cargo_id }}: 크기 원본 #{{ shape.footprint_revision|default:'기록 없음' }}{% if shape.length_cells %} · {{ shape.length_cells }}칸{% endif %}</li>{% endfor %}</ul>{% endwith %}

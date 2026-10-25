@@ -100,6 +100,20 @@ class CommandTests(TestCase):
         with self.assertRaises(Conflict):
             commands.prepare_command(self.operator, plan_id=plan.pk, expected_version=2)
 
+    def test_plan_confirmation_submits_once_and_repeated_post_opens_original(self):
+        plan = self.plan()
+        registry = commands.acquire_registry()
+        self.client.force_login(self.operator)
+        with patch.object(registry.client, 'propose_arm', side_effect=TimeoutError) as post:
+            response = self.client.post(f'/plans/{plan.pk}/', {'expected_version': 1})
+            command = Command.objects.get(plan=plan)
+            self.assertRedirects(response, f'/work/{command.pk}/', fetch_redirect_response=False)
+            self.assertEqual(command.state, 'UNKNOWN')
+            self.assertEqual(post.call_count, 1)
+            response = self.client.post(f'/plans/{plan.pk}/', {'expected_version': 1})
+            self.assertRedirects(response, f'/work/{command.pk}/', fetch_redirect_response=False)
+            self.assertEqual(post.call_count, 1)
+
     def test_role_explicit_even_superuser(self):
         plan = self.plan()
         root = User.objects.create_superuser('command-root')
