@@ -26,7 +26,9 @@
 
 ## 실제 Fleet 검증과 운영 연결
 
-고정 producer `bb38fdcdd0140873e4e9d0133662982c1d6a30e0`의 실제 HTTP 통합은 커밋된 소스로 별도 원격 검증한다. 이 기록 시점에는 새 변경의 실제 Fleet 검증을 아직 실행하지 않았다. 합성 HTTP double의 성공이나 이전 커밋 결과로 대신하지 않는다.
+고정 producer `bb38fdcdd0140873e4e9d0133662982c1d6a30e0`와 Harbor `e4bf6cd9de2d53d20060583b50ce2fde8103115d`의 실제 HTTP 통합을 적격 비현장 시험 PC에서 실행했다. 기존 checkout에는 정확한 pin이 없어 시험 캐시로부터 격리 clone을 준비했으며 기존 플랫폼 작업은 바꾸지 않았다. 별도 app venv는 플랫폼 모듈을 import하지 않고 공개 HTTP만 소비했다. pip check 통과, 실제 통합1개 실행·skip0·exit0, 수행 시간6.026초다.
+
+실제 `product_web_http` 시험은 관리자 HTTP/CSRF 세션으로 연결 프로필을 저장하고 신원·구조화된 ARM 조회를 검증했다. 이어 계획 확정의 즉시 제출, 외부 승인 주체, 원래 key·본문·신원·receipt 결속, 재제출409, 물리 receipt 뒤에도 업무 완료 근거 없이는 WAITING 유지, 취소·원본 대조를 확인했다. raw 로그와 양 끝 SHA 기록은 비공개 작업 공간의 `Rosy/docs/workspace-records/2026-10-26/fleet-bridge-http-evidence/`에 보존한다. 실제 Fleet 코드에 합성 owner/observer를 연결한 시험이며 물리 장치·현장 수용이 아니다.
 
 사용할 운영 Fleet origin·서비스 principal과 서버 자격은 실제 설치 담당자가 지정해야 한다. 합성 미리보기는 운영 설정을 상속하지 않는다. 다칸 binding·인증된 업무 근거·ARM 정책 admission·상시 업무 실행기는 이 연결 확인으로 활성화되지 않는다.
 
