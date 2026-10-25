@@ -282,6 +282,10 @@ def main():
                 capture(viewport, name + '-evidence.png')
                 viewport.reload()
                 assert viewport.locator('.transfer-list > li').count() == 3
+                # The renderer is a dynamic ESM import; document load does not finish its mount.
+                result.setdefault('reload_mount_states', []).append(viewport.locator('[data-yard-3d]').evaluate(
+                    '(figure) => ({ready:figure.dataset.ready || null, hidden:figure.hidden})'))
+                viewport.locator('[data-yard-3d][data-ready="true"]').wait_for()
                 assert viewport.locator('[data-yard-3d]').is_visible()
                 assert viewport.locator('canvas').get_attribute('data-frame') == '0'
                 visit(viewport, '/requests/')

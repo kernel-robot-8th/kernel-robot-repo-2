@@ -88,6 +88,7 @@ def _spatial_stages(order, plan, source):
 
 def workspace_context(order, plan=None, *, priority_form=None, plan_form=None, review_observation=None):
     from harbor_web.views import reason_text
+    from harbor_web.plan_explanation import explain_plan
     from harbor_web.planning_pages import gate_text
 
     command = Command.objects.filter(order=order).select_related('plan__observation__condition', 'plan__condition').first()
@@ -142,6 +143,7 @@ def workspace_context(order, plan=None, *, priority_form=None, plan_form=None, r
         pipeline=pipeline_for(order, plan, command, detail), review_observation=review_observation,
         review_differs=bool(plan and review_observation and plan.observation_id != review_observation.pk),
         source=source, latest_source=latest, yard_stages=stages, yard_scene=scene_for(stages), display_moves=moves,
+        plan_explanation=explain_plan(plan) if plan else None,
         plan_changes=changes, different_execution_plan=different, decision=decision,
         gate=gate, gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']) if plan else '',
         command_label=COMMAND_LABELS.get(command.state, command.state) if command else '',

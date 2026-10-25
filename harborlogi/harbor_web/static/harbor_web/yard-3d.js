@@ -22,6 +22,8 @@ export async function mountYardViewer(figure) {
   const info = figure.querySelector('[data-scene-info]');
   const play = figure.querySelector('[data-scene-play]');
   const motion = figure.querySelector('[data-scene-motion]');
+  const speed = figure.querySelector('[data-scene-speed]');
+  const progress = figure.querySelector('[data-scene-progress]');
   const editor = figure.querySelector('[data-scene-editor]');
   const editButton = figure.querySelector('[data-scene-action="edit"]');
   const draftState = figure.querySelector('[data-scene-draft]');
@@ -39,13 +41,13 @@ export async function mountYardViewer(figure) {
   let index = Number(controls.find(b => b.getAttribute('aria-pressed') === 'true')?.dataset.yardStage || 0);
   let selected = '', current = cloneBoxes(scene.frames[index].boxes), draft = null;
   let playing = false, internalStep = false, isolated = false, timer = 0, raf = 0, animation = null;
-  let destroyed = false;
+  let destroyed = false, draftHistory = [], replayIndex = 0;
   const ceiling = Math.max(...scene.areas.map(a => a.levels)) + .6;
   let renderer = null;
   renderer = createRenderer(canvas, scene.areas, {
     showVolumes: scene.kind === 'map-definition',
     colors, onSelect: id => select(id), onTransform: (id, position) => {
-      if (!draft) return;
+      if (!draft || playing) return;
       const box = draft.find(b => b.id === id);
       const placement = placementFromWorld(scene.areas, box, position);
       if (placement) applyDraft(id, placement);
@@ -53,8 +55,15 @@ export async function mountYardViewer(figure) {
     }, onError: () => { destroy(); fallback(figure); },
   });
   function stop() {
-    playing = false; clearTimeout(timer);
-    play.textContent = '계획 재생'; play.setAttribute('aria-pressed', 'false');
+    if (draft && animation) {
+      progress.dataset.phase = '중지 · 최종 가상 배치'; progress.dataset.progress = '100';
+      progress.textContent = '로컬 가상 변경 재생 중지 · 최종 가상 배치 복원 · 서버에 저장되지 않음';
+    }
+    playing = false; clearTimeout(timer); cancelAnimationFrame(raf); raf = 0; animation = null;
+    canvas.dataset.moving = 'false';
+    play.textContent = draft ? '가상 변경 재생' : '계획 재생'; play.setAttribute('aria-pressed', 'false');
+    editButton.disabled = scene.kind === 'map-definition';
+    if (draft && !destroyed) { renderer?.setEditable(true); editor.querySelector('fieldset').disabled = !selected; paint(draft); }
   }
   function status(text) { motion.textContent = text; }
   function boxes() { return draft || scene.frames[index].boxes; }
@@ -78,7 +87,7 @@ export async function mountYardViewer(figure) {
       (draft ? '가상: ' + box.area + ' / ' + box.row + '행 ' + box.column + '열 ' + box.level + '층 · 기준: ' + base.positions.join(' / ') : box.positions.join(' / '))
       : '박스나 화물 목록을 선택해 크기·위치를 확인하세요.';
     for (const name of ['area','row','column','level','orientation']) editor.elements[name].value = box ? box[name] : '';
-    editor.querySelector('fieldset').disabled = !box;
+    editor.querySelector('fieldset').disabled = !box || playing;
     figure.querySelector('[data-scene-action="focus"]').disabled = !box;
     figure.querySelector('[data-scene-action="isolate"]').disabled = !box;
     updateDraftState();
@@ -101,16 +110,21 @@ export async function mountYardViewer(figure) {
     canvas.dataset.boxCount = String(current.length); canvas.dataset.frame = String(index);
   }
   function applyDraft(id, placement) {
+    if (playing) return;
     const result = moveBox(scene.areas, draft, id, placement);
     error.textContent = result.valid ? '' : result.reason;
     if (result.valid) {
+      if (JSON.stringify(result.boxes) !== JSON.stringify(draft)) draftHistory.push(cloneBoxes(result.boxes));
+      play.disabled = draftHistory.length < 2;
       draft = result.boxes; status(id + ' 가상 위치 변경 · 논리 점유·지지 검사 통과');
     }
     paint(draft); select(id);
   }
   function lockDraft(value) {
     controls.forEach(button => { button.disabled = value; });
-    play.disabled = value;
+    play.disabled = value && draftHistory.length < 2;
+    play.hidden = scene.kind === 'map-definition' || (!value && scene.frames.length < 2);
+    play.textContent = value ? '가상 변경 재생' : '계획 재생';
     views.querySelector('[data-yard-view="flat"]').disabled = value;
     editButton.setAttribute('aria-pressed', String(value));
     editButton.textContent = value ? '원본 복원·편집 끝내기' : '가상 배치 편집';
@@ -119,43 +133,87 @@ export async function mountYardViewer(figure) {
   function toggleEdit() {
     stop(); cancelAnimationFrame(raf); animation = null; canvas.dataset.moving = 'false';
     if (draft) {
-      draft = null; lockDraft(false); paint(scene.frames[index].boxes);
+      draft = null; draftHistory = []; lockDraft(false); paint(scene.frames[index].boxes);
       status('가상 변경을 버리고 선택한 기준 배치를 복원했습니다.');
     } else {
-      draft = cloneBoxes(scene.frames[index].boxes); lockDraft(true); paint(draft);
+      draft = cloneBoxes(scene.frames[index].boxes); draftHistory = [cloneBoxes(draft)]; lockDraft(true); paint(draft);
       status('박스를 선택하고 이동 핸들을 드래그하거나 아래 위치를 입력하세요.');
     }
     error.textContent = ''; fillCargo(); select(selected);
   }
   function advance() {
     if (!playing) return;
+    if (draft) {
+      if (replayIndex >= draftHistory.length - 1) { stop(); status('로컬 가상 변경 재생 완료 · 서버에 저장되지 않음'); return; }
+      startTransition(draftHistory[++replayIndex]);
+      return;
+    }
     if (index === scene.frames.length - 1) { stop(); status('계획 재생 완료 · 실제 실행 상태는 바뀌지 않았습니다.'); return; }
     timer = setTimeout(() => {
       if (!playing || document.hidden || figure.hidden) return;
       internalStep = true; controls[index + 1].click(); internalStep = false;
-    }, reduced.matches ? 1000 : 550);
+    }, reduced.matches ? 0 : 550);
+  }
+  function describeMove(segment, t) {
+    const {from, to} = segment;
+    const location = box => box.area + ' ' + box.row + '행 ' + box.column + '열 ' + box.level + '층';
+    const phase = !from ? '배치 비교 · 새 화물 즉시 표시' : segment.instant ? '방향 비교 · 즉시 전환' : t < .25 ? '들어 올림' : t < .75 ? '이동' : t < 1 ? '내려놓기' : '완료';
+    Object.assign(progress.dataset, {cargo:to.id, source:from ? location(from) : '관측 출발 위치 없음',
+      destination:location(to), phase, progress:String(Math.round(t * 100)), mode:draft ? 'local-draft' : 'plan'});
+    progress.textContent = (draft ? '로컬 가상 변경' : '계획 설명') + ' · ' + to.id + ' · ' + progress.dataset.source + ' → ' + location(to) +
+      ' · ' + phase + ' · ' + Math.round(t * 100) + '%';
+  }
+  function startTransition(target) {
+    const from = new Map(current.map(box => [box.id, box]));
+    const moved = target.filter(to => {
+      const initial = from.get(to.id);
+      return !initial || ['x','y','z','orientation'].some(key => initial[key] !== to[key]);
+    });
+    const segments = [], working = cloneBoxes(target.filter(to => from.has(to.id)).map(to => from.get(to.id)));
+    for (const to of moved) {
+      const initial = from.get(to.id);
+      if (!initial) working.push(cloneBoxes([to])[0]);
+      segments.push({from:initial, to, boxes:cloneBoxes(working),
+        instant:initial && ['x','y','z'].every(key => initial[key] === to[key])});
+      working[working.findIndex(box => box.id === to.id)] = cloneBoxes([to])[0];
+    }
+    if (!segments.length || reduced.matches || figure.hidden || document.hidden) {
+      paint(target); canvas.dataset.moving = 'false';
+      if (segments.length) describeMove(segments.at(-1), 1);
+      status(draft ? '로컬 가상 배치 비교 · 즉시 전환' : scene.frames[index].label + ' · 예상 배치');
+      advance(); return;
+    }
+    animation = {segments, segment:0, target, elapsed:0, last:performance.now()};
+    canvas.dataset.moving = 'true';
+    describeMove(segments[0], 0);
+    status('배치 이동 설명 · 실제 로봇 경로·작업 시간이 아님');
+    raf = requestAnimationFrame(tick);
   }
   function tick(now) {
     raf = 0;
     if (!animation || destroyed) return;
-    const t = Math.min(1, (now - animation.started) / 1100);
-    paint(animation.to.map(to => transit(animation.from.get(to.id) || to, to, t, ceiling)));
+    animation.elapsed += (now - animation.last) * Number(speed.value); animation.last = now;
+    const segment = animation.segments[animation.segment];
+    const t = segment.from && !segment.instant ? Math.min(1, animation.elapsed / 4500) : 1;
+    paint(segment.boxes.map(box => box.id === segment.to.id ? transit(segment.from || segment.to, segment.to, t, ceiling) : box));
+    describeMove(segment, t);
     if (t < 1) raf = requestAnimationFrame(tick);
-    else { animation = null; canvas.dataset.moving = 'false'; status(scene.frames[index].label + ' · 예상 배치'); advance(); }
+    else if (++animation.segment < animation.segments.length) {
+      animation.elapsed = 0; describeMove(animation.segments[animation.segment], 0); raf = requestAnimationFrame(tick);
+    } else {
+      paint(animation.target); animation = null; canvas.dataset.moving = 'false';
+      status(draft ? '로컬 가상 변경 · 서버에 저장되지 않음' : scene.frames[index].label + ' · 예상 배치'); advance();
+    }
   }
   function selectFrame(next, animate = true) {
     if (draft || !scene.frames[next]) return;
     if (!internalStep) stop();
-    cancelAnimationFrame(raf); raf = 0;
-    const from = new Map(current.map(b => [b.id, {...b}]));
+    cancelAnimationFrame(raf); raf = 0; animation = null;
     index = next; fillCargo();
     figure.querySelector('[data-scene-step]').textContent = scene.frames[index].label;
-    if (animate && next && !reduced.matches && !figure.hidden && !document.hidden) {
-      animation = {from, to: scene.frames[index].boxes, started: performance.now()};
-      canvas.dataset.moving = 'true';
-      status('박스 이동 설명 중 · 실제 로봇 경로 아님'); raf = requestAnimationFrame(tick);
-    } else {
-      animation = null; canvas.dataset.moving = 'false'; paint(scene.frames[index].boxes);
+    if (animate && next) startTransition(scene.frames[index].boxes);
+    else {
+      canvas.dataset.moving = 'false'; paint(scene.frames[index].boxes);
       status(scene.kind === 'map-definition' ? scene.frames[index].label : next ? scene.frames[index].label + ' · 예상 배치' : '원본 관측 배치'); advance();
     }
   }
@@ -169,15 +227,19 @@ export async function mountYardViewer(figure) {
   scene.areas.forEach(area => editor.elements.area.add(new Option(area.label + ' · ' + area.id, area.id)));
   on(editor, 'submit', event => {
     event.preventDefault();
-    if (!draft || !selected) return;
+    if (!draft || !selected || playing) return;
     applyDraft(selected, {area: editor.elements.area.value, row: Number(editor.elements.row.value),
       column: Number(editor.elements.column.value), level: Number(editor.elements.level.value),
       orientation: Number(editor.elements.orientation.value)});
   });
   on(cargo, 'change', () => { error.textContent = ''; select(cargo.value); });
   on(play, 'click', () => {
-    if (playing) { stop(); selectFrame(index, false); return; }
+    if (playing) { stop(); if (!draft) selectFrame(index, false); return; }
     playing = true; play.textContent = '재생 중지'; play.setAttribute('aria-pressed', 'true');
+    if (draft) {
+      replayIndex = 0; paint(draftHistory[0]); renderer.setEditable(false);
+      editor.querySelector('fieldset').disabled = true; editButton.disabled = true; advance(); return;
+    }
     if (index === scene.frames.length - 1) { internalStep = true; controls[0].click(); internalStep = false; }
     else if (!animation) advance();
   });
@@ -205,7 +267,7 @@ export async function mountYardViewer(figure) {
   on(preview, 'yardstagechange', event => selectFrame(Number(event.detail.index)));
   on(document, 'visibilitychange', () => { if (document.hidden) { stop(); if (!draft) selectFrame(index, false); } });
   on(reduced, 'change', () => { stop(); if (!draft) selectFrame(index, false); });
-  on(window, 'pagehide', event => { stop(); if (!event.persisted) destroy(); });
+  on(window, 'pagehide', event => { stop(); if (!draft) selectFrame(index, false); if (!event.persisted) destroy(); });
   on(window, 'pageshow', () => renderer.resize());
   on(canvas, 'webglcontextlost', event => { event.preventDefault(); destroy(); fallback(figure); });
   function destroy() {

@@ -56,6 +56,10 @@ def overview(request):
     from harbor_web.workspace import plan_changes
     if not has_role(request.user, 'viewer', 'operator', 'admin'):
         return redirect('/field/')
+    observation = selected_observation(request, default_latest=True)
+    observations = list(Observation.objects.select_related('condition').order_by('-pk')[:100])
+    if observation and all(item.pk != observation.pk for item in observations):
+        observations.insert(0, observation)
     issues = list(Command.objects.filter(state__in=['UNKNOWN', 'DISPATCHING', 'CANCEL_PENDING', 'BLOCKED']).select_related('plan__order__cargo').order_by('created_at')[:12])
     issue_ids = [command.plan.order_id for command in issues]
     requests = [command.plan.order for command in issues]
@@ -80,9 +84,14 @@ def overview(request):
             else:
                 row.update(action='현장 확인 배정', reason='차량과 담당자를 지정해 입고 확인 회차를 배정하세요.',
                            status_label='배정 전', href=f'/requests/{order.pk}/')
+            if plan and plan.result.get('plan_kind') == 'inbound-placement':
+                row['field_status'] = row['status_label']
+                row.update(action='입고 추천·변경 근거 확인', reason=reason_text(plan.result['reason']),
+                    status=plan.result['status'], status_label='입고 배치 추천' if plan.result['status'] == 'READY' else '입고 배치 보류',
+                    href=f'/plans/{plan.pk}/')
         changes = plan_changes(order, plan, current_queue_digest=current_queue_digest)
         if changes:
-            row.update(status='HOLD', status_label='계획 재검토', reason=changes[0]['message'], action='최신 기준으로 검토')
+            row.update(status='HOLD', status_label='계획 재검토', reason=changes[0]['message'], action='최신 기준으로 검토', href=f'/requests/{order.pk}/')
         command = executions.get(order.pk)
         if command:
             row.update(status=command.state, status_label={'UNKNOWN': '결과 불명', 'DISPATCHING': '제출 대조 필요', 'CANCEL_PENDING': '취소 대조 필요', 'BLOCKED': '인계 보류', 'PREPARED': '제안 검토 대기', 'RECONCILED': '원본 대조됨'}.get(command.state, command.state), action='원래 작업 대조', href=f'/work/{command.pk}/')
@@ -95,8 +104,9 @@ def overview(request):
                 'RECONCILED': '실행 원본을 대조했습니다. 실제 수행과 전체 업무 완료 근거를 확인하세요.',
             }.get(command.state, '원래 작업의 상태와 근거를 확인하세요.')
         rows.append(row)
-    return page(request, 'overview.html', section='overview', rows=rows,
-                observation=Observation.objects.order_by('-id').first(), condition=Condition.objects.order_by('-id').first(),
+    from harbor_web.operations import operations_context
+    return page(request, 'overview.html', section='overview', rows=rows, operations=operations_context(observation), observations=observations,
+                observation=observation, condition=observation.condition if observation else None,
                 field_pending=FieldEpisode.objects.filter(state='OPEN').count())
 
 

@@ -1,5 +1,8 @@
 """Real viewer/editor gestures on the isolated multicell fixture; no mocked renderer."""
 
+import json
+import time
+
 
 def exercise_workbench(page, output):
     canvas = page.locator('canvas')
@@ -42,6 +45,53 @@ def exercise_workbench(page, output):
     page.screenshot(path=str(output / 'selected-model.png'), full_page=True)
     page.locator('[data-scene-action="isolate"]').click()
 
+    playback = page.locator('[data-scene-progress]')
+    speed = page.locator('[data-scene-speed]')
+    play = page.locator('[data-scene-play]')
+
+    def wait_progress(low, high):
+        page.wait_for_function('''([low,high]) => {
+          const p=document.querySelector('[data-scene-progress]');
+          return Number(p.dataset.progress)>=low && Number(p.dataset.progress)<high;
+        }''', arg=[low, high])
+
+    def rendered_positions():
+        return json.loads(canvas.get_attribute('data-rendered-positions'))
+
+    def wait_rendered(expected):
+        page.wait_for_function('''expected => {
+          const actual=JSON.parse(document.querySelector('canvas').dataset.renderedPositions || '{}');
+          return Object.entries(expected).every(([id,p]) => actual[id] && ['x','y','z'].every(k => actual[id][k]===p[k]));
+        }''', arg=expected)
+
+    # Read positions written after the real WebGL draw, rather than trusting timeline state.
+    durations = []
+    for rate in ('1', '2'):
+        speed.select_option(rate)
+        page.locator('[data-yard-stage="0"]').click()
+        started = time.monotonic()
+        page.locator('[data-yard-stage="1"]').click()
+        wait_progress(35, 65)
+        durations.append(time.monotonic() - started)
+        moving_id = playback.get_attribute('data-cargo')
+        endpoint_frames = json.loads(source)['frames'][:2]
+        endpoints = [next(b for b in frame['boxes'] if b['id'] == moving_id) for frame in endpoint_frames]
+        actual = rendered_positions()[moving_id]
+        assert actual['z'] > max(b['z'] for b in endpoints), actual
+        assert canvas.get_attribute('data-moving') == 'true'
+        assert playback.get_attribute('data-source') and playback.get_attribute('data-destination')
+        if rate == '1':
+            assert durations[-1] >= 1.4, durations
+            page.screenshot(path=str(output / 'slow-playback-midair.png'), full_page=True)
+            wait_progress(80, 99)
+            assert rendered_positions()[moving_id]['z'] > endpoints[-1]['z']
+    assert durations[1] < durations[0] * .8, durations
+    play.click()
+    play.click()
+    assert canvas.get_attribute('data-moving') == 'false'
+    speed.select_option('1')
+    page.locator('[data-yard-stage="0"]').click()
+
     edit = page.locator('[data-scene-action="edit"]')
     edit.click()
     assert figure.get_attribute('data-editing') == 'true'
@@ -65,6 +115,33 @@ def exercise_workbench(page, output):
     move('C1', 'stand', 1, 1, 1)
     assert figure.get_attribute('data-draft-changes') == '2'
     assert '가상:' in page.locator('[data-scene-info]').inner_text()
+    speed.select_option('2')
+    fixture = json.loads(source)
+    final_draft = {b['id']: {key: b[key] for key in ('x', 'y', 'z')} for b in fixture['frames'][0]['boxes']}
+    for code, area_id in [('C1', 'stand'), ('C2', 'temp')]:
+        area = next(a for a in fixture['areas'] if a['id'] == area_id)
+        final_draft[code] = dict(x=area['x'], y=area['y'], z=0)
+    wait_rendered(final_draft)
+    play.click()
+    # Playwright checks disabled form controls; fieldset itself requires its DOM disabled property.
+    assert page.locator('[data-scene-editor] fieldset').evaluate('(fieldset) => fieldset.disabled')
+    assert page.locator('[data-scene-editor] button[type=submit]').is_disabled()
+    assert page.locator('[data-scene-editor] [name=column]').is_disabled()
+    assert edit.is_disabled()
+    wait_progress(35, 65)
+    assert playback.get_attribute('data-mode') == 'local-draft'
+    assert playback.get_attribute('data-cargo') == 'C2', 'Accepted edit order must be preserved'
+    assert rendered_positions()['C2']['z'] > final_draft['C2']['z']
+    play.click()
+    wait_rendered(final_draft)
+    assert rendered_positions() == final_draft, 'Stop restores the final local draft'
+    assert edit.is_enabled()
+    play.click()
+    page.wait_for_function('() => document.querySelector("[data-scene-play]").getAttribute("aria-pressed") === "false"')
+    wait_rendered(final_draft)
+    assert rendered_positions() == final_draft
+    assert page.locator('#yard-scene-data').text_content() == source
+    speed.select_option('1')
     move('C1', 'stand', 1, 1, 1, 90)
     assert page.locator('[data-scene-error]').inner_text()
     assert figure.get_attribute('data-draft-changes') == '2'
@@ -159,4 +236,5 @@ def exercise_workbench(page, output):
     assert not requests, requests
     return ['WebGL camera pan/presets/zoom, selection focus/isolation and fullscreen work; two-finger motion does not select cargo',
             'Local drafts enforce footprint boundaries, overlaps, full support and restoration; original JSON and server stay unchanged',
-            'Actual rendered translation handle moves and snaps one cargo; no injected transform or mocked renderer']
+            'Actual rendered translation handle moves and snaps one cargo; no injected transform or mocked renderer',
+            'Default 4.5-second moves visibly lift/travel/lower; speed changes actual rendered motion; accepted local draft history replays and stop restores its final state']

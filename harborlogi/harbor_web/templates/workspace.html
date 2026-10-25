@@ -9,6 +9,7 @@
 <dl class="task-meta"><div><dt>현재 지시</dt><dd>v{{ order.version }}</dd></div><div><dt>반출 순서</dt><dd>그룹 {{ order.priority_group }} · {{ order.sequence }}순위</dd></div><div><dt>동순위 규칙</dt><dd>{% if order.tie_policy == 'ANY' %}그룹 안 선택 허용{% else %}순서 고정{% endif %}</dd></div>{% if plan %}<div><dt>계획 기준 지시</dt><dd>v{{ plan.order_version }} · {{ plan.created_at|date:'m-d H:i' }}</dd></div>{% endif %}</dl>
 <nav class="tabs workspace-tabs" aria-label="업무 안에서 이동"><a href="#yard">야드·계획</a><a href="#execution">실행·근거</a><a href="#history">변경 이력</a></nav>
 {% if different_execution_plan %}<div class="notice"><strong>원래 실행은 계획 #{{ command.plan_id }}에 연결돼 있습니다.</strong><p>지금 보는 계획 #{{ plan.pk }}와 구별해 대조하세요. <a href="/requests/{{ order.pk }}/">원래 실행 기준으로 돌아가기</a></p></div>{% endif %}
+{% if plan_explanation %}<div class="workspace-explanation">{% include 'plan_explanation.html' with explanation=plan_explanation %}</div>{% endif %}
 <div class="workspace-layout">
   <section class="decision-summary {{ decision.tone }}"><h2>{{ decision.title }}</h2><p>{{ decision.body }}</p><a class="button" href="{{ decision.href }}">{{ decision.label }}</a></section>
   <section class="yard-workspace" id="yard" aria-labelledby="yard-title" data-yard-preview>
