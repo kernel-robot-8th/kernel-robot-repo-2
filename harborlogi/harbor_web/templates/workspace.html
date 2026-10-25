@@ -18,7 +18,7 @@
     <div class="yard-legend" aria-label="화물 구분"><span><i class="legend-target" aria-hidden="true"></i>반출 대상</span><span><i class="legend-blocker" aria-hidden="true"></i>재취급 대상</span><span>논리 배치 · 실측 좌표 아님</span></div>
     {% if display_moves %}<div class="preview-controls" aria-label="계획 예상 단계 선택">{% for stage in yard_stages %}<button type="button" class="quiet" data-yard-stage="{{ stage.index }}" aria-controls="{{ stage.panel_id }}" aria-pressed="{% if forloop.first %}true{% else %}false{% endif %}" hidden>{% if forloop.first %}관측{% else %}{{ stage.index }} · {{ stage.phase }}{% endif %}</button>{% endfor %}</div>{% endif %}
     <p class="preview-status helptext" data-yard-status role="status">관측한 배치{% if display_moves %} · 단계를 선택하면 계획상 예상 위치만 바뀝니다.{% endif %}</p>
-    {% for stage in yard_stages %}{% include 'yard_stage.html' %}{% endfor %}
+    {% include 'yard_3d.html' %}<div data-yard-flat>{% for stage in yard_stages %}{% include 'yard_stage.html' %}{% endfor %}</div>
     {% if source.payload.holdings %}<div class="notice"><strong>들고 있는 화물 · 위치 대조 필요</strong><ul>{% for holding in source.payload.holdings %}<li>{{ holding.cargo_id }} · 보유 주체 {{ holding.holder_id|default:'미확인' }}</li>{% endfor %}</ul></div>{% endif %}
     <p class="helptext">층 번호는 아래부터 시작합니다. {% if display_moves %}마지막 단계는 계획 후 예상 배치이며 실제 위치와 완료 근거를 대신하지 않습니다.{% endif %}</p>
     {% else %}<div class="empty"><h3>관측 원본이 필요합니다</h3><p>화물의 실제 위치를 임의로 채우지 않습니다. 출처·시각·설치 기준을 가진 재고 원본을 연결하세요.</p><a href="/inventory/">재고 연결 상태 확인</a></div>{% endif %}

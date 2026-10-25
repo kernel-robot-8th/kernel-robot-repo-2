@@ -1,0 +1,17 @@
+const assert = require('node:assert/strict');
+const {project, transit, inside} = require('../harbor_web/static/harbor_web/yard-3d.js');
+const camera = {x:0,y:0,yaw:0,pitch:Math.PI/4};
+assert.equal(project({x:2,y:0,z:0},camera).x,2);
+assert(project({x:0,y:0,z:2},camera).y < project({x:0,y:0,z:1},camera).y);
+assert(Math.abs(project({x:2,y:0,z:0},{...camera,yaw:Math.PI/2}).x) < 1e-9);
+const from={x:0,y:0,z:1,width:2,depth:1,id:'C1'}, to={...from,x:5,y:3,z:0};
+assert.deepEqual(transit(from,to,0,4),from);
+assert.deepEqual(transit(from,to,1,4),to);
+assert.equal(transit(from,to,.2,4).x,0);
+assert.equal(transit(from,to,.5,4).z,4);
+assert.equal(transit(from,to,.8,4).x,5);
+assert.equal(transit(from,to,.5,4).width,2);
+assert.deepEqual(transit(from,from,.5,4),from);
+assert(inside({x:1,y:1},[{x:0,y:0},{x:2,y:0},{x:2,y:2},{x:0,y:2}]));
+assert(!inside({x:3,y:1},[{x:0,y:0},{x:2,y:0},{x:2,y:2},{x:0,y:2}]));
+console.log('3D projection, rigid footprint, lift/travel/lower, endpoint and selection checks passed');

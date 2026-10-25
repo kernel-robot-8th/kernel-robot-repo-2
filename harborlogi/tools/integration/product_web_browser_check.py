@@ -145,6 +145,7 @@ def main():
             assert page.locator('.transfer-list > li').count() == 3
             assert page.locator('[data-yard-stage]').count() == 4
             assert all(page.locator('.transfer-list > li').nth(i).locator('.move-arm').inner_text().strip() for i in range(3))
+            page.locator('[data-yard-view="flat"]').click()
             page.locator('[data-yard-stage="3"]').focus()
             page.keyboard.press('Enter')
             assert page.locator('[data-yard-stage="3"]').get_attribute('aria-pressed') == 'true'
@@ -266,6 +267,8 @@ def main():
                 visit(viewport, f'/plans/{plan.pk}/')
                 assert not viewport.evaluate('document.documentElement.scrollWidth > innerWidth'), (name, 'workspace')
                 capture(viewport, name + '-plan.png')
+                assert viewport.locator('[data-yard-3d]').is_visible()
+                viewport.locator('[data-yard-view="flat"]').click()
                 assert viewport.locator('[data-yard-panel="0"] [data-yard-layer="1"] .grid-cell').count() == 9
                 viewport.locator('[data-yard-panel="0"] [data-yard-level="3"]').click()
                 assert not viewport.evaluate('document.documentElement.scrollWidth > innerWidth'), (name, 'grid-level-3')
@@ -279,7 +282,8 @@ def main():
                 capture(viewport, name + '-evidence.png')
                 viewport.reload()
                 assert viewport.locator('.transfer-list > li').count() == 3
-                assert viewport.locator('[data-yard-panel="0"]').is_visible()
+                assert viewport.locator('[data-yard-3d]').is_visible()
+                assert viewport.locator('canvas').get_attribute('data-frame') == '0'
                 visit(viewport, '/requests/')
                 viewport.go_back()
                 assert f'/plans/{plan.pk}/' in viewport.url

@@ -246,7 +246,9 @@ def inventory(request):
     view = (spatial_yard_view(services.spatial_snapshot(selected)) if selected.payload.get('schema') == 'grid-placement-v1'
             else yard_view(selected.payload['bays'], selected.condition.payload)) if selected else None
     stage = dict(view, panel_id='inventory-yard', label='관측한 배치', index=0) if view else None
-    return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices, yard_stage=stage)
+    from harbor_web.yard_scene import scene_for
+    return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices,
+                yard_stage=stage, yard_scene=scene_for([stage]) if stage else None)
 
 
 @require_roles('admin')

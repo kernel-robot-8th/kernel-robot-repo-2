@@ -7,6 +7,7 @@ from django.utils import timezone
 from harbor_web import commands, forms, services
 from harbor_web.models import Audit, Command, Observation, Plan
 from harbor_web.yard_view import yard_view, spatial_yard_view
+from harbor_web.yard_scene import scene_for
 
 
 COMMAND_LABELS = {
@@ -140,7 +141,7 @@ def workspace_context(order, plan=None, *, priority_form=None, plan_form=None, r
     return dict(order=order, plan=plan, plans=plans, command=command, execution=detail,
         pipeline=pipeline_for(order, plan, command, detail), review_observation=review_observation,
         review_differs=bool(plan and review_observation and plan.observation_id != review_observation.pk),
-        source=source, latest_source=latest, yard_stages=stages, display_moves=moves,
+        source=source, latest_source=latest, yard_stages=stages, yard_scene=scene_for(stages), display_moves=moves,
         plan_changes=changes, different_execution_plan=different, decision=decision,
         gate=gate, gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']) if plan else '',
         command_label=COMMAND_LABELS.get(command.state, command.state) if command else '',

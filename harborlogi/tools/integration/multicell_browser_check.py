@@ -108,10 +108,54 @@ def main():
             assert [m['cargo_id'] for m in plan.result['moves']] == ['C2', 'C1', 'C2']
             plan_path = f'/plans/{plan.pk}/'
             result['checks'].append('Actual browser creates complete atomic spatial plan: blocker, target, restore; three cargo moves, never per-cell moves')
+            page.locator('[data-yard-3d][data-ready=true]').wait_for()
+            assert page.locator('canvas[data-box-count="6"]').count() == 1
+            page.locator('[data-scene-cargo]').select_option('C1')
+            assert '2×1' in page.locator('[data-scene-info]').inner_text()
+            assert 'Y12-L1' in page.locator('[data-scene-info]').inner_text()
+            before_rotation = page.locator('canvas').evaluate('(c)=>c.toDataURL()')
+            page.locator('canvas').focus()
+            page.keyboard.press('ArrowLeft')
+            assert page.locator('canvas').evaluate('(c)=>c.toDataURL()') != before_rotation
+            page.keyboard.press('Home')
+            page.locator('[data-scene-cargo]').select_option('')
+            canvas = page.locator('canvas')
+            rect = canvas.bounding_box()
+            for y in range(100, int(rect['height']) - 30, 30):
+                for x in range(60, int(rect['width']) - 30, 35):
+                    canvas.click(position=dict(x=x, y=y))
+                    if page.locator('[data-scene-cargo]').input_value():
+                        break
+                if page.locator('[data-scene-cargo]').input_value():
+                    break
+            assert page.locator('[data-scene-cargo]').input_value(), 'Projected cuboid selection did not hit any cargo'
+            page.locator('[data-scene-play]').click()
+            page.wait_for_function('() => document.querySelector("canvas").dataset.frame === "3" && document.querySelector("canvas").dataset.moving === "false"')
+            page.wait_for_function('() => document.querySelector("[data-scene-play]").getAttribute("aria-pressed") === "false"')
+            assert page.locator('[data-yard-stage="3"]').get_attribute('aria-pressed') == 'true'
+            assert page.locator('canvas').get_attribute('data-box-count') == '6'
+            page.locator('[data-yard-stage="0"]').click()
+            page.locator('[data-scene-play]').click()
+            page.wait_for_function('() => document.querySelector("canvas").dataset.moving === "true"')
+            page.locator('[data-scene-play]').click()
+            assert page.locator('canvas').get_attribute('data-moving') == 'false'
+            assert page.locator('[data-scene-play]').get_attribute('aria-pressed') == 'false'
+            page.locator('[data-scene-play]').click()
+            page.wait_for_function('() => document.querySelector("canvas").dataset.moving === "true"')
+            page.locator('[data-yard-stage="2"]').click()
+            assert page.locator('[data-scene-play]').get_attribute('aria-pressed') == 'false'
+            page.wait_for_function('() => document.querySelector("canvas").dataset.frame === "2" && document.querySelector("canvas").dataset.moving === "false"')
+            result['checks'].append('3D Canvas renders six atomic cuboids; footprint selection, real projected hit selection, keyboard camera and complete explicit playback stay synchronized')
+            result['checks'].append('Explicit stop snaps to selected endpoint; manual step interrupts automatic playback without another step')
             for width, height in [(1440, 1000), (1280, 800), (768, 1024), (390, 844)]:
                 page.set_viewport_size(dict(width=width, height=height))
                 page.goto(origin + plan_path)
                 page.wait_for_load_state('networkidle')
+                page.locator('[data-yard-3d][data-ready=true]').wait_for()
+                assert page.locator('canvas').is_visible()
+                assert not page.evaluate('document.documentElement.scrollWidth > innerWidth'), width
+                page.screenshot(path=str(output / f'{width}-3d.png'), full_page=True)
+                page.locator('[data-yard-view="flat"]').click()
                 source = page.locator('[data-yard-panel="0"]')
                 yard = source.locator('[data-grid-area="yard"]')
                 first = yard.locator('[data-yard-layer="1"]')
@@ -153,6 +197,24 @@ def main():
             assert no_js.locator('[data-yard-panel]:visible').count() == 4
             assert no_js.locator('[data-cargo-id="C1"]').count() == 4
             no_js_context.close()
+            reduced_context = browser.new_context(reduced_motion='reduce')
+            reduced_context.add_cookies(page.context.cookies())
+            reduced_page = reduced_context.new_page()
+            reduced_page.goto(origin + plan_path)
+            reduced_page.locator('[data-yard-3d][data-ready=true]').wait_for()
+            reduced_page.locator('[data-yard-stage="1"]').click()
+            assert reduced_page.locator('canvas').get_attribute('data-frame') == '1'
+            assert reduced_page.locator('canvas').get_attribute('data-moving') == 'false'
+            reduced_context.close()
+            unsupported = browser.new_context()
+            unsupported.add_cookies(page.context.cookies())
+            unsupported.add_init_script('HTMLCanvasElement.prototype.getContext = () => null;')
+            fallback_page = unsupported.new_page()
+            fallback_page.goto(origin + plan_path)
+            assert fallback_page.locator('[data-yard-3d-fallback]').is_visible()
+            assert fallback_page.locator('[data-yard-panel="0"]').is_visible()
+            unsupported.close()
+            result['checks'].append('Reduced-motion stage changes are instant; Canvas-unavailable and no-JS preserve original readable plane view')
             page.goto(origin + '/inventory/')
             assert page.locator('[data-grid-area="yard"] [data-yard-layer="1"] [data-cargo-id="C1"]').get_attribute('colspan') == '2'
             page.goto(origin + '/cargo/new/')
