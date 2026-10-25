@@ -86,7 +86,9 @@ class ProductWebHttpTests(unittest.TestCase):
                     admin, operator, viewer = (browser(role) for role in ('admin', 'operator', 'viewer'))
                     cargo_code = config['binding']['cargo_id']
                     operator('/cargo/new/')
-                    operator('/cargo/new/', dict(code=cargo_code, name='Synthetic HTTP cargo', weight_kg=1, volume_m3=1, destination='stand'))
+                    operator('/cargo/new/', dict(code=cargo_code, name='Synthetic HTTP cargo', length_cells=1,
+                        weight_kg=1, volume_m3=1, destination='stand'))
+                    self.assertTrue(Cargo.objects.filter(code=cargo_code).exists(), 'Cargo form did not save its synthetic fixture')
                     admin('/settings/conditions/new/')
                     admin('/settings/conditions/new/', dict(name='Synthetic HTTP installation', calibration_ref='synthetic-only', payload=json.dumps(dict(outbound_stand='stand', temporary_bays=['temp'], allowed_moves=[['yard', 'stand']], max_observation_age_seconds=300, conveyor='conveyor', arm_reach=[['A', 'yard'], ['A', 'stand']]))))
                     condition = Condition.objects.get()
