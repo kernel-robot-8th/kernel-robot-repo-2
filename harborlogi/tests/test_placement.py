@@ -98,6 +98,26 @@ class PlacementTests(unittest.TestCase):
         result = self.plan(source, policy, 2, {'base': (1, 1), 'top': (1, 2), 'incoming': (2, 1)})
         self.assertEqual(result.score, (2, 0, 3))
 
+    def test_crossing_bridge_counts_earlier_cargo_outside_incoming_column(self):
+        source, policy = scene(rows=1, columns=3, levels=3,
+            placements=(Placement('earlier', 'yard', 1, 1, 1),
+                        Placement('middle', 'yard', 1, 2, 1),
+                        Placement('right', 'yard', 1, 3, 1),
+                        Placement('bridge', 'yard', 1, 1, 2)), lengths={'bridge': 3})
+        # Only the far-right bridge cell can receive incoming cargo.
+        policy = replace(policy, arm_reach=frozenset({('A', 'Y1-3')}))
+        before = asdict(source)
+        result = self.plan(source, policy, schedule={'earlier': (1, 1), 'middle': (3, 1),
+            'right': (3, 2), 'bridge': (3, 3), 'incoming': (2, 1)})
+        self.assertEqual((result.recommendation.column, result.recommendation.level), (3, 3))
+        self.assertEqual(result.score, (1, 0, 3))
+        self.assertIn('KNOWN_EARLIER_OUTBOUND_BLOCKED:earlier', result.rationale)
+        unknown = self.plan(source, policy, schedule={'middle': (3, 1),
+            'right': (3, 2), 'bridge': (3, 3), 'incoming': (2, 1)})
+        self.assertEqual(unknown.score, (0, 1, 3))
+        self.assertIn('LOWER_OUTBOUND_ORDER_UNKNOWN:earlier', unknown.rationale)
+        self.assertEqual(asdict(source), before)
+
     def test_stale_future_holding_already_observed_and_full_are_atomic_holds(self):
         source, policy = scene()
         for changed in (replace(source, observed_at=NOW-timedelta(minutes=2)),

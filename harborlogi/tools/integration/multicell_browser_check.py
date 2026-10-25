@@ -154,6 +154,15 @@ def main():
             result['checks'].append('Cargo route step jumps to its preceding snapshot and animates only that step; manual motion can be stopped')
             result['checks'].append('3D Canvas renders six atomic cuboids; footprint selection, real projected hit selection, keyboard camera and complete explicit playback stay synchronized')
             result['checks'].append('Explicit stop snaps to selected endpoint; manual step interrupts automatic playback without another step')
+            from tools.integration.linked_yard_browser_checks import exercise_linked_views
+            result['checks'].extend(exercise_linked_views(page, output))
+            unobserved = services.register_condition(admin, name='Synthetic unobserved selection',
+                calibration_ref='synthetic-only', payload=policy)
+            page.goto(origin + f'/inventory/?condition={unobserved.pk}')
+            from tools.integration.linked_yard_browser_checks import exercise_unobserved_selection
+            result['checks'].extend(exercise_unobserved_selection(page, output))
+            page.goto(origin + plan_path)
+            page.locator('[data-yard-3d][data-ready=true]').wait_for()
             from tools.integration.workbench_browser_checks import exercise_workbench
             result['checks'].extend(exercise_workbench(page, output))
             revised = services.make_plan(operator, order_id=order.pk, expected_version=1, observation_id=observed.pk)
@@ -173,32 +182,33 @@ def main():
                 assert page.locator('canvas').is_visible()
                 assert not page.evaluate('document.documentElement.scrollWidth > innerWidth'), width
                 page.screenshot(path=str(output / f'{width}-3d.png'), full_page=True)
-                page.locator('[data-yard-view="flat"]').click()
-                source = page.locator('[data-yard-panel="0"]')
+                if width < 1200:
+                    page.locator('[data-yard-view="flat"]').click()
+                source = page.locator('[data-yard-linked-flat]')
                 yard = source.locator('[data-grid-area="yard"]')
-                first = yard.locator('[data-yard-layer="1"]')
+                first = yard.locator('table')
                 assert first.locator('[data-cargo-id="C1"]').count() == 1
-                assert first.locator('[data-cargo-id="C1"]').get_attribute('colspan') == '2'
+                assert first.locator('[data-cargo-id="C1"]').locator('..').get_attribute('colspan') == '2'
                 assert first.locator('[data-cargo-id="C5"]').count() == 1
-                assert first.locator('[data-cargo-id="C5"]').get_attribute('colspan') == '3'
+                assert first.locator('[data-cargo-id="C5"]').locator('..').get_attribute('colspan') == '3'
                 assert first.locator('.grid-cell').evaluate_all('(cells)=>cells.reduce((n,c)=>n+c.colSpan*c.rowSpan,0)') == 9
                 assert page.locator('form[data-command]').count() == 0
                 assert not page.evaluate('document.documentElement.scrollWidth > innerWidth'), width
                 page.screenshot(path=str(output / f'{width}-source.png'), full_page=True)
-                yard.locator('[data-yard-level="2"]').focus()
+                yard.locator('[data-linked-level="2"]').focus()
                 page.keyboard.press('Enter')
                 page.locator('[data-yard-stage="1"]').click()
-                step = page.locator('[data-yard-panel="1"]')
-                assert step.locator('[data-grid-area="yard"] [data-yard-layer="2"]').is_visible()
-                assert step.locator('[data-grid-area="temp"] [data-yard-layer="1"] [data-cargo-id="C2"]').is_visible()
+                step = page.locator('[data-yard-linked-flat]')
+                assert step.locator('[data-grid-area="yard"] [data-linked-level="2"]').get_attribute('aria-pressed') == 'true'
+                assert step.locator('[data-grid-area="temp"] [data-cargo-id="C2"]').is_visible()
                 page.locator('[data-yard-stage="2"]').click()
-                step = page.locator('[data-yard-panel="2"]')
+                step = page.locator('[data-yard-linked-flat]')
                 assert step.locator('[data-grid-area="yard"] [data-cargo-id="C1"]').count() == 0
-                assert step.locator('[data-grid-area="stand"] [data-cargo-id="C1"]').get_attribute('colspan') == '2'
+                assert step.locator('[data-grid-area="stand"] [data-cargo-id="C1"]').locator('..').get_attribute('colspan') == '2'
                 page.locator('[data-yard-stage="3"]').click()
-                step = page.locator('[data-yard-panel="3"]')
-                step.locator('[data-grid-area="yard"] [data-yard-level="1"]').click()
-                assert step.locator('[data-grid-area="yard"] [data-yard-layer="1"] [data-cargo-id="C2"]').count() == 1
+                step = page.locator('[data-yard-linked-flat]')
+                step.locator('[data-grid-area="yard"] [data-linked-level="1"]').click()
+                assert step.locator('[data-grid-area="yard"] [data-cargo-id="C2"]').count() == 1
                 assert step.locator('[data-grid-area="stand"] [data-cargo-id="C1"]').count() == 1
                 page.screenshot(path=str(output / f'{width}-expected.png'), full_page=True)
                 assert not page.evaluate('document.documentElement.scrollWidth > innerWidth'), width

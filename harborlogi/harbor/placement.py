@@ -83,6 +83,9 @@ def plan_placement(snapshot: SpatialSnapshot, incoming: CargoShape, policy: Spat
 
     incoming_rank = schedule.get(incoming.cargo_id)
     occupied = snapshot.occupied()
+    supporting = {p.cargo_id: {occupied[a, r, c, level-1]
+                              for a, r, c, level in snapshot.cells(p) if level > 1}
+                  for p in snapshot.placements}
     yard_bays = {(cell.row, cell.column): cell.bay_id for cell in snapshot.layout.cells}
     choices = []
     examined = 0
@@ -111,8 +114,14 @@ def plan_placement(snapshot: SpatialSnapshot, incoming: CargoShape, policy: Spat
                         # Use the observation validator as the final geometry/support authority.
                         replace(snapshot, shapes=snapshot.shapes+(incoming,),
                                 placements=snapshot.placements+(destination,))
-                        lower = {occupied[area_id, r, c, below] for _, r, c, _ in cells
-                                 for below in range(1, level) if (area_id, r, c, below) in occupied}
+                        lower = set()
+                        pending = [occupied[a, r, c, level-1] for a, r, c, level in cells if level > 1]
+                        # A crossing support can obstruct cargo outside the incoming footprint.
+                        while pending:
+                            cargo = pending.pop()
+                            if cargo not in lower:
+                                lower.add(cargo)
+                                pending.extend(supporting[cargo] - lower)
                         earlier = []
                         unknown = []
                         for cargo in sorted(lower):

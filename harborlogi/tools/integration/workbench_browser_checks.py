@@ -98,7 +98,8 @@ def exercise_workbench(page, output):
     assert figure.get_attribute('data-editing') == 'true'
     assert page.locator('[data-yard-stage="1"]').is_disabled()
     assert page.locator('[data-scene-play]').is_disabled()
-    assert page.locator('[data-yard-view="flat"]').is_disabled()
+    assert page.locator('[data-yard-view="flat"]').is_enabled()
+    assert page.locator('[data-yard-linked-flat]').get_attribute('data-source') == 'local-draft'
 
     def move(code, area, row, column, level, orientation=0):
         cargo.select_option(code)
@@ -328,9 +329,16 @@ def exercise_inbound_comparison(page, output):
         if request.method != 'GET':
             writes.append(request.method)
     page.on('request', observe)
+    from tools.integration.linked_yard_browser_checks import exercise_occupied_location
+    exercise_occupied_location(page, 1, incoming['id'],
+        {key: incoming[key] for key in ('area', 'row', 'column', 'level')})
+    page.locator('[data-scene-animate]').check()
     started = time.monotonic()
     play.click()
-    page.wait_for_function('() => Number(document.querySelector("[data-scene-progress]").dataset.progress) >= 25')
+    page.wait_for_function('''() => {
+      const progress = Number(document.querySelector('[data-scene-progress]').dataset.progress);
+      return document.querySelector('canvas').dataset.frame === '1' && progress >= 25 && progress < 100;
+    }''')
     assert play.get_attribute('aria-pressed') == 'true'
     assert progress.get_attribute('data-source') == '관측 출발 위치 없음'
     assert '배치 비교' in progress.get_attribute('data-phase')

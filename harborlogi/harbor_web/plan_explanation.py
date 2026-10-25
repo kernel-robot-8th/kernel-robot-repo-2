@@ -2,6 +2,7 @@
 from copy import deepcopy
 
 from harbor_web.models import Plan
+from harbor_web.recommendation_view import explain_optimization
 
 
 def _location(value):
@@ -77,7 +78,8 @@ def _current(plan):
         outbound_count=sum(s['phase'] == '반출' for r in routes.values() for s in r['steps']),
         rehandle_count=sum(any(s['phase'] == '재취급' for s in r['steps']) for r in routes.values()),
         restore_count=sum(s['phase'] == '복귀' for r in routes.values() for s in r['steps']),
-        status=result.get('status', ''), comparison=None)
+          status=result.get('status', ''), comparison=None,
+          optimization=explain_optimization(result.get('optimization')))
 
 
 def explain_plan(plan):

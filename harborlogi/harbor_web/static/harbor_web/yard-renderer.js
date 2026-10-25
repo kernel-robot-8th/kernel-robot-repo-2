@@ -55,6 +55,10 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
   const selectedMaterial = keep(new THREE.LineBasicMaterial({color: palette.blocker}));
   const floorMaterial = keep(new THREE.MeshStandardMaterial({color: palette.floor, roughness: 1}));
   const gridMaterial = keep(new THREE.LineBasicMaterial({color: palette.line}));
+  const markerMaterial = keep(new THREE.LineDashedMaterial({color:palette.blocker, dashSize:.12, gapSize:.07}));
+  const locationMarker = new THREE.LineSegments(edges, markerMaterial);
+  locationMarker.computeLineDistances(); locationMarker.scale.set(.94, .94, .94);
+  locationMarker.visible = false; scene.add(locationMarker);
   const models = new Map();
   const activePointers = new Set();
   let selected = null, isolated = null, editable = false, fitted = false;
@@ -213,7 +217,8 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
   }
   function bounds(id) {
     const result = new THREE.Box3();
-    if (id && models.has(id)) result.expandByObject(models.get(id).group);
+    if (id === '@location' && locationMarker.visible) result.expandByObject(locationMarker);
+    else if (id && models.has(id)) result.expandByObject(models.get(id).group);
     else {
       areas.forEach(a => {
         result.expandByPoint(new THREE.Vector3(a.x, 0, a.y));
@@ -341,6 +346,14 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     select(id) { selected = id; syncSelection(); },
     setMode(mode) { orbit.mouseButtons.LEFT = mode === 'pan' ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE; },
     setEditable(value) { editable = !!value; syncSelection(); },
+    selectLocation(position) {
+      const area = areas.find(area => area.id === position?.area);
+      locationMarker.visible = Boolean(area);
+      if (area) locationMarker.position.set(area.x + position.column - .5, position.level - .5, area.y + position.row - .5);
+      canvas.dataset.locationMarker = area ? JSON.stringify(position) : '';
+      invalidate();
+    },
+    fitLocation() { fit('@location'); },
     fit, view, zoom,
     isolate(id) { isolated = id || null; syncSelection(); },
     resize,

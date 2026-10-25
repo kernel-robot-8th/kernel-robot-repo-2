@@ -156,7 +156,8 @@ def main():
             assert page.get_by_text('배치 미관측', exact=True).count() > 0
             assert page.locator('[data-model-editor]').count() == 0
             assert page.locator('form [name=observation]').count() == 0
-            assert page.locator('[data-cargo-id]').count() == 0
+            assert page.locator('[data-cargo-id]:not([data-cargo-id=""])').count() == 0
+            assert page.locator('[data-yard-linked-flat]').get_attribute('data-source') == 'map-definition'
             page.screenshot(path=str(output / 'new-version-unobserved.png'), full_page=True)
             created = Condition.objects.get(pk=condition_id)
             assert created.payload['yard_layout']['columns'] == 4

@@ -180,6 +180,35 @@ class SpatialMove:
 
 
 @dataclass(frozen=True)
+class SpatialScore:
+    different_area_count: int
+    different_position_count: int
+    same_area_manhattan_distance: int
+    final_level_sum: int
+
+
+@dataclass(frozen=True)
+class SpatialAlternative:
+    score: SpatialScore
+    moves: tuple[SpatialMove, ...]
+
+
+@dataclass(frozen=True)
+class SpatialOptimization:
+    objective_version: str
+    score: SpatialScore | None
+    first_feasible_score: SpatialScore | None
+    alternatives: tuple[SpatialAlternative, ...]
+    expanded_states: int
+    examined_candidates: int
+    complete_plans_compared: int
+    search_complete: bool
+    budget_reason: str | None
+    state_limit: int
+    candidate_limit: int
+
+
+@dataclass(frozen=True)
 class SpatialProposal:
     status: str
     reason: str
@@ -188,11 +217,17 @@ class SpatialProposal:
     required_completion: tuple[str, ...] = (
         'outbound_placed_on_stand', 'rehandles_restored', 'arms_retreated',
     )
+    optimization: SpatialOptimization | None = None
 
 
 def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: SpatialPolicy,
                  *, now: datetime) -> SpatialProposal:
-    """Search complete legal plans; exhausted or impossible searches emit no moves."""
+    """Compare complete legal plans by restoration cost, then full move signature.
+
+    The objective counts changed areas, changed row/column anchors, same-area
+    Manhattan displacement, and final levels, in that lexicographic order.
+    A bounded search returns its best complete incumbent, never a partial plan.
+    """
     aware_time(now)
     areas = {a.area_id: a for a in snapshot.areas}
     referenced = {policy.outbound_area, *policy.temporary_areas, *policy.storage_areas}
@@ -232,9 +267,12 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
                 pending.append(above)
     blockers = dependencies - {target.cargo_id}
     originals = {p.cargo_id: p for p in snapshot.placements}
-    visited = set()
+    visited = {}
     count = 0
     candidates = 0
+    complete = 0
+    alternatives = []
+    first_score = None
 
     def reach(p):
         if p.area_id != 'yard':
@@ -252,9 +290,9 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
             for level in range(1, area.levels+1):
                 for row in range(1, area.rows+1):
                     for column in range(1, area.columns+1):
+                        if candidates >= SPATIAL_CANDIDATE_LIMIT:
+                            raise SearchLimit('CANDIDATE_LIMIT')
                         candidates += 1
-                        if candidates > SPATIAL_CANDIDATE_LIMIT:
-                            raise SearchLimit
                         choices.append(Placement(cargo, area_id, row, column, level, origin.orientation))
         if restore:
             original = originals[cargo]
@@ -267,17 +305,44 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
     class SearchLimit(Exception):
         pass
 
-    def search(current, remaining, restoring, exported):
-        nonlocal count
+    def placement_signature(p):
+        return (p.cargo_id, p.area_id, p.row, p.column, p.level, p.orientation)
+
+    def move_signature(move):
+        return (move.cargo_id, move.source, move.destination, move.primary_arm,
+                move.alternate_arms, placement_signature(move.source_placement),
+                placement_signature(move.destination_placement), move.phase_label,
+                move.footprint_revision)
+
+    def score(current):
+        restored = [(originals[cargo], current.placement(cargo)) for cargo in sorted(blockers)]
+        values = (sum(a.area_id != b.area_id for a, b in restored),
+                  sum((a.row, a.column) != (b.row, b.column) for a, b in restored),
+                  sum(abs(a.row-b.row) + abs(a.column-b.column) for a, b in restored
+                      if a.area_id == b.area_id),
+                  sum(b.level for _, b in restored))
+        return values, SpatialScore(*values)
+
+    def search(current, remaining, restoring, exported, moves, signature):
+        nonlocal count, complete, first_score
+        if count >= SPATIAL_SEARCH_LIMIT:
+            raise SearchLimit('STATE_LIMIT')
         count += 1
-        if count > SPATIAL_SEARCH_LIMIT:
-            raise SearchLimit
         if exported and not restoring:
-            return ()
-        key = (current.placements, remaining, restoring, exported)
-        if key in visited:
-            return None
-        visited.add(key)
+            values, result_score = score(current)
+            complete += 1
+            if first_score is None:
+                first_score = result_score
+            alternatives.append((values, signature, SpatialAlternative(result_score, moves)))
+            alternatives.sort(key=lambda item: item[:2])
+            del alternatives[5:]
+            return
+        key = (tuple(sorted(placement_signature(p) for p in current.placements)),
+               remaining, restoring, exported)
+        # Equal states have identical future costs; only a better prefix can improve a tie.
+        if key in visited and visited[key] <= signature:
+            return
+        visited[key] = signature
         occupied = current.occupied()
         if remaining:
             tasks = [(cargo, policy.temporary_areas, '재취급') for cargo in sorted(remaining)]
@@ -299,19 +364,23 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
                 arms = tuple(a for a in YARD_ARMS if all((a, loc) in policy.arm_reach for loc in locations))
                 if not arms:
                     continue
-                result = search(projected, remaining-{cargo},
-                                restoring-{cargo} if exported else restoring, exported or cargo == target.cargo_id)
-                if result is not None:
-                    move = SpatialMove(cargo, current.position_id(origin), current.position_id(destination),
-                                       arms[0], arms[1:], origin, destination, phase,
-                                       snapshot.shape(cargo).footprint_revision)
-                    return (move,) + result
-        return None
+                move = SpatialMove(cargo, current.position_id(origin), current.position_id(destination),
+                                   arms[0], arms[1:], origin, destination, phase,
+                                   snapshot.shape(cargo).footprint_revision)
+                search(projected, remaining-{cargo},
+                       restoring-{cargo} if exported else restoring, exported or cargo == target.cargo_id,
+                       moves + (move,), signature + (move_signature(move),))
 
+    budget_reason = None
     try:
-        moves = search(snapshot, frozenset(blockers), frozenset(blockers), False)
-    except SearchLimit:
-        return hold('SPATIAL_SEARCH_LIMIT_REACHED')
-    if moves is None:
-        return hold('NO_LEGAL_SPATIAL_PLAN')
-    return SpatialProposal('READY', 'PROPOSAL_REQUIRES_ADMISSION_AND_EVIDENCE', snapshot.revision, moves)
+        search(snapshot, frozenset(blockers), frozenset(blockers), False, (), ())
+    except SearchLimit as exc:
+        budget_reason = str(exc)
+    report = SpatialOptimization('restoration_lex_v1', alternatives[0][2].score if alternatives else None,
+        first_score, tuple(item[2] for item in alternatives), count, candidates, complete,
+        budget_reason is None, budget_reason, SPATIAL_SEARCH_LIMIT, SPATIAL_CANDIDATE_LIMIT)
+    if not alternatives:
+        reason = 'SPATIAL_SEARCH_LIMIT_REACHED' if budget_reason else 'NO_LEGAL_SPATIAL_PLAN'
+        return replace(hold(reason), optimization=report)
+    return SpatialProposal('READY', 'PROPOSAL_REQUIRES_ADMISSION_AND_EVIDENCE', snapshot.revision,
+                           alternatives[0][2].moves, optimization=report)
