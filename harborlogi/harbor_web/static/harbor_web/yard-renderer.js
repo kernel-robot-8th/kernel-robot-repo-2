@@ -51,8 +51,10 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
   const floorMaterial = keep(new THREE.MeshStandardMaterial({color: palette.floor, roughness: 1}));
   const gridMaterial = keep(new THREE.LineBasicMaterial({color: palette.line}));
   const models = new Map();
+  const activePointers = new Set();
   let selected = null, isolated = null, editable = false, fitted = false;
-  let disposed = false, failed = false, raf = 0, pointer = null, draggedGizmo = false, revision = 0, renderRevision = 0;
+  let disposed = false, failed = false, raf = 0, pointer = null, multiPointer = false,
+    draggedGizmo = false, revision = 0, renderRevision = 0;
 
   function invalidate() {
     if (!disposed && !failed && !raf) raf = requestAnimationFrame(draw);
@@ -244,6 +246,9 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
   const raycaster = new THREE.Raycaster();
   function pointerDown(event) {
     if (event.button !== 0) return;
+    activePointers.add(event.pointerId);
+    if (activePointers.size > 1) multiPointer = true;
+    if (multiPointer) { pointer = null; return; }
     pointer = {x: event.clientX, y: event.clientY, id: event.pointerId, moved: false};
     draggedGizmo = transform.dragging || !!transform.axis;
   }
@@ -251,8 +256,16 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     if (pointer?.id === event.pointerId && Math.hypot(pointer.x - event.clientX, pointer.y - event.clientY) > 5)
       pointer.moved = true;
   }
-  function pointerCancel() { pointer = null; }
+  function pointerCancel(event) {
+    activePointers.delete(event.pointerId);
+    if (!activePointers.size) multiPointer = false;
+    pointer = null;
+  }
   function pointerUp(event) {
+    activePointers.delete(event.pointerId);
+    const suppressPick = multiPointer;
+    if (!activePointers.size) multiPointer = false;
+    if (suppressPick) { pointer = null; return; }
     if (!pointer || pointer.id !== event.pointerId) return;
     const start = pointer; pointer = null;
     if (draggedGizmo || start.moved || Math.hypot(start.x - event.clientX, start.y - event.clientY) > 5) return;

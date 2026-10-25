@@ -123,6 +123,18 @@ def exercise_workbench(page, output):
     page.screenshot(path=str(output / 'gizmo-moved.png'), full_page=True)
     edit.click()
     page.locator('[data-scene-action="isolate"]').click()
+    cargo.select_option('')
+    canvas.scroll_into_view_if_needed()
+    touch = page.context.new_cdp_session(page)
+    touch.send('Emulation.setTouchEmulationEnabled', dict(enabled=True, maxTouchPoints=2))
+    box = canvas.bounding_box()
+    x, y = box['x'] + box['width'] * .5, box['y'] + box['height'] * .5
+    touch.send('Input.dispatchTouchEvent', dict(type='touchStart', touchPoints=[dict(x=x-25, y=y, id=1), dict(x=x+25, y=y, id=2)]))
+    touch.send('Input.dispatchTouchEvent', dict(type='touchMove', touchPoints=[dict(x=x-65, y=y-15, id=1), dict(x=x+25, y=y, id=2)]))
+    touch.send('Input.dispatchTouchEvent', dict(type='touchEnd', touchPoints=[]))
+    touch.send('Emulation.setTouchEmulationEnabled', dict(enabled=False))
+    touch.detach()
+    assert cargo.input_value() == '', 'Two-finger camera gesture must not select a box on the stationary finger'
     page.locator('[data-scene-action="fit"]').click()
     if page.locator('[data-scene-action="fullscreen"]').is_visible():
         page.locator('[data-scene-action="fullscreen"]').click()
@@ -131,6 +143,6 @@ def exercise_workbench(page, output):
         page.wait_for_function('() => !document.fullscreenElement')
     assert page.locator('#yard-scene-data').text_content() == source
     assert not requests, requests
-    return ['WebGL camera pan/presets/zoom, selection focus/isolation and fullscreen work',
+    return ['WebGL camera pan/presets/zoom, selection focus/isolation and fullscreen work; two-finger motion does not select cargo',
             'Local drafts enforce footprint boundaries, overlaps, full support and restoration; original JSON and server stay unchanged',
             'Actual rendered translation handle moves and snaps one cargo; no injected transform or mocked renderer']
