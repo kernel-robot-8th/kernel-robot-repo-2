@@ -1,0 +1,1 @@
+<a href="{{ href }}" aria-label="{{ label }}" data-nav-tip="{{ label }} · {{ hint }}" title="{{ label }} · {{ hint }}" {% if utility %}class="utility"{% endif %} {% if section == key %}aria-current="page"{% endif %}>{% include 'nav_icon.html' with icon=key %}<span class="nav-label">{{ label }}</span></a>

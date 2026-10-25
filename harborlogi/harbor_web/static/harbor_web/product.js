@@ -4,14 +4,63 @@ const toggle = document.getElementById('nav-toggle');
 const navigation = document.getElementById('navigation');
 if (toggle && navigation) {
   toggle.hidden = false;
-  const close = () => { toggle.setAttribute('aria-expanded', 'false'); document.body.classList.remove('nav-open'); };
+  const close = () => { toggle.setAttribute('aria-expanded', 'false'); toggle.textContent = '메뉴 열기'; document.body.classList.remove('nav-open'); };
   toggle.addEventListener('click', () => {
     const open = toggle.getAttribute('aria-expanded') !== 'true';
     toggle.setAttribute('aria-expanded', String(open));
+    toggle.textContent = open ? '메뉴 닫기' : '메뉴 열기';
     document.body.classList.toggle('nav-open', open);
     if (open) navigation.querySelector('a')?.focus();
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && document.body.classList.contains('nav-open')) { close(); toggle.focus(); } });
+}
+
+const density = document.querySelector('[data-nav-density]');
+const navTooltip = document.getElementById('nav-tooltip');
+if (density && navigation && navTooltip) {
+  let compact = true, active = null, hideTimer = 0;
+  const desktop = matchMedia('(min-width: 901px)');
+  try { compact = localStorage.getItem('harbor.nav.compact') !== 'false'; } catch (_) {}
+  const setDensity = () => {
+    document.body.classList.toggle('nav-compact', compact);
+    density.setAttribute('aria-expanded', String(!compact));
+    density.setAttribute('aria-label', compact ? '메뉴 이름 펼치기' : '메뉴 이름 접기');
+  };
+  const hideTip = () => {
+    clearTimeout(hideTimer); navTooltip.hidden = true;
+    active?.removeAttribute('aria-describedby'); active = null;
+  };
+  const showTip = link => {
+    hideTip();
+    if (!desktop.matches) return;
+    active = link; navTooltip.textContent = link.dataset.navTip; navTooltip.hidden = false;
+    link.setAttribute('aria-describedby', 'nav-tooltip');
+    const rect = link.getBoundingClientRect(), tip = navTooltip.getBoundingClientRect();
+    navTooltip.style.left = Math.max(12, Math.min(rect.right + 12, innerWidth - tip.width - 12)) + 'px';
+    navTooltip.style.top = Math.max(12, Math.min(rect.top + (rect.height - tip.height) / 2, innerHeight - tip.height - 12)) + 'px';
+  };
+  const deferHide = () => {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => { if (document.activeElement !== active) hideTip(); }, 120);
+  };
+  navigation.querySelectorAll('[data-nav-tip]').forEach(link => {
+    link.removeAttribute('title');
+    link.addEventListener('pointerenter', () => showTip(link));
+    link.addEventListener('focus', () => showTip(link));
+    link.addEventListener('pointerleave', deferHide);
+    link.addEventListener('blur', deferHide);
+    link.addEventListener('click', hideTip);
+  });
+  navTooltip.addEventListener('pointerenter', () => clearTimeout(hideTimer));
+  navTooltip.addEventListener('pointerleave', deferHide);
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') hideTip(); });
+  navigation.addEventListener('scroll', hideTip);
+  window.addEventListener('resize', hideTip);
+  density.addEventListener('click', () => {
+    compact = !compact; setDensity(); hideTip();
+    try { localStorage.setItem('harbor.nav.compact', String(compact)); } catch (_) {}
+  });
+  density.hidden = false; setDensity();
 }
 document.querySelectorAll('form[data-command]').forEach(form => {
   form.addEventListener('submit', event => {

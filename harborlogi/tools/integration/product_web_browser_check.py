@@ -327,6 +327,10 @@ def main():
             assert added.groups.filter(name='viewer').exists()
             assert not added.groups.filter(name='operator').exists()
             assert not admin_errors, admin_errors
+            visit(admin_page, '/outbound/')
+            from navigation_browser_checks import exercise_navigation
+            exercise_navigation(admin_page)
+            result['checks'].append('Icon navigation: hover/focus tooltip, hoverable content, Escape, density persistence, tablet/mobile labels')
             result['checks'].append('Staff plus explicit admin creates a team account and assigns viewer via real admin UI; no implicit operator; no admin CSP/console errors')
             assert page.request.get(origin + '/settings/').status == 403
             result['checks'].append('Four viewports, nav/Escape/focus, styles, labels, direct/reload/back, invalid retention, images/favicon, server role checks and POST logout')
