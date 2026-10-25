@@ -52,11 +52,12 @@ Files: browser check and validation record; `PRODUCT.md`, `DESIGN.md`, design in
 - [x] Run full domain unittest, product Django tests, token check and whitespace check once changes stabilize.
 - [x] Inspect desktop/tablet/mobile screenshots; correct observed issues.
 - [x] Obtain one fresh-context whole-branch review and address material findings with regression checks.
-- [ ] Record supported behavior and remaining operational contracts without claiming full UR/SR or field acceptance. Evaluate CE gate.
-- [ ] Commit, locally integrate as previously authorized, and restart the isolated loopback preview for the user.
+- [x] Record supported behavior and remaining operational contracts without claiming full UR/SR or field acceptance. Evaluate CE gate.
+- [x] Commit, locally integrate as previously authorized, and restart the isolated loopback preview for the user.
 
 ## Execution ledger
 
 - Ruling: Continue the existing approved Django/brand work in its clean isolated worktree on `feat/outbound-workspace`; do not reset to remote and lose already integrated local product work.
 - Ruling: User approved the immediately preceding concrete workspace proposal; do not repeat design permission questions already settled by this request.
 - Review: Two Important findings reproduced as failing tests: original execution versus displayed-plan completion subjects; queue/home freshness. Both fixed and independently confirmed. Final workspace suite12, Django suite84, domain117(skip2), browser four widths and no-JS passed. Execution services and Fleet contracts were not expanded.
+- Evidence: `docs/validation/2026-10-25-outbound-workspace.md`. CE: not applicable; the fixes are fully explained by code and regression tests. Keep this existing worktree for the running preview and preserve the feature branch as a review reference; no remote publish is included.
