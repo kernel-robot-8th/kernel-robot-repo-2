@@ -1,0 +1,16 @@
+{
+  "rows": 3,
+  "columns": 3,
+  "levels": 3,
+  "cells": [
+    {"bay_id": "Y11", "row": 1, "column": 1},
+    {"bay_id": "Y12", "row": 1, "column": 2},
+    {"bay_id": "Y13", "row": 1, "column": 3},
+    {"bay_id": "Y21", "row": 2, "column": 1},
+    {"bay_id": "Y22", "row": 2, "column": 2},
+    {"bay_id": "Y23", "row": 2, "column": 3},
+    {"bay_id": "Y31", "row": 3, "column": 1},
+    {"bay_id": "Y32", "row": 3, "column": 2},
+    {"bay_id": "Y33", "row": 3, "column": 3}
+  ]
+}

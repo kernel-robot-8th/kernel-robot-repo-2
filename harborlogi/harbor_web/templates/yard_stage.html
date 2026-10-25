@@ -1,13 +1,11 @@
 <section class="yard-stage" id="{{ stage.panel_id }}" data-yard-panel="{{ stage.index }}" aria-label="{{ stage.label }}">
   <div class="yard-stage-heading"><h3>{{ stage.label }}</h3>{% if stage.index %}<span class="badge">예상 · 실제 위치 아님</span>{% else %}<span class="badge">고정된 원본</span>{% endif %}</div>
-  {% if stage.move %}<p class="stage-description"><strong>{{ stage.move.cargo_id }}</strong> · {{ stage.move.source }} → {{ stage.move.destination }} · 계획한 팔 {{ stage.move.primary_arm }}</p>{% endif %}
-  <div class="yard-grid">
-    {% for bay in stage.bays %}<section class="yard-zone {% if bay.kind == '반출대' %}outbound-zone{% endif %}">
-      <div class="zone-heading"><div><span>{{ bay.kind }}</span><h4>{{ bay.bay_id }}</h4></div><span class="zone-capacity">{{ bay.cargo|length }}/{{ bay.capacity }}단</span></div>
-      <ol class="cargo-stack" aria-label="{{ bay.bay_id }} · 아래부터 1단">
-        {% for cell in bay.cells %}<li class="cargo-cell {{ cell.role }}"><span class="cargo-level">{{ cell.level }}단</span><strong>{{ cell.code }}</strong><span class="cargo-purpose">{{ cell.label }}</span></li>{% empty %}<li class="empty-slot">보관 화물 없음</li>{% endfor %}
-      </ol>
-      <p class="zone-space">빈 단 {{ bay.free }} / {{ bay.capacity }}</p>
-    </section>{% endfor %}
-  </div>
+  {% if stage.move %}<p class="stage-description"><strong>{{ stage.move.cargo_id }}</strong> · {{ stage.move.source }} {{ stage.move.source_level }}층 → {{ stage.move.destination }} {{ stage.move.destination_level }}층 · 계획한 팔 {{ stage.move.primary_arm }}</p>{% endif %}
+  {% if stage.layout %}
+    {% include 'yard_grid.html' %}
+    {% if stage.auxiliary_bays %}<h4 class="auxiliary-heading">맵 밖 보조 위치</h4><div class="yard-grid yard-auxiliary">{% for bay in stage.auxiliary_bays %}{% include 'bay_stack.html' %}{% endfor %}</div>{% endif %}
+  {% else %}
+    <p class="helptext">배치 좌표 미등록 · 원본 칸 목록입니다. ID나 나열 순서로 행·열을 추측하지 않습니다.</p>
+    <div class="yard-grid">{% for bay in stage.bays %}{% include 'bay_stack.html' %}{% endfor %}</div>
+  {% endif %}
 </section>

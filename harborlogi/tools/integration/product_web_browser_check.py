@@ -49,13 +49,13 @@ def main():
     op, admin = users['operator'], users['admin']
     for code in ['C1', 'C2'] + [f'PAG-{i:02}' for i in range(27)]:
         services.register_cargo(op, code=code, name='Browser synthetic cargo', weight_kg='1', volume_m3='1', destination='yard')
-    condition = services.register_condition(admin, name='Browser synthetic installation', calibration_ref='synthetic-browser-only', payload={
-        'outbound_stand': 'out', 'temporary_bays': ['temp'],
-        'allowed_moves': [['bay', 'out'], ['bay', 'temp'], ['temp', 'bay']],
-        'max_observation_age_seconds': 3600, 'conveyor': 'belt',
-        'arm_reach': [['A', 'bay'], ['A', 'temp'], ['A', 'out']]})
+    policy = json.loads((ROOT / 'config/yard-grid.example.json').read_text(encoding='utf-8'))
+    policy['yard_layout'] = json.loads((ROOT / 'config/yard-layout.json').read_text(encoding='utf-8'))
+    condition = services.register_condition(admin, name='Browser synthetic installation', calibration_ref='synthetic-browser-only', payload=policy)
+    bays = [dict(bay_id=c['bay_id'], cargo=['C1', 'C2'] if c['bay_id'] == 'Y11' else [], capacity=3) for c in policy['yard_layout']['cells']]
+    bays += [dict(bay_id='temp', cargo=[], capacity=3), dict(bay_id='stand', cargo=[], capacity=1)]
     observed = services.record_observation(admin, source_id='browser-synthetic', source_revision='browser-1', observed_at=timezone.now(), provenance='SYNTHETIC', condition=condition,
-        payload={'bays': [{'bay_id': 'bay', 'cargo': ['C1', 'C2'], 'capacity': 2}, {'bay_id': 'temp', 'cargo': [], 'capacity': 2}, {'bay_id': 'out', 'cargo': [], 'capacity': 1}], 'holdings': []})
+        payload={'bays': bays, 'holdings': []})
     inbound = services.create_order(op, cargo=Cargo.objects.get(code='C2'), kind='INBOUND', priority_group=9, sequence=1, tie_policy='FIXED')
     measurement_fields = dict(scenario='browser', conditions_ref='same-condition', initial_layout_ref='same-layout', information_ref='same-information', baseline_reach_verified=True, provenance='MEASURED', source_ref='browser-fixture-reference', vehicle_transfers=None, human_interventions=None, elapsed_seconds=None)
     left = services.record_measurement(op, label='Browser baseline', method='BASELINE', **measurement_fields)
@@ -151,8 +151,18 @@ def main():
             assert page.locator('[data-yard-panel="3"]').is_visible()
             assert page.locator('[data-yard-panel="0"]').is_hidden()
             assert page.locator('[data-yard-panel="3"] .outbound-zone .cargo-cell.target strong').inner_text() == 'C1'
-            assert page.locator('[data-yard-panel="3"] .yard-zone').first.locator('.cargo-cell strong').all_text_contents() == ['C2']
+            assert page.locator('[data-yard-panel="3"] [data-yard-layer="1"] [data-grid-bay="Y11"] [data-grid-cargo]').inner_text() == 'C2'
+            assert page.locator('[data-yard-panel="3"] [data-yard-layer="1"] .grid-cell').count() == 9
             assert '예상 배치' in page.locator('[data-yard-status]').inner_text()
+            page.locator('[data-yard-panel="3"] [data-yard-level="2"]').focus()
+            page.keyboard.press('Enter')
+            page.locator('[data-yard-stage="0"]').click()
+            assert page.locator('[data-yard-panel="0"] [data-yard-layer="2"]').is_visible()
+            assert page.locator('[data-yard-panel="0"] [data-yard-layer="2"] [data-grid-bay="Y11"] [data-grid-cargo]').inner_text() == 'C2'
+            page.locator('[data-yard-panel="0"] [data-yard-level="3"]').click()
+            assert page.locator('[data-yard-panel="0"] [data-yard-layer="3"] .grid-cell').count() == 9
+            page.locator('[data-yard-panel="0"] [data-yard-level="1"]').click()
+            assert '저장된 원본' in page.locator('[data-yard-status]').inner_text()
             observed.refresh_from_db()
             assert observed.payload['bays'][0]['cargo'] == ['C1', 'C2'] and not Command.objects.exists()
             page.locator('[data-yard-stage="0"]').click()
@@ -161,12 +171,13 @@ def main():
             assert page.locator('.action-table tbody tr').count() == 1
             page.get_by_role('link', name='야드·계획·근거 확인', exact=True).click()
             assert f'/requests/{outbound.pk}/' in page.url
-            result['checks'].append('Task workspace, filtered outbound queue, four keyboard-selectable yard stages, target outbound/blocker restoration, original observation unchanged, execution closed')
+            result['checks'].append('Configured 3x3x3 yard with27 positions, keyboard layer selection, retained level across plan stages, target outbound/blocker restoration, unchanged original observation, execution closed')
             no_js_context = browser.new_context(java_script_enabled=False)
             no_js = no_js_context.new_page()
             login(no_js, 'viewer')
             visit(no_js, f'/plans/{plan.pk}/')
             assert no_js.locator('[data-yard-panel]:visible').count() == 4
+            assert no_js.locator('[data-yard-layer]:visible').count() == 12
             assert no_js.locator('[data-yard-stage]:visible').count() == 0
             assert no_js.locator('.transfer-list > li').count() == 3
             assert no_js.get_by_role('heading', name='실행과 업무 완료 근거', exact=True).is_visible()
@@ -255,6 +266,11 @@ def main():
                 visit(viewport, f'/plans/{plan.pk}/')
                 assert not viewport.evaluate('document.documentElement.scrollWidth > innerWidth'), (name, 'workspace')
                 capture(viewport, name + '-plan.png')
+                assert viewport.locator('[data-yard-panel="0"] [data-yard-layer="1"] .grid-cell').count() == 9
+                viewport.locator('[data-yard-panel="0"] [data-yard-level="3"]').click()
+                assert not viewport.evaluate('document.documentElement.scrollWidth > innerWidth'), (name, 'grid-level-3')
+                capture(viewport, name + '-layer-3.png')
+                viewport.locator('[data-yard-panel="0"] [data-yard-level="1"]').click()
                 viewport.locator('[data-yard-stage="3"]').click()
                 assert viewport.locator('[data-yard-panel="3"]').is_visible()
                 capture(viewport, name + '-expected.png')

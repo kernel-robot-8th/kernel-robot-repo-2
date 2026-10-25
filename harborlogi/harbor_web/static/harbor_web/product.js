@@ -47,3 +47,21 @@ document.querySelectorAll('[data-yard-preview]').forEach(preview => {
   });
   select(controls[0]);
 });
+
+document.querySelectorAll('[data-yard-preview]').forEach(preview => {
+  const controls = [...preview.querySelectorAll('[data-yard-level]')];
+  const layers = [...preview.querySelectorAll('[data-yard-layer]')];
+  if (!controls.length || !layers.length) return;
+  const selectLevel = level => {
+    controls.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.yardLevel === level)));
+    layers.forEach(layer => { layer.hidden = layer.dataset.yardLayer !== level; });
+    preview.querySelectorAll('[data-layer-status]').forEach(status => {
+      status.textContent = `현재 ${level}층 · 칸의 행·열 주소와 원본 관측은 유지됩니다. 1층은 바닥층입니다.`;
+    });
+  };
+  controls.forEach(button => {
+    button.hidden = false;
+    button.addEventListener('click', () => selectLevel(button.dataset.yardLevel));
+  });
+  selectLevel('1');
+});

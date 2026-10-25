@@ -73,7 +73,7 @@ def capability(plan):
             raise ValidationError('PLAN_NOT_READY')
         if plan.order.version != plan.order_version or plan.queue_digest != queue_digest():
             raise ValidationError('PLAN_QUEUE_CHANGED')
-        if Observation.objects.filter(source_id=plan.observation.source_id, condition=plan.condition, pk__gt=plan.observation_id).exists():
+        if Observation.objects.filter(source_id=plan.observation.source_id, pk__gt=plan.observation_id).exists():
             raise ValidationError('OBSERVATION_REVISION_CHANGED')
         age = timezone.now() - plan.observation.observed_at
         if not timezone.timedelta(0) <= age <= constraints(plan.condition.payload).max_observation_age:

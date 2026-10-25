@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from harbor_web import commands, forms, services
 from harbor_web.models import Audit, Command, Observation, Plan
+from harbor_web.yard_view import yard_view
 
 
 COMMAND_LABELS = {
@@ -22,8 +23,7 @@ def plan_changes(order, plan, *, current_queue_digest=None):
         current_queue_digest = services.queue_digest()
     if order.version != plan.order_version or plan.queue_digest != current_queue_digest:
         changes.append(dict(code='PLAN_QUEUE_CHANGED', message='검토 후 업무 지시가 변경되었습니다. 최신 지시로 계획을 다시 검토하세요.'))
-    if Observation.objects.filter(source_id=plan.observation.source_id, condition_id=plan.condition_id,
-                                  pk__gt=plan.observation_id).exists():
+    if Observation.objects.filter(source_id=plan.observation.source_id, pk__gt=plan.observation_id).exists():
         changes.append(dict(code='OBSERVATION_REVISION_CHANGED', message='같은 출처에 새 관측이 있습니다. 아래 그림은 계획에 고정된 이전 원본입니다.'))
     age = timezone.now() - plan.observation.observed_at
     if not timezone.timedelta(0) <= age <= services.constraints(plan.condition.payload).max_observation_age:
@@ -43,14 +43,7 @@ def _yard_stages(order, plan, source):
     bays = deepcopy(source.payload['bays'])
 
     def stage(index, phase, label, move=None):
-        result = deepcopy(bays)
-        for bay in result:
-            bay['kind'] = '반출대' if bay['bay_id'] == policy['outbound_stand'] else '임시 장치' if bay['bay_id'] in policy['temporary_bays'] else '장치 칸'
-            bay['free'] = bay['capacity'] - len(bay['cargo'])
-            bay['cells'] = [dict(code=code, level=i + 1, role='target' if code == target else 'blocker' if code in blockers else 'stored',
-                                 label='반출 대상' if code == target else '재취급 대상' if code in blockers else '보관 화물')
-                            for i, code in enumerate(bay['cargo'])]
-        return dict(index=index, phase=phase, label=label, bays=result, move=move,
+        return dict(yard_view(bays, policy, target=target, blockers=blockers), index=index, phase=phase, label=label, move=move,
                     panel_id=f'yard-{order.pk}-{index}')
 
     stages = [stage(0, '관측', '관측한 배치')]
@@ -59,9 +52,10 @@ def _yard_stages(order, plan, source):
     display_moves = []
     for i, move in enumerate(moves):
         phase = '재취급' if i < outbound_index else '반출' if i == outbound_index else '복귀'
-        display = dict(move, number=i + 1, phase_label=phase)
-        display_moves.append(display)
         by_id = {b['bay_id']: b for b in bays}
+        display = dict(move, number=i + 1, phase_label=phase,
+                       source_level=len(by_id[move['source']]['cargo']), destination_level=len(by_id[move['destination']]['cargo']) + 1)
+        display_moves.append(display)
         by_id[move['source']]['cargo'].remove(move['cargo_id'])
         by_id[move['destination']]['cargo'].append(move['cargo_id'])
         stages.append(stage(i + 1, phase, f'{i + 1}단계 후 예상 · {phase}', display))

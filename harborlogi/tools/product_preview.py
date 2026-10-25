@@ -43,14 +43,23 @@ def main():
             user.set_password(values['password'])
             user.save()
             user.groups.add(*Group.objects.filter(name__in=['viewer', 'operator', 'field', 'admin']))
-        for code, name in [('C1', '우선 반출 화물'), ('C2', '상단 재취급 화물'), ('C3', '공급 인계 확인 화물')]:
+        for code, name in [('C1', '우선 반출 화물'), ('C2', '상단 재취급 화물'), ('C3', '공급 인계 확인 화물'),
+                           ('C4', '중앙 보관 화물'), ('C5', '하단 보관 화물'), ('C6', '중단 보관 화물'), ('C7', '상단 보관 화물')]:
             if not Cargo.objects.filter(code=code).exists():
                 services.register_cargo(user, code=code, name=name, weight_kg=2, volume_m3='0.012', destination='반출대 · 합성 시험')
-        condition = Condition.objects.filter(name='합성 야드 · A/B 반출 검토용').first()
+        layout = json.loads((root / 'config/yard-layout.json').read_text(encoding='utf-8'))
+        policy = json.loads((root / 'config/yard-grid.example.json').read_text(encoding='utf-8'))
+        policy['yard_layout'] = layout
+        condition = Condition.objects.filter(name='3×3×3 논리 야드 · 합성 관측 검토용').order_by('-id').first()
         if condition is None:
-            condition = services.register_condition(user, name='합성 야드 · A/B 반출 검토용', calibration_ref='synthetic-only-not-field-calibration', payload=dict(outbound_stand='반출대', temporary_bays=['임시 칸'], allowed_moves=[['보관 칸', '임시 칸'], ['임시 칸', '보관 칸'], ['보관 칸', '반출대']], max_observation_age_seconds=1800, conveyor='컨베이어', arm_reach=[['A', '보관 칸'], ['A', '임시 칸'], ['B', '보관 칸'], ['B', '반출대']]))
+            condition = services.register_condition(user, name='3×3×3 논리 야드 · 합성 관측 검토용', calibration_ref='synthetic-only-not-field-calibration', payload=policy)
+        elif condition.payload != policy:
+            condition = services.register_condition(user, name='3×3×3 논리 야드 · 합성 관측 검토용', calibration_ref='synthetic-only-not-field-calibration', payload=policy)
         now = timezone.now()
-        observation = services.record_observation(user, source_id='synthetic-preview-camera', source_revision=now.isoformat(), observed_at=now, provenance='SYNTHETIC', condition=condition, payload=dict(bays=[dict(bay_id='보관 칸', cargo=['C1', 'C2'], capacity=3), dict(bay_id='임시 칸', cargo=[], capacity=2), dict(bay_id='반출대', cargo=[], capacity=1)], holdings=[]))
+        contents = {'Y11': ['C1', 'C2'], 'Y22': ['C4'], 'Y33': ['C5', 'C6', 'C7']}
+        bays = [dict(bay_id=cell['bay_id'], cargo=contents.get(cell['bay_id'], []), capacity=3) for cell in layout['cells']]
+        bays += [dict(bay_id=policy['temporary_bays'][0], cargo=[], capacity=3), dict(bay_id=policy['outbound_stand'], cargo=[], capacity=1)]
+        observation = services.record_observation(user, source_id='synthetic-preview-camera', source_revision=now.isoformat(), observed_at=now, provenance='SYNTHETIC', condition=condition, payload=dict(bays=bays, holdings=[]))
         order = Order.objects.filter(cargo__code='C1', kind='OUTBOUND').first()
         if order is None:
             order = services.create_order(user, cargo=Cargo.objects.get(code='C1'), kind='OUTBOUND', priority_group=1, sequence=1, tie_policy='FIXED', note='변경된 반출 지시를 검토하는 합성 사례')

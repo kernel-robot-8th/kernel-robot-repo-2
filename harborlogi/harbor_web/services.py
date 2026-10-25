@@ -10,6 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from harbor.model import Bay, CargoHolding, YardSnapshot, PortConstraints, OutboundRequest, aware_time
+from harbor.layout import YardLayout
 from harbor.outbound import plan_outbound, OutboundProposal
 from harbor_web.auth import has_role
 from harbor_web.coordination import serialized
@@ -42,7 +43,8 @@ def _domain(call):
 
 def constraints(payload):
     def build():
-        if not isinstance(payload, dict) or set(payload) != {'outbound_stand', 'temporary_bays', 'allowed_moves', 'max_observation_age_seconds', 'conveyor', 'arm_reach'}:
+        required = {'outbound_stand', 'temporary_bays', 'allowed_moves', 'max_observation_age_seconds', 'conveyor', 'arm_reach'}
+        if not isinstance(payload, dict) or not required <= set(payload) <= required | {'yard_layout'}:
             raise ValueError('Condition requires exactly the documented keys.')
         for name in ('temporary_bays', 'allowed_moves', 'arm_reach'):
             if not isinstance(payload[name], list):
@@ -60,6 +62,17 @@ def constraints(payload):
         age = payload['max_observation_age_seconds']
         if type(age) not in (int, float):
             raise ValueError('Expected numeric freshness.')
+        if 'yard_layout' in payload:
+            layout = YardLayout.from_dict(payload['yard_layout'])
+            mapped = {cell.bay_id for cell in layout.cells}
+            for cell in layout.cells:
+                clean_text(cell.bay_id)
+            if mapped & {payload['outbound_stand'], payload['conveyor']}:
+                raise ValueError('Outbound stand and conveyor must remain outside the storage grid.')
+            known = mapped | {payload['outbound_stand'], payload['conveyor'], *payload['temporary_bays']}
+            referenced = {p for edge in payload['allowed_moves'] for p in edge} | {edge[1] for edge in payload['arm_reach']}
+            if not referenced <= known:
+                raise ValueError('Moves and reach must reference configured grid or auxiliary locations.')
         return PortConstraints(payload['outbound_stand'], tuple(payload['temporary_bays']),
                                frozenset(tuple(e) for e in payload['allowed_moves']), timedelta(seconds=age),
                                payload['conveyor'], frozenset(tuple(e) for e in payload['arm_reach']))
@@ -90,6 +103,9 @@ def snapshot(observation):
         if codes != set(Cargo.objects.filter(code__in=codes).values_list('code', flat=True)):
             raise ValueError('Every observed cargo must be registered.')
         policy = constraints(observation.condition.payload)
+        if 'yard_layout' in observation.condition.payload:
+            YardLayout.from_dict(observation.condition.payload['yard_layout']).validate_bays(result.bays,
+                auxiliary_ids=(policy.outbound_stand, policy.conveyor, *policy.temporary_bays))
         referenced = {policy.outbound_stand, *policy.temporary_bays, *(p for edge in policy.allowed_moves for p in edge)} - {policy.conveyor}
         if not referenced <= {b.bay_id for b in result.bays}:
             raise ValueError('Condition references unobserved bays.')

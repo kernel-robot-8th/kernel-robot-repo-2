@@ -1,0 +1,7 @@
+<section class="yard-zone {% if bay.kind == '반출대' %}outbound-zone{% endif %}">
+  <div class="zone-heading"><div><span>{{ bay.kind }}</span><h4>{{ bay.bay_id }}</h4></div><span class="zone-capacity">{{ bay.cargo|length }}/{{ bay.capacity }}단</span></div>
+  <ol class="cargo-stack" aria-label="{{ bay.bay_id }} · 아래부터 1단">
+    {% for cell in bay.cells %}<li class="cargo-cell {{ cell.role }}"><span class="cargo-level">{{ cell.level }}단</span><strong>{{ cell.code }}</strong><span class="cargo-purpose">{{ cell.label }}</span></li>{% empty %}<li class="empty-slot">보관 화물 없음</li>{% endfor %}
+  </ol>
+  <p class="zone-space">빈 단 {{ bay.free }} / {{ bay.capacity }}</p>
+</section>

@@ -178,7 +178,9 @@ def order_detail(request, pk):
 def inventory(request):
     observations = Observation.objects.select_related('condition').order_by('-id')
     selected = get_object_or_404(observations, pk=request.GET['observation']) if request.GET.get('observation', '').isdigit() else observations.first()
-    return page(request, 'inventory.html', section='inventory', observation=selected, observations=observations[:100])
+    from harbor_web.yard_view import yard_view
+    stage = dict(yard_view(selected.payload['bays'], selected.condition.payload), panel_id='inventory-yard', label='관측한 배치', index=0) if selected else None
+    return page(request, 'inventory.html', section='inventory', observation=selected, observations=observations[:100], yard_stage=stage)
 
 
 @require_roles('admin')

@@ -57,7 +57,7 @@ class ConditionForm(forms.ModelForm):
         fields = ['name', 'calibration_ref', 'payload']
         labels = dict(name='설치 기준 이름', calibration_ref='보정·검증 기록 참조', payload='이동·도달 조건 (JSON)')
         widgets = {'payload': forms.Textarea(attrs={'rows': 15, 'spellcheck': 'false'})}
-        help_texts = {'payload': 'outbound_stand, temporary_bays, allowed_moves, max_observation_age_seconds, conveyor, arm_reach의 6개 필드가 필요합니다. 등록은 실행 허가나 compile 검증을 뜻하지 않습니다.'}
+        help_texts = {'payload': 'outbound_stand, temporary_bays, allowed_moves, max_observation_age_seconds, conveyor, arm_reach가 필요합니다. yard_layout으로 3행·3열·3층과 9개 칸 ID의 행·열을 지정합니다. 등록은 실행 허가나 도달 검증을 뜻하지 않습니다.'}
 
 
 class ObservationForm(forms.ModelForm):

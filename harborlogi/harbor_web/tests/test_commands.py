@@ -28,6 +28,18 @@ class LeaseTests(SimpleTestCase):
 
 
 class CommandTests(TestCase):
+    def test_same_source_with_changed_installation_invalidates_original_plan(self):
+        from harbor_web import services
+        from django.utils import timezone
+        plan = self.plan()
+        observed = plan.observation
+        self.assertTrue(commands.capability(plan)['enabled'])
+        condition = services.register_condition(self.admin, name='Changed map revision',
+            calibration_ref='different-installation-reference', payload=observed.condition.payload)
+        services.record_observation(self.admin, source_id=observed.source_id, source_revision='changed-map',
+            observed_at=timezone.now(), provenance=observed.provenance, payload=observed.payload, condition=condition)
+        self.assertEqual(commands.capability(plan)['reason'], 'OBSERVATION_REVISION_CHANGED')
+
     def test_new_source_revision_blocks_old_fresh_plan(self):
         from harbor_web import services
         from django.utils import timezone
