@@ -261,11 +261,13 @@ class RealFleet:
     """진짜 Fleet 앱 (simulation 프로필, 임시 SQLite)을 127.0.0.1에 띄운다. with 문으로 쓴다."""
 
     def __init__(self, root: Optional[Path] = None, port: Optional[int] = None, work_s: float = 1.0,
-                 speed: float = 0.5, workdir: Optional[Path] = None, open_dispatch: bool = True):
+                 speed: float = 0.5, workdir: Optional[Path] = None, open_dispatch: bool = True,
+                 transport_only: bool = False):
         self.root = Path(root or rosy_root() or "")
         if not (self.root / "operations/fleet/fleet/server/app.py").is_file():
             raise RuntimeError(f"rosy-platform 소스 root가 아님: {self.root}")
         self.port, self.work_s, self.speed = port or _free_port(), work_s, speed
+        self.transport_only = transport_only
         self.open_dispatch = open_dispatch   # False: 새 Fleet처럼 출발이 닫힌 채 둔다 (사람 · 앱이 열게)
         self.url = f"http://127.0.0.1:{self.port}"
         self.workdir = Path(workdir or tempfile.mkdtemp(prefix="harbor-real-fleet-"))
@@ -290,8 +292,6 @@ class RealFleet:
         import yaml
         from core_common.protocol.schemas import CellGoalEvidenceSubmission, DeviceActionReceipt
         from fleet.server.app import create_app
-        from fleet.server.cell_compiler import PalletizingCellJobCompiler
-        from fleet.server.cell_goal_evidence_registry import CellGoalProducer, CellGoalRegistry
         from fleet.server.console import FleetConsole
         from fleet.server.mission_service import MissionService
         from fleet.server.mission_store import MissionStore
@@ -301,22 +301,27 @@ class RealFleet:
         from fleet.server.task_store import FleetTaskStore
         from fleet.site_map import SiteMap
         from fleet.swarm.robots import RobotEndpoint
-        from rosy.execution.site.item_pose import ItemPoseTolerance
         from rosy.world.state.projections.map_pose import MapPose
 
-        docs = documents(self.root)
-        compiler = PalletizingCellJobCompiler(tol_m=0.001)
-        cell_doc = docs[("cell", CELL_ID)]
-        producers, self.producer_tokens = [], {}
-        for key, rid in TRANSFERS.items():
-            bundle = compiler.compile(docs[("recipe", rid)], cell_doc).plan_bundle
-            token = f"int-producer-{secrets.token_hex(12)}"
-            self.producer_tokens[bundle.recipe_digest] = token
-            producers.append(CellGoalProducer(
-                producer_id=f"harbor-int-{bundle.recipe_digest[:8]}", token=token, workcell_id=WORKCELL,
-                instance_id=INSTANCE, recipe_sha256=bundle.recipe_digest, cell_sha256=bundle.cell_digest,
-                evaluator_revisions=(PRODUCER_REVISION,), max_age_s=30,
-                valid_until=datetime.now(timezone.utc) + timedelta(days=1)))
+        docs, cell_options = {}, {}
+        self.producer_tokens = {}
+        if not self.transport_only:
+            from fleet.server.cell_compiler import PalletizingCellJobCompiler
+            from fleet.server.cell_goal_evidence_registry import CellGoalProducer, CellGoalRegistry
+            from rosy.execution.site.item_pose import ItemPoseTolerance
+            docs = documents(self.root)
+            compiler = PalletizingCellJobCompiler(tol_m=0.001)
+            cell_doc = docs[("cell", CELL_ID)]
+            producers, self.producer_tokens = [], {}
+            for key, rid in TRANSFERS.items():
+                bundle = compiler.compile(docs[("recipe", rid)], cell_doc).plan_bundle
+                token = f"int-producer-{secrets.token_hex(12)}"
+                self.producer_tokens[bundle.recipe_digest] = token
+                producers.append(CellGoalProducer(
+                    producer_id=f"harbor-int-{bundle.recipe_digest[:8]}", token=token, workcell_id=WORKCELL,
+                    instance_id=INSTANCE, recipe_sha256=bundle.recipe_digest, cell_sha256=bundle.cell_digest,
+                    evaluator_revisions=(PRODUCER_REVISION,), max_age_s=30,
+                    valid_until=datetime.now(timezone.utc) + timedelta(days=1)))
 
         fakes = _fakes(self.root)
         self.drive = Drive(MapPose, PLACES["dock"], self.speed)
@@ -351,18 +356,20 @@ class RealFleet:
             source="harbor-int")
         users = {hashlib.sha256(tok.encode()).hexdigest(): {"principal_id": self.principals[n][0], "role": self.principals[n][1]}
                  for n, tok in self.tokens.items()}
-        self.omx = Omx(DeviceActionReceipt, self.work_s)
         missions = MissionService(MissionStore(self.db))
-        tolerance = ItemPoseTolerance.from_mapping(yaml.safe_load(
-            (self.root / "deploy/robot/omx/sim/item_pose_goal.yaml").read_text(encoding="utf-8")))
+        if not self.transport_only:
+            self.omx = Omx(DeviceActionReceipt, self.work_s)
+            tolerance = ItemPoseTolerance.from_mapping(yaml.safe_load(
+                (self.root / "deploy/robot/omx/sim/item_pose_goal.yaml").read_text(encoding="utf-8")))
+            cell_options = dict(cell_job_compiler=compiler, cell_app_service_id=SERVICE,
+                enable_mission_dispatcher=True, omx_instances={WORKCELL: INSTANCE}, omx_action_transport=self.omx,
+                omx_stop_transport=self.omx,
+                omx_cell_grant_revisions={INSTANCE: {"capability_revision": "cell-transfer-v1",
+                                                     "config_revision": "cell-config-v1"}},
+                cell_item_pose_tolerance=tolerance, cell_goal_registry=CellGoalRegistry(tuple(producers)))
         self.app = create_app(
             console, task_service=tasks, site_users=users, mission_service=missions, proposal_store=ProposalStore(self.db),
-            cell_job_compiler=compiler, cell_app_service_id=SERVICE, deployment_profile="simulation",
-            enable_mission_dispatcher=True, omx_instances={WORKCELL: INSTANCE}, omx_action_transport=self.omx,
-            omx_stop_transport=self.omx,
-            omx_cell_grant_revisions={INSTANCE: {"capability_revision": "cell-transfer-v1",
-                                                 "config_revision": "cell-config-v1"}},
-            cell_item_pose_tolerance=tolerance, cell_goal_registry=CellGoalRegistry(tuple(producers)),
+            **cell_options, deployment_profile="simulation",
             site_maps=maps, map_pose_port=drive, lane_junction=drive,
             # 운행 작업(D-763)은 사이트 운행 임대 · 교통 권한이 켜져 있어야 받는다 (fleet_trips.py의 시뮬 설정과 같음)
             trip_lease={"required": True, "ttl_s": 8.0}, traffic_authority=True)
@@ -375,9 +382,10 @@ class RealFleet:
                 raise RuntimeError("Fleet 앱이 뜨지 않음")
             time.sleep(0.05)
         self._seed(docs)
-        self.producer = Producer(self.url, str(self.db), self.app.state.cell_job_store, self.producer_tokens,
-                                 CellGoalEvidenceSubmission)
-        self.producer.start()
+        if not self.transport_only:
+            self.producer = Producer(self.url, str(self.db), self.app.state.cell_job_store, self.producer_tokens,
+                                     CellGoalEvidenceSubmission)
+            self.producer.start()
 
     def stop(self) -> None:
         if getattr(self, "producer", None):
@@ -392,6 +400,10 @@ class RealFleet:
 
     def _seed(self, docs) -> None:
         """사람이 Fleet 콘솔에서 하는 준비: 문서 저장, 컴파일 미리보기, 출발 허가(rearm, open_dispatch일 때)."""
+        if self.transport_only:
+            if self.open_dispatch:
+                self.rearm()
+            return
         with self.client("operator") as c:
             saved = {}
             for (kind, ident), doc in docs.items():

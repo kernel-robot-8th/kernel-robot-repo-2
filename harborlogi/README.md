@@ -8,7 +8,7 @@ HarborLogi의 항만 업무 앱이다. 선적 순서가 바뀌었을 때 묻힌 
 
 ## 빠른 시작
 
-Python 3.10 이상이면 되고, 런타임 외부 의존성은 없다.
+Python 3.10 이상. domain·CLI·기존 조회 preview는 표준 라이브러리만 사용한다. 계정과 영속 업무를 가진 제품 웹은 선택 의존성 `.[web]`을 설치한다.
 
 ```bash
 cd harborlogi
@@ -33,7 +33,15 @@ python -m harbor
 
 `READY`는 관측 기준으로 세운 업무 제안일 뿐 실행 허가가 아니다. 이동마다 적층암 A·B 중 주 팔(`primary_arm`)과 대체 팔(`alternate_arms`)을 붙인다. 팔 배정은 설치자가 준 도달 표(`PortConstraints.arm_reach`)로만 하고, 표가 없거나 닿는 팔이 없으면 `HOLD`다. 플랫폼 compile 사전 검증 조회 계약(D-856 P1)이 생기면 그 결과로 바꾼다. 실제 arm claim과 대체 팔 전환은 Fleet이 한다. 업무 완료는 `required_completion`의 세 가지(반출 대상 화물을 반출대에 내려놓음, 재취급 화물 복귀, 관련 팔 퇴피)에 실제 근거가 있을 때만 판정한다. 필요하면 `python -m pip install -e .`로 설치한다.
 
+## 웹 작업 관제
+
+계정/역할·화물/요청·관측/계획·작업 인계·현장 확인·기록/비교를 가진 새 웹은 [제품 웹 안내](docs/product-web.md)를 따른다. 로컬 검토는 `runs/web-venv/Scripts/python.exe tools/product_preview.py`와 `http://127.0.0.1:8060/`이다. 합성 개발 자료이며 운영 관측/전체 장치 수용은 별도다.
+
+기존 `python -m harbor.web --demo --port 8050`과 `http://127.0.0.1:8050/overview`는 호환용 로컬 조회 preview다. 실제 장부와 ROSY ARM job·receipt 읽기는 [조회 웹 안내](docs/web-workbench.md)를 따른다. 이 preview는 계정이나 업무 쓰기를 제공하지 않는다.
+
 ## Harbor와 ROSY의 경계
+
+제품 웹은 저장된 요청·관측 revision으로 기존 계획 엔진의 재취급→반출→복귀 또는 공간/관측 HOLD를 계산한다. 기존 preview의 `/planning`은 고정 합성 입력이다. 실제 인증 관측 producer·입고 planner·전체 공정/현장 수용은 미완료이며 물리 receipt만으로 전체 업무를 완료하지 않는다.
 
 | Harbor가 하는 일 | ROSY가 하는 일 |
 |---|---|
@@ -52,8 +60,8 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 | `harbor/outbound.py` | 재취급·반출·복귀 순서의 결정적 제안 |
 | `harbor/site.py` | 적층암 A/B 2대(공급암 S는 외부 단계로 관측만), 이송 차량 3대, 컨베이어(용량 1), 업무 위치·셀 위치 두 층, 충전 한 자리, 직렬 이동 제약 |
 | `harbor/availability.py` | 수동 충전·대기·적재·정비·불명 이송 차량의 후보 제외 |
-| `harbor/process.py` | 각 화물 이동을 설치된 공정 문서 ID·digest·compiler artifact에 연결 |
-| `harbor/rosy_http.py` | Fleet compile/proposal/job 조회와 이송 후보 요청의 HTTP 클라이언트 |
+| `harbor/process.py` | 기존 공정 문서 binding과 중립 ARM 물리 참조 binding, 반출 계획의 이동별 대응 |
+| `harbor/rosy_http.py` | 기존 Cell·TRIP와 중립 ARM 제안/조회·physical receipt의 HTTP 클라이언트. 승인·관측 제출은 제공하지 않음 |
 | `harbor/workflow.py` | 중복 요청 방지·불명 접수 HOLD·현재 시도와 관측 대조의 업무 장부 |
 | `harbor/departure.py` | 공급암 S 퇴피 확인(1차 사람, 이후 카메라)의 근거 보존과 이송 차량 출발 허용 (ADR 0005 결정 6) |
 
@@ -73,6 +81,8 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 |---|---|
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | 함께 작업하기 — Harbor와 ROSY 중 어디서 고칠지, 연결 확인 단계, PR 절차 |
 | [CONTEXT.md](CONTEXT.md) | 항만 업무 용어 |
+| [PRODUCT.md](PRODUCT.md) | 관제 PC·현장 태블릿 제품 맥락과 확정/미정 |
+| [역할·앱·UI/UX 상세설계](docs/design/README.md) | 역할·업무 흐름, 화면·예외, 앱 구성·계약 결손, 단계별 구현·수용 기준(검토안) |
 | [docs/platform-contract.md](docs/platform-contract.md) | 플랫폼 연결 기준과 다음 작업 |
 | [docs/execution.md](docs/execution.md) | 공정 제안과 업무 장부 사용법 |
 | [docs/observation-acceptance.md](docs/observation-acceptance.md) | 물리 관측 연동의 수용 조건 |

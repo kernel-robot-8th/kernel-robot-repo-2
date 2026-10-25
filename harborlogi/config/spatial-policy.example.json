@@ -1,0 +1,20 @@
+{
+  "outbound_stand": "stand",
+  "temporary_bays": ["temp"],
+  "allowed_moves": [["Y11", "temp"], ["temp", "Y11"], ["Y11", "stand"]],
+  "max_observation_age_seconds": 1800,
+  "conveyor": "conveyor",
+  "arm_reach": [
+    ["A", "Y11"], ["A", "Y12"], ["A", "Y13"],
+    ["A", "Y21"], ["A", "Y22"], ["A", "Y23"],
+    ["A", "Y31"], ["A", "Y32"], ["A", "Y33"], ["A", "temp"],
+    ["B", "Y11"], ["B", "Y12"], ["B", "Y13"],
+    ["B", "Y21"], ["B", "Y22"], ["B", "Y23"],
+    ["B", "Y31"], ["B", "Y32"], ["B", "Y33"], ["B", "stand"]
+  ],
+  "spatial_areas": [
+    {"area_id": "temp", "rows": 1, "columns": 3, "levels": 3},
+    {"area_id": "stand", "rows": 1, "columns": 3, "levels": 1}
+  ],
+  "spatial_moves": [["yard", "temp"], ["temp", "yard"], ["yard", "stand"]]
+}

@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {resizeCells, addArea, sceneAreas} from '../harbor_web/static/harbor_web/map-editor-model.mjs';
+const cells = [{bay_id:'physical-A',row:1,column:1},{bay_id:'old-R1C2',row:1,column:2}];
+const grown = resizeCells(cells,2,3);
+assert.equal(grown.length,6);
+assert.equal(grown[0].bay_id,'physical-A');
+assert.deepEqual(resizeCells(grown,1,1),[cells[0]]);
+assert.equal(cells.length,2);
+assert.equal(new Set(resizeCells([{bay_id:'YARD-R1C2',row:1,column:1}],1,2).map(c=>c.bay_id)).size,2);
+const map = {areas:[{id:'yard',label:'주 보관',role:'storage',rows:3,columns:3,levels:3,x:0,y:0,cells}]};
+const added = addArea(map);
+assert.equal(map.areas.length,1);
+assert.equal(added.areas.length,2);
+assert.equal(added.areas[1].x,5);
+assert.equal(addArea(added).areas[2].id,'storage-2');
+assert.equal(sceneAreas(map)[0].label,'주 보관');
+assert.throws(()=>resizeCells([],13,1));
+console.log('Map editor model checks passed');
