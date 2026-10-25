@@ -8,7 +8,7 @@
 
 확인한 중립 ARM producer는 ROSY `bb38fdcdd0140873e4e9d0133662982c1d6a30e0`이며 feature `f4a934657ff72fd3d274860c8e6bb524292f6e77`의 관련 server/protocol/web 경로와 같다. 조사한 ROSY shared main `46f7a88240740095ec0aa89ac27226297406dd65`에는 해당 중립 ARM 경로가 없다. 최신 main이라는 이유로 설치 계약을 같다고 보지 않는다.
 
-기존 Fleet work 화면은 Task/Mission/TRIP/Cell을 읽으며 중립 ARM을 목록에 넣지 않고 다른 admit API를 호출한다. 승인 API의 존재가 승인 UI의 존재를 뜻하지 않는다. 이번 작업은 Fleet 소유 화면에 알려진 ARM mission 조회·독립 승인·물리 결과 대조를 연결한다. Harbor에 승인 메서드나 Fleet 자격증명을 넘기지 않는다.
+기존 Fleet work 화면은 Task/Mission/TRIP/Cell을 읽으며 중립 ARM을 목록에 넣지 않고 다른 admit API를 호출한다. 승인 API의 존재가 승인 UI의 존재를 뜻하지 않는다. 이번 작업은 Fleet 소유 화면에 알려진 ARM mission 조회·독립 승인·수행 상태 표시를 연결한다. 상세 physical receipt 조회·검증은 Harbor 원본 대조가 맡는다. Harbor에 승인 메서드나 Fleet 자격증명을 넘기지 않는다.
 
 기존 API에는 물리 observer와 receipt가 시뮬레이션 프로필로 이미 있다. 없다고 기록한 문서는 바로잡는다. 아직 없는 것은 운영 관측과 Harbor 업무용 배치/관련 팔 퇴피 근거의 인증된 연결, 다칸 설치 binding과 실물 수용이다. `/healthz` 성공은 liveness, `/api/fleet/session`은 인증 신원만 입증하며 중립 ARM/다칸 지원을 입증하지 않는다. 공개 버전/capability 협상 GET은 확인되지 않았다.
 
