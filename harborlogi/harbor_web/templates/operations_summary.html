@@ -18,7 +18,7 @@
     <section aria-labelledby="proposal-title"><h3 id="proposal-title">선택 관측에 고정된 현재 검토</h3>
       <p>유효 READY {{ operations.workload.ready_count }}건 · HOLD {{ operations.workload.hold_count }}건 · 재검토로 이동 집계 제외 {{ operations.workload.excluded_count }}건</p>
       <p>재취급 {{ operations.workload.phase_counts.재취급 }}회 · 반출 {{ operations.workload.phase_counts.반출 }}회 · 복귀 {{ operations.workload.phase_counts.복귀 }}회 · 입고 {{ operations.workload.phase_counts.입고 }}회</p>
-      <ul>{% for row in operations.workload.plans %}<li><a href="/requests/{{ row.plan.order_id }}/">{{ row.plan.order.cargo.code }} · 요청 #{{ row.plan.order_id }}</a> / Plan #{{ row.plan.pk }} · {{ row.status }}{% if row.stale %} · 재검토 필요{% endif %}{% if not row.included %} · 예상 이동 집계 제외{% endif %}</li>{% empty %}<li>이 관측에 고정된 현재 검토 계획이 없습니다.</li>{% endfor %}</ul>
+<ul>{% for row in operations.workload.plans %}<li><a href="/requests/{{ row.plan.order_id }}/?observation={{ operations.observation.pk }}">{{ row.plan.order.cargo.code }} · 요청 #{{ row.plan.order_id }}</a> / Plan #{{ row.plan.pk }} · {{ row.status }}{% if row.stale %} · 재검토 필요{% endif %}{% if not row.included %} · 예상 이동 집계 제외{% endif %}</li>{% empty %}<li>이 관측에 고정된 현재 검토 계획이 없습니다.</li>{% endfor %}</ul>
       <p class="muted">요청별 최신 계획 한 건만 표시합니다. 과거 계획과 다른 관측은 합산하지 않습니다. 입고 배치 추천은 실제 이동 횟수로 환산하지 않습니다.</p>
       <p class="muted">개별 제안의 예상 작업량 합계입니다. 독립 검토한 계획을 공동 실행 일정이나 실제 처리 실적으로 해석하지 않습니다.</p>
     </section>

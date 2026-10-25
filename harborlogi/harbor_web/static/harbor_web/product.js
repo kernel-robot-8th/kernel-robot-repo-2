@@ -1,4 +1,33 @@
 'use strict';
+document.querySelectorAll('[data-plan-step]').forEach(button => {
+  button.hidden = false;
+  button.addEventListener('click', () => {
+    const preview = document.querySelector('[data-yard-preview]');
+    if (!preview) return;
+    const controls = [...preview.querySelectorAll('[data-yard-stage]')];
+    if (controls.some(control => control.disabled)) return;
+    const step = Number(button.dataset.planStep);
+    const figure = preview.querySelector('[data-yard-3d][data-ready="true"]');
+    if (figure?.hidden) preview.querySelector('[data-yard-view="3d"]')?.click();
+    preview.dispatchEvent(new CustomEvent('yardstagejump', {detail:{index:step - 1, animate:false}}));
+    preview.dispatchEvent(new CustomEvent('yardstagejump', {detail:{index:step, animate:true}}));
+    (figure || preview).scrollIntoView({block:'start'});
+    (figure?.querySelector('canvas') || controls.find(control => Number(control.dataset.yardStage) === step))?.focus({preventScroll:true});
+  });
+});
+document.querySelectorAll('[data-changes-only]').forEach(button => {
+  button.hidden = false;
+  button.addEventListener('click', () => {
+    const comparison = button.closest('.plan-comparison');
+    const filtered = button.getAttribute('aria-pressed') !== 'true';
+    button.setAttribute('aria-pressed', String(filtered));
+    const rows = [...comparison.querySelectorAll('[data-plan-change]')];
+    rows.forEach(row => { row.hidden = filtered && row.dataset.planChange === 'unchanged'; });
+    const visible = rows.filter(row => !row.hidden).length;
+    comparison.querySelector('[data-no-changes]').hidden = !filtered || visible > 0;
+    comparison.querySelector('[data-change-status]').textContent = filtered ? `변경된 화물 ${visible}개 표시` : `전체 화물 ${visible}개 표시`;
+  });
+});
 document.querySelectorAll('[data-plan-cargo]').forEach(link => link.addEventListener('click', event => {
   const figure = document.querySelector('[data-yard-3d][data-ready="true"]');
   if (!figure) return;
@@ -96,17 +125,21 @@ document.querySelectorAll('[data-yard-preview]').forEach(preview => {
   const panels = [...preview.querySelectorAll('[data-yard-panel]')];
   const status = preview.querySelector('[data-yard-status]');
   if (!controls.length || !panels.length) return;
-  const select = selected => {
+  const select = (selected, animate = true) => {
     controls.forEach(button => button.setAttribute('aria-pressed', String(button === selected)));
     panels.forEach(panel => { panel.hidden = panel.id !== selected.getAttribute('aria-controls'); });
     if (status) status.textContent = selected.dataset.yardStage === '0'
       ? '계획 기준 관측 · 저장된 원본 배치입니다.'
       : `${selected.textContent.trim()} 후 예상 배치 · 실제 관측·실행 상태는 바뀌지 않습니다.`;
-    preview.dispatchEvent(new CustomEvent('yardstagechange', {detail: {index: selected.dataset.yardStage}}));
+    preview.dispatchEvent(new CustomEvent('yardstagechange', {detail: {index: selected.dataset.yardStage, animate}}));
   };
   controls.forEach(button => {
     button.hidden = false;
     button.addEventListener('click', () => select(button));
+  });
+  preview.addEventListener('yardstagejump', event => {
+    const selected = controls.find(button => Number(button.dataset.yardStage) === Number(event.detail.index));
+    if (selected && !selected.disabled) select(selected, event.detail.animate !== false);
   });
   select(controls[0]);
 });

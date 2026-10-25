@@ -104,6 +104,10 @@ def overview(request):
                 'RECONCILED': '실행 원본을 대조했습니다. 실제 수행과 전체 업무 완료 근거를 확인하세요.',
             }.get(command.state, '원래 작업의 상태와 근거를 확인하세요.')
         rows.append(row)
+    if observation:
+        for row in rows:
+            if row['href'].startswith(('/requests/', '/plans/')):
+                row['href'] += f'?observation={observation.pk}'
     from harbor_web.operations import operations_context
     return page(request, 'overview.html', section='overview', rows=rows, operations=operations_context(observation), observations=observations,
                 observation=observation, condition=observation.condition if observation else None,
@@ -165,6 +169,7 @@ def order_list(request):
 @require_http_methods(['GET'])
 def outbound_queue(request):
     from harbor_web.workspace import COMMAND_LABELS, plan_changes
+    observation = selected_observation(request)
     q = request.GET.get('q', '')[:200]
     items = Order.objects.filter(kind='OUTBOUND').select_related('cargo').filter(
         Q(cargo__code__icontains=q) | Q(cargo__name__icontains=q) | Q(note__icontains=q)
@@ -183,7 +188,8 @@ def outbound_queue(request):
         rows.append(dict(order=order, plan=plan, command=command, status_label=label,
             status=command.state if command else 'HOLD' if changes else plan.result['status'] if plan else '',
             reason='원래 실행의 상태와 업무 근거를 대조하세요.' if command else changes[0]['message'] if changes else reason_text(plan.result['reason']) if plan else '관측 재고를 선택해 재취급·반출·복귀를 검토하세요.'))
-    return page(request, 'outbound_queue.html', section='outbound', rows=rows, q=q, **pagination)
+    return page(request, 'outbound_queue.html', section='outbound', rows=rows, q=q,
+                observation=observation, **pagination)
 
 
 @require_roles('operator')

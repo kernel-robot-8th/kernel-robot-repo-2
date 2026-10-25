@@ -1,5 +1,7 @@
 # 플랫폼 연결 기준
 
+Harbor 사용자의 계획 확정은 준비·제출을 한 번에 이어서 수행한다([ADR 0012](adr/0012-user-confirmed-command-dispatch.md)). 제품 목표는 설치된 Fleet 승인 범위 안에서 별도 사람 클릭 없이 admission·실행으로 진행하는 것이다. 현재 ARM 계약은 별도 승인을 요구하며, 이번 앱 변경은 그 정책을 활성화하지 않는다. 아래의 현행 승인 서술을 영구적인 제품 UX 요구로 해석하지 않는다.
+
 페이지/API 인계의 현행 구현과 배포 구분은 [Harbor–ROSY 파이프라인](design/18-harbor-rosy-pipeline.md), 양 끝 SHA와 화면별 검증은 [2026-10-25 기록](validation/2026-10-25-operator-pipeline.md)을 따른다. 새 Fleet ARM 승인 UI는 `/console?view=work&arm_transfer=<encoded mission>`이며 구버전 콘솔에 있다고 가정하지 않는다. wire API 변경은 없고 기존 v1.312 계약을 소비한다.
 
 중립 ARM 경로는 API reference **v1.312**의 ARM 작업 제안·조회와 별도 물리 receipt를 소비한다. [ADR 0006](adr/0006-neutral-arm-transfer-binding.md)의 `ArmTransferBinding`이 Harbor 업무 위치를 설치된 물리 참조로 변환한다. 독립 관측자 인증·측정 제출과 운영자 승인은 Fleet 측에 남는다. [고정 양 끝 SHA 검증](validation/2026-10-24-neutral-arm-http.md)에서 독립 ARM HTTP·UDS와 기존 Cell/TRIP 회귀를 확인했다. 로컬 기본 discovery의 통합 미설정 skip과 명시 실행한 HTTP 결과를 구분한다.

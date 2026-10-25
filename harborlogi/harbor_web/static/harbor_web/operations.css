@@ -56,3 +56,6 @@
   .plan-explanation {padding:var(--primitive-space-4)}
   .scene-playback label,.scene-playback select {width:100%}
 }
+.route-step-play {display:inline-flex;align-items:center;min-height:40px;font-size:var(--primitive-font-caption);margin:var(--primitive-space-2) 0}
+.route-step-play[hidden],.plan-comparison tr[hidden],.plan-comparison [data-no-changes][hidden] {display:none}
+.plan-comparison .actions {margin-bottom:var(--primitive-space-3);flex-wrap:wrap}

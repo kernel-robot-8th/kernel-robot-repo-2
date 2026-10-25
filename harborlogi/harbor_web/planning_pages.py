@@ -53,6 +53,8 @@ def plan_detail(request, pk):
         if form.is_valid():
             try:
                 command = commands.prepare_command(request.user, plan_id=pk, expected_version=form.cleaned_data['expected_version'])
+                if command.state == 'PREPARED':
+                    command = commands.submit_command(request.user, command_id=command.pk, expected_version=command.version)
             except (services.Conflict, ValidationError):
                 return render(request, 'error.html', dict(heading='실행 인계 조건이 달라졌습니다', reason='요청 revision·원본 관측·설치 대응과 연결 상태를 다시 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
             return redirect(f'/work/{command.pk}/')

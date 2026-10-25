@@ -143,12 +143,28 @@ def main():
             page.locator('[data-scene-play]').click()
             page.wait_for_function('() => document.querySelector("canvas").dataset.moving === "true"')
             page.locator('[data-yard-stage="2"]').click()
-            assert page.locator('[data-scene-play]').get_attribute('aria-pressed') == 'false'
+            assert page.locator('[data-scene-play]').get_attribute('aria-pressed') == 'true'
             page.wait_for_function('() => document.querySelector("canvas").dataset.frame === "2" && document.querySelector("canvas").dataset.moving === "false"')
+            page.locator('[data-plan-step="2"]').first.click()
+            page.wait_for_function('() => document.querySelector("canvas").dataset.frame === "2" && document.querySelector("canvas").dataset.moving === "true"')
+            assert page.locator('[data-scene-play]').get_attribute('aria-pressed') == 'true'
+            page.locator('[data-scene-play]').click()
+            assert page.locator('canvas').get_attribute('data-moving') == 'false'
+            assert page.locator('[data-scene-play]').get_attribute('aria-pressed') == 'false'
+            result['checks'].append('Cargo route step jumps to its preceding snapshot and animates only that step; manual motion can be stopped')
             result['checks'].append('3D Canvas renders six atomic cuboids; footprint selection, real projected hit selection, keyboard camera and complete explicit playback stay synchronized')
             result['checks'].append('Explicit stop snaps to selected endpoint; manual step interrupts automatic playback without another step')
             from tools.integration.workbench_browser_checks import exercise_workbench
             result['checks'].extend(exercise_workbench(page, output))
+            revised = services.make_plan(operator, order_id=order.pk, expected_version=1, observation_id=observed.pk)
+            page.goto(origin + f'/plans/{revised.pk}/')
+            page.locator('[data-changes-only]').click()
+            assert page.locator('[data-plan-change]:visible').count() == 0
+            assert page.locator('[data-no-changes]').is_visible()
+            page.locator('[data-changes-only]').click()
+            assert page.locator('[data-plan-change]:visible').count() == 2
+            result['checks'].append('Unchanged cargo can be hidden and restored; empty changed-only result is explained')
+            page.goto(origin + plan_path)
             for width, height in [(1440, 1000), (1280, 800), (768, 1024), (390, 844)]:
                 page.set_viewport_size(dict(width=width, height=height))
                 page.goto(origin + plan_path)
