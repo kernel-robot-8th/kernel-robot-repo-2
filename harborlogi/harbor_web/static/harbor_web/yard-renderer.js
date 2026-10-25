@@ -55,6 +55,7 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
   let selected = null, isolated = null, editable = false, fitted = false;
   let disposed = false, failed = false, raf = 0, pointer = null, multiPointer = false,
     draggedGizmo = false, revision = 0, renderRevision = 0;
+  let width = 0, height = 0;
 
   function invalidate() {
     if (!disposed && !failed && !raf) raf = requestAnimationFrame(draw);
@@ -300,9 +301,13 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
   }
   function resize() {
     const rect = canvas.getBoundingClientRect();
-    if (!rect.width || !rect.height || disposed) return;
+    if (!rect.width || !rect.height || disposed || failed || (rect.width === width && rect.height === height)) return;
+    width = rect.width; height = rect.height;
     renderer.setSize(rect.width, rect.height, false);
-    camera.aspect = rect.width / rect.height; camera.updateProjectionMatrix(); invalidate();
+    camera.aspect = rect.width / rect.height; camera.updateProjectionMatrix();
+    // Resizing clears the drawing buffer; refill it before the browser paints.
+    cancelAnimationFrame(raf); raf = 0;
+    draw();
   }
   function contextLost(event) {
     event.preventDefault(); failed = true;

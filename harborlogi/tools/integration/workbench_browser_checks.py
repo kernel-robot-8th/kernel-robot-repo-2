@@ -137,8 +137,22 @@ def exercise_workbench(page, output):
     assert cargo.input_value() == '', 'Two-finger camera gesture must not select a box on the stationary finger'
     page.locator('[data-scene-action="fit"]').click()
     if page.locator('[data-scene-action="fullscreen"]').is_visible():
+        page.evaluate('''() => {
+          window.__fullscreenFrame = null;
+          const c = document.querySelector('canvas');
+          const observer = new ResizeObserver(() => {
+            if (!document.fullscreenElement) return;
+            const p=document.createElement('canvas');p.width=c.width;p.height=c.height;
+            const g=p.getContext('2d');g.drawImage(c,0,0);const d=g.getImageData(0,0,p.width,p.height).data;
+            let colored=0;for(let i=0;i<d.length;i+=4)if(Math.max(d[i],d[i+1],d[i+2])-Math.min(d[i],d[i+1],d[i+2])>50)colored++;
+            window.__fullscreenFrame = {colored, width:c.width, height:c.height};observer.disconnect();
+          });observer.observe(c);
+        }''')
         page.locator('[data-scene-action="fullscreen"]').click()
         page.wait_for_function('() => Boolean(document.fullscreenElement)')
+        page.wait_for_function('() => window.__fullscreenFrame !== null')
+        assert page.evaluate('() => window.__fullscreenFrame.colored') > 1000, 'Fullscreen resize exposed an empty WebGL frame'
+        page.screenshot(path=str(output / 'fullscreen-rendered.png'))
         page.locator('[data-scene-action="fullscreen"]').click()
         page.wait_for_function('() => !document.fullscreenElement')
     assert page.locator('#yard-scene-data').text_content() == source
