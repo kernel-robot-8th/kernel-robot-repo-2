@@ -224,7 +224,13 @@ H 아이콘은 `assets/brand/harbor-app-icon-20261023.png`를 `/assets/icon.png`
 - Don't present declared inventory, audit records or fixture comparisons as authenticated operational evidence or field performance acceptance.
 - Do label synthetic observed stacks and projected plan results separately; keep HOLD free of partial moves or projected completion.
 
-## HarborLogi 로고 기반 팔레트 조정
+## 아이콘 중심 네비게이션 (2026-10-26)
+
+mode: Operate. PC 주 메뉴는 76px 아이콘 레일을 기본으로 제공한다. 이름 펼치기 버튼으로 기존 폭과 이름을 복원하고 해당 브라우저의 선택을 보존한다. 메뉴 아이콘은 같은 24px·1.8px 선의 자체 SVG이며 이름·경로·역할별 표시·현재 위치를 유지한다. 마우스와 키보드 포커스로 용도 툴팁을 표시하고 Escape로 닫는다. 툴팁 위로 포인터를 옮겨도 읽을 수 있으며 화면 안에 배치한다.
+
+태블릿·모바일에서는 열린 메뉴에 아이콘과 이름을 함께 표시한다. JavaScript가 없으면 이름과 기본 title 안내를 보존한다. 스크린리더 이름과 aria-current는 아이콘 표시와 독립이다. 메뉴의 열림/닫힘 문구와 aria-expanded는 같은 상태를 표현한다. 레일 폭은 component.navigation.rail-width 토큰에서 관리한다.
+
+### 로고 기반 팔레트의 기존 적용
 
 로고 대표색: navy #112C3F, teal #2CBBB7, orange #FE6D08, cream #FCF1D9. 청록 홈의 #087C80은 조작·링크용 짙은 톤, #DAF5F2/#EFFBFA는 선택/hover 면의 파생 톤이다. 오렌지 #B94D00은 포커스 등 대비가 필요한 용도에 쓴다. 로고와 아이콘은 교체하지 않는다.
 

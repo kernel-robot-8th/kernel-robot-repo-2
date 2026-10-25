@@ -119,6 +119,7 @@
   --component-button-border: var(--semantic-action-primary);
   --component-button-focus-ring: var(--semantic-focus-on-light);
   --component-navigation-width: var(--primitive-size-navigation);
+  --component-navigation-rail-width: 76px;
   --component-navigation-background: var(--semantic-surface-navigation);
   --component-navigation-foreground: var(--semantic-text-inverse);
   --component-navigation-selected-background: var(--semantic-surface-navigation-selected);
