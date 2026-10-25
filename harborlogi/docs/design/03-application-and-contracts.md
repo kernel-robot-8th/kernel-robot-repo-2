@@ -6,6 +6,8 @@
 
 ## 1. 프로세스와 배포 경계
 
+2026-10-26 후속 결정: [ADR0013](../adr/0013-independent-business-execution-and-platform.md)과 [상세설계24](24-business-execution-boundary.md)는 업무 실행기·ROSY 어댑터·지속 운용 책임을 나눈다. 이 설계는 상시 실행기 구현 전이며 현재 API나 다중 worker를 활성화하지 않는다.
+
 권장 구성은 **브라우저 → Harbor 웹 서버 → 기존 Harbor domain/장부 → Fleet HTTP**다. PC와 태블릿은 같은 Harbor 서버의 서로 다른 task 화면을 사용한다. browser에서 Fleet 서비스 토큰·관측자 자격·장치 접속 정보를 보유하지 않는다.
 
 | 구성 | 책임 | 현재/제안 |
