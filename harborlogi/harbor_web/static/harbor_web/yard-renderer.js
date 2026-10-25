@@ -2,7 +2,7 @@ import * as THREE from './vendor/three-0.186.1/three.module.js';
 import {OrbitControls} from './vendor/three-0.186.1/OrbitControls.js';
 import {TransformControls} from './vendor/three-0.186.1/TransformControls.js';
 
-export function createRenderer(canvas, areas, {onSelect, onTransform, onError, colors = {}} = {}) {
+export function createRenderer(canvas, areas, {onSelect, onTransform, onError, colors = {}, showVolumes = false} = {}) {
   const context = canvas.getContext('webgl2', {antialias: true, preserveDrawingBuffer: true});
   if (!context) throw new Error('WebGL2 is unavailable');
   const palette = {target: '#112c3f', blocker: '#fe6d08', stored: '#2cbbb7',
@@ -32,10 +32,15 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
   light.position.set(-8, 18, 10);
   light.castShadow = true;
   light.shadow.mapSize.set(1024, 1024);
-  const extent = Math.max(10, ...areas.map(a => Math.max(a.x + a.columns, a.y + a.rows)));
+  const minX = Math.min(...areas.map(a => a.x)), minY = Math.min(...areas.map(a => a.y));
+  const maxX = Math.max(...areas.map(a => a.x + a.columns)), maxY = Math.max(...areas.map(a => a.y + a.rows));
+  const extent = Math.max(10, maxX - minX, maxY - minY);
+  camera.far = Math.max(1000, extent * 30);
+  camera.updateProjectionMatrix();
+  orbit.maxDistance = Math.max(300, extent * 10);
   Object.assign(light.shadow.camera, {left: -extent, right: extent, top: extent, bottom: -extent, far: extent * 5});
-  light.position.set(-extent / 2, extent * 2, extent);
-  light.target.position.set(extent / 2, 0, extent / 2);
+  light.position.set((minX + maxX) / 2 - extent, extent * 2, (minY + maxY) / 2 + extent);
+  light.target.position.set((minX + maxX) / 2, 0, (minY + maxY) / 2);
   light.shadow.bias = -.0003;
   scene.add(light, light.target);
   const resources = new Set();
@@ -110,6 +115,12 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     const geometry = keep(new THREE.BufferGeometry());
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
     scene.add(new THREE.LineSegments(geometry, gridMaterial));
+    if (showVolumes) {
+      const volume = new THREE.LineSegments(edges, edgeMaterial);
+      volume.scale.set(area.columns, area.levels, area.rows);
+      volume.position.set(area.x + area.columns / 2, area.levels / 2, area.y + area.rows / 2);
+      scene.add(volume);
+    }
     const text = label(area.label || area.id, palette.text, palette.canvas);
     keep(text.texture); keep(text.material);
     const sign = new THREE.Mesh(plane, text.material);

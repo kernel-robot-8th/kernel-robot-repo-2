@@ -25,6 +25,46 @@ def policy():
 
 
 class SpatialTests(unittest.TestCase):
+    def test_variable_rectangular_layout_and_large_coordinates(self):
+        layout = YardLayout(12, 11, 6, tuple(YardCell(f'Y{r}-{c}', r, c)
+            for r in range(1, 13) for c in range(1, 12)))
+        source = SpatialSnapshot(4, NOW, layout, (Area('yard', 12, 11, 6),),
+            (CargoShape('target', 1, 1),), (Placement('target', 'yard', 12, 11, 1),))
+        self.assertEqual(source.position_id(source.placements[0]), 'Y12-11-L1')
+        with self.assertRaises(ValueError):
+            replace(source, areas=(Area('yard', 11, 11, 6),))
+
+    def test_extra_storage_target_and_original_storage_restoration(self):
+        source = snapshot([('target', 1), ('block', 1)], [
+            Placement('target', 'yard', 1, 1, 1), Placement('block', 'yard', 1, 1, 2)])
+        source = replace(source, areas=source.areas+(Area('store', 1, 2, 2),),
+            placements=tuple(replace(p, area_id='store') for p in source.placements))
+        constraints = replace(policy(), storage_areas=('yard', 'store'),
+            allowed_moves=policy().allowed_moves | {('store', 'temp'), ('store', 'stand'), ('temp', 'store')},
+            arm_reach=policy().arm_reach | {('A', 'store')})
+        result = self.plan(source, constraints)
+        self.assertEqual(result.status, 'READY')
+        self.assertEqual(result.moves[-1].destination_placement.area_id, 'store')
+        self.assertEqual(self.plan(source, replace(constraints, arm_reach=policy().arm_reach)).status, 'HOLD')
+
+    def test_candidate_budget_returns_no_partial_moves(self):
+        source = snapshot([('target', 1)], [Placement('target', 'yard', 1, 1, 1)])
+        with patch('harbor.spatial.SPATIAL_CANDIDATE_LIMIT', 0):
+            result = self.plan(source)
+        self.assertEqual((result.status, result.reason, result.moves),
+                         ('HOLD', 'SPATIAL_SEARCH_LIMIT_REACHED', ()))
+
+    def test_workload_limits_reject_large_area_sets_cells_and_cargo(self):
+        source = snapshot([('target', 1)], [Placement('target', 'yard', 1, 1, 1)])
+        for areas in (source.areas + tuple(Area(f'a{i}', 1, 1, 1) for i in range(14)),
+                      source.areas + tuple(Area(f'a{i}', 12, 12, 6) for i in range(5)),
+                      source.areas + (Area('Y11', 1, 1, 1),)):
+            with self.assertRaises(ValueError):
+                replace(source, areas=areas)
+        # Unknown holders are valid reconciliations individually, but still count as cargo.
+        with self.assertRaises(ValueError):
+            replace(source, holdings=tuple(CargoHolding(f'held{i}', None) for i in range(256)))
+
     def plan(self, source, constraints=None):
         return plan_spatial(source, OutboundRequest('target', 4), constraints or policy(), now=NOW)
 
@@ -148,7 +188,7 @@ class SpatialTests(unittest.TestCase):
                 replace(source, **changes)
         for constructor, args in ((CargoShape, ('x', True, 1)), (CargoShape, ('x', 1, 0)),
                                   (Placement, ('x', 'yard', True, 1, 1)),
-                                  (Placement, ('x', 'yard', 1, 1, 1, 180)), (Area, ('x', 4, 1, 1))):
+                                  (Placement, ('x', 'yard', 1, 1, 1, 180)), (Area, ('x', 13, 1, 1))):
             with self.assertRaises(ValueError):
                 constructor(*args)
         overlap = source.placements + (Placement('other', 'yard', 1, 2, 1),)

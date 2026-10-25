@@ -43,6 +43,7 @@ export async function mountYardViewer(figure) {
   const ceiling = Math.max(...scene.areas.map(a => a.levels)) + .6;
   let renderer = null;
   renderer = createRenderer(canvas, scene.areas, {
+    showVolumes: scene.kind === 'map-definition',
     colors, onSelect: id => select(id), onTransform: (id, position) => {
       if (!draft) return;
       const box = draft.find(b => b.id === id);
@@ -155,7 +156,7 @@ export async function mountYardViewer(figure) {
       status('박스 이동 설명 중 · 실제 로봇 경로 아님'); raf = requestAnimationFrame(tick);
     } else {
       animation = null; canvas.dataset.moving = 'false'; paint(scene.frames[index].boxes);
-      status(next ? scene.frames[index].label + ' · 예상 배치' : '원본 관측 배치'); advance();
+      status(scene.kind === 'map-definition' ? scene.frames[index].label : next ? scene.frames[index].label + ' · 예상 배치' : '원본 관측 배치'); advance();
     }
   }
   function showFlat(value) {
@@ -213,6 +214,13 @@ export async function mountYardViewer(figure) {
     controls.forEach(button => { button.disabled = false; }); renderer?.dispose();
   }
   play.hidden = scene.frames.length < 2 || controls.length !== scene.frames.length;
+  if (scene.kind === 'map-definition') {
+    figure.classList.add('map-definition');
+    figure.querySelector('.model-inspector').hidden = true;
+    editButton.disabled = true;
+    figure.querySelector('[data-scene-step]').textContent = scene.frames[index].label;
+    status(scene.frames[index].label);
+  }
   figure.querySelector('[data-scene-action="fullscreen"]').hidden = !document.fullscreenEnabled;
   paint(current); fillCargo(); views.hidden = false; figure.hidden = false; flat.hidden = true;
   canvas.dataset.moving = 'false'; figure.dataset.ready = 'true'; figure.dataset.renderer = 'webgl'; renderer.resize(); renderer.fit();

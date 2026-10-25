@@ -1,0 +1,67 @@
+from types import SimpleNamespace
+
+from django.core.exceptions import ValidationError
+from django.test import SimpleTestCase
+
+from harbor_web import services
+
+
+def configured_map():
+    return dict(outbound_stand='out', temporary_bays=['temp'], conveyor='belt',
+        allowed_moves=[], arm_reach=[], max_observation_age_seconds=60,
+        yard_layout=dict(rows=1, columns=4, levels=2,
+            cells=[dict(bay_id=f'Y{c}', row=1, column=c) for c in range(1, 5)]),
+        spatial_areas=[dict(area_id=a, rows=1, columns=2, levels=1) for a in ('temp', 'out', 'store')],
+        spatial_moves=[], storage_areas=['yard', 'store'],
+        area_presentation={a: dict(label=a, x=0, y=i*3) for i, a in enumerate(('yard', 'temp', 'out', 'store'))})
+
+
+class MapDomainTests(SimpleTestCase):
+    def test_roles_resolved_areas_and_presentation(self):
+        payload = configured_map()
+        services.constraints(payload)
+        self.assertEqual(services.spatial_policy(payload).storage_areas, ('yard', 'store'))
+        self.assertEqual(services.map_areas(payload)[0].columns, 4)
+        self.assertEqual(services.area_presentation(payload), payload['area_presentation'])
+
+    def test_invalid_roles_overlap_metadata_and_location_collisions(self):
+        for change in ('overlap', 'missing', 'nonfinite', 'unknown', 'collision', 'role', 'label', 'bool'):
+            payload = configured_map()
+            if change == 'overlap': payload['area_presentation']['temp']['y'] = 0
+            elif change == 'missing': del payload['area_presentation']['temp']
+            elif change == 'nonfinite': payload['area_presentation']['temp']['x'] = float('nan')
+            elif change == 'unknown': payload['unexpected'] = 1
+            elif change == 'collision': payload['temporary_bays'] = ['Y1']
+            elif change == 'role': payload['storage_areas'].append('temp')
+            elif change == 'label': payload['area_presentation']['temp']['label'] = 'x'*81
+            else: payload['area_presentation']['temp']['x'] = True
+            with self.subTest(change=change), self.assertRaises(ValidationError):
+                services.constraints(payload)
+
+    def test_editor_metadata_requires_spatial_observation(self):
+        observation = SimpleNamespace(payload={'bays': [], 'holdings': []},
+            condition=SimpleNamespace(payload=configured_map()))
+        with self.assertRaisesMessage(ValidationError, 'grid-placement-v1'):
+            services.snapshot(observation)
+
+    def test_old_metadata_automatic_layout_and_defaults(self):
+        payload = configured_map()
+        del payload['storage_areas'], payload['area_presentation']
+        payload['spatial_areas'] = payload['spatial_areas'][:2]
+        self.assertEqual(services.spatial_policy(payload).storage_areas, ('yard',))
+        presentation = services.area_presentation(payload)
+        self.assertEqual((presentation['temp']['x'], presentation['out']['y']), (5.2, 2.2))
+
+    def test_area_and_cell_budget(self):
+        payload = configured_map()
+        payload['spatial_areas'] = [dict(area_id=f'a{i}', rows=12, columns=12, levels=6) for i in range(5)]
+        with self.assertRaises(ValidationError):
+            services.map_areas(payload)
+
+    def test_storage_area_cannot_alias_a_primary_cell_reach_identifier(self):
+        payload = configured_map()
+        payload['spatial_areas'][-1]['area_id'] = 'Y1'
+        payload['storage_areas'][-1] = 'Y1'
+        payload['area_presentation']['Y1'] = payload['area_presentation'].pop('store')
+        with self.assertRaises(ValidationError):
+            services.constraints(payload)

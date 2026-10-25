@@ -1,6 +1,6 @@
 """Harbor product routes, separate from account and Fleet routes."""
 from django.urls import path
-from harbor_web import views, planning_pages, field_pages, record_pages, guide_pages
+from harbor_web import views, planning_pages, field_pages, record_pages, guide_pages, map_pages
 
 urlpatterns = [
     path('workflow/', guide_pages.workflow, name='workflow'),
@@ -16,6 +16,10 @@ urlpatterns = [
     path('inventory/', views.inventory, name='inventory'),
     path('inventory/import/', views.observation_new, name='observation_new'),
     path('settings/', views.settings_page, name='settings'),
+    path('settings/maps/new/', map_pages.map_editor, name='map_new'),
+    path('settings/maps/new/validate/', map_pages.map_validate, name='map_new_validate'),
+    path('settings/conditions/<int:pk>/map/', map_pages.map_editor, name='map_edit'),
+    path('settings/conditions/<int:pk>/map/validate/', map_pages.map_validate, name='map_validate'),
     path('settings/conditions/new/', views.condition_new, name='condition_new'),
     path('plans/<int:pk>/', planning_pages.plan_detail, name='plan_detail'),
     path('work/', planning_pages.work_list, name='work'),

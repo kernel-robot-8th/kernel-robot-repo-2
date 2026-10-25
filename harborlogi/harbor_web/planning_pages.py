@@ -60,14 +60,15 @@ def plan_detail(request, pk):
     if plan.order.kind == 'OUTBOUND':
         from harbor_web.workspace import workspace_context
         return page(request, 'workspace.html', section='outbound', **workspace_context(plan.order, plan, review_observation=review_observation))
+    from harbor_web.yard_scene import present_stage, scene_for
     observation_stage = None
     if plan.observation.payload.get('schema') == 'grid-placement-v1':
         from harbor_web.yard_view import spatial_yard_view
-        observation_stage = dict(spatial_yard_view(services.spatial_snapshot(plan.observation), target=plan.order.cargo.code),
-            panel_id=f'held-plan-{plan.pk}', label='관측한 배치', index=0)
+        observation_stage = present_stage(dict(spatial_yard_view(services.spatial_snapshot(plan.observation), target=plan.order.cargo.code),
+            panel_id=f'held-plan-{plan.pk}', label='관측한 배치', index=0), plan.condition.payload)
     return page(request, 'plan.html', section='inventory', plan=plan, display_moves=[], gate=gate,
                 gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']), command=None,
-                observation_stage=observation_stage)
+                observation_stage=observation_stage, yard_scene=scene_for([observation_stage]) if observation_stage else None)
 
 
 @require_roles('viewer', 'operator', 'admin')

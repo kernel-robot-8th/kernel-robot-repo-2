@@ -26,6 +26,8 @@ HarborLogi 프로젝트의 업무 앱 Harbor는 양하 이후 장치와 재취�
 
 ## Operating Context
 
+구역 맵은 [버전 편집기](docs/design/21-versioned-map-editor.md)에서 행·열·높이, 추가 구역의 보관/임시/반출 역할과 표시 위치를 편집할 수 있다. 3×3×3은 초기 예시이며 고정 제품 한계가 아니다. 검증 후 새 설치 기준을 등록하고 기존 관측·계획은 당시 기준에 고정한다. 새 맵의 화물 배치는 미관측으로 시작한다.
+
 공급암 S는 외부 운영이고 Harbor가 명령하지 않는다. 적층암 A·B는 ROSY 제어 대상이며 작업마다 역할을 정한다. Pinky 이송 차량은 후보 풀에서 고르고 Fleet이 실제 배정한다. 컨베이어는 용량1의 한 방향 상시 동작 구간이다. 근거는 ADR0005와 현재 site/model 코드이며 실제 설치 수용은 별도다.
 
 ## Capabilities and Constraints

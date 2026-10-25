@@ -11,6 +11,18 @@ def _box(cell, area):
         size=cell.get('footprint_label', '1×1'))
 
 
+def present_stage(stage, payload):
+    """Carry explicit display metadata with the pinned condition, without changing old spacing."""
+    if 'area_presentation' in payload:
+        from harbor_web import services
+        stage['area_presentation'] = services.area_presentation(payload)
+        for source in [stage, *stage.get('auxiliary_areas', []), *stage.get('auxiliary_bays', [])]:
+            area_id = source.get('area_id', source.get('bay_id', 'yard'))
+            item = stage['area_presentation'][area_id]
+            source.update(area_label=item['label'], x=item['x'], y=item['y'])
+    return stage
+
+
 def scene_for(stages):
     if not stages or any(not stage.get('layout') for stage in stages):
         return None
@@ -27,6 +39,8 @@ def scene_for(stages):
         areas.append(dict(id=bay['bay_id'], label=bay.get('kind', bay['bay_id']), rows=1, columns=1,
             levels=bay['capacity'], x=right, y=y))
         y += 2.2
+    for area in areas:
+        area.update(first.get('area_presentation', {}).get(area['id'], {}))
     by_id = {area['id']: area for area in areas}
     frames = []
     for stage in stages:

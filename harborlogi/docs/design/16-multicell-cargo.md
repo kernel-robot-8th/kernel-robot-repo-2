@@ -1,6 +1,6 @@
 # 다칸 점유 화물의 관측·계획·완료
 
-2026-10-25 사용자 요구: 맵은3행×3열×3층이며 화물 하나가1×1·2×1·3×1의 바닥 면적을 점유한다. Django는 유지한다. FastAPI 전환은 이번 범위에서 제외한다. 기존 UR/SR와 팀 상세 설계의 정본은 비공개 Confluence이며 이 문서는 공개 앱의 구현 계약만 기록한다.
+2026-10-25 사용자 요구: 초기 맵은3행×3열×3층이며 화물 하나가1×1·2×1·3×1의 바닥 면적을 점유한다. 이후 확장 요구로 맵 크기·구역은 [편집 가능한 설치 기준](21-versioned-map-editor.md)으로 일반화했다. Django는 유지한다. FastAPI 전환은 이번 범위에서 제외한다. 기존 UR/SR와 팀 상세 설계의 정본은 비공개 Confluence이며 이 문서는 공개 앱의 구현 계약만 기록한다.
 
 ## 업무 의미
 
@@ -14,7 +14,7 @@
 
 - `CargoShape(cargo_id: str, length_cells: int, footprint_revision: int)`: 허용 길이1/2/3, 짧은 변1. revision은 양수. 원본의 크기 revision을 고정한다.
 - `Placement(cargo_id: str, area_id: str, row: int, column: int, level: int, orientation: int = 0)`:1기반 주소. orientation은0/90, 모든 이동에서 보존한다.
-- `Area(area_id: str, rows: int, columns: int, levels: int)`: 보관 구역 yard는3×3×3, 별도 임시/반출 구역은 명시한 크기. 각 축1..3.
+- `Area(area_id: str, rows: int, columns: int, levels: int)`: 모든 구역은 명시한 크기. 행·열1..12, 높이1..6이며 합산 작업량 상한은 설계21을 따른다. 화물 길이1..3과 구분한다.
 - `SpatialSnapshot(revision, observed_at, layout: YardLayout, areas: tuple[Area,...], shapes: tuple[CargoShape,...], placements: tuple[Placement,...], holdings: tuple[CargoHolding,...] = ())`: 동일 화물/shape 중복, 알려지지 않은 구역, 겹침·범위·지지 오류를 검증한다. `occupied()`는 `(area_id,row,column,level) -> cargo_id`, `cells(placement)`는 그 점유 좌표 집합, `shape(cargo_id)`, `placement(cargo_id)`, `with_placements(tuple)`는 불변 대조/투영을 제공한다. `position_id(placement)`는 yard의 Y11-L1, 보조 위치의 temp-R1C1-L1 형태로 반환한다.
 - `SpatialPolicy(outbound_area, temporary_areas: tuple[str,...], allowed_moves: frozenset[tuple[str,str]], arm_reach: frozenset[tuple[str,str]], max_observation_age: timedelta)`: 허용 이동은 area쌍. 도달 참조는 yard의 점유한 모든 칸 ID와 보조 area ID다. 한 팔이 출발/도착 전체를 담당할 수 있어야 한다.
 - `SpatialMove(cargo_id, source: str, destination: str, primary_arm, alternate_arms, source_placement: Placement, destination_placement: Placement, phase_label: str, footprint_revision: int)`: 화물 하나의 원자적 이동. phase_label은 재취급/반출/복귀다.

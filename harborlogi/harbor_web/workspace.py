@@ -7,7 +7,7 @@ from django.utils import timezone
 from harbor_web import commands, forms, services
 from harbor_web.models import Audit, Command, Observation, Plan
 from harbor_web.yard_view import yard_view, spatial_yard_view
-from harbor_web.yard_scene import scene_for
+from harbor_web.yard_scene import present_stage, scene_for
 
 
 COMMAND_LABELS = {
@@ -46,8 +46,8 @@ def _yard_stages(order, plan, source):
     bays = deepcopy(source.payload['bays'])
 
     def stage(index, phase, label, move=None):
-        return dict(yard_view(bays, policy, target=target, blockers=blockers), index=index, phase=phase, label=label, move=move,
-                    panel_id=f'yard-{order.pk}-{index}')
+        return present_stage(dict(yard_view(bays, policy, target=target, blockers=blockers), index=index, phase=phase, label=label, move=move,
+                    panel_id=f'yard-{order.pk}-{index}'), policy)
 
     stages = [stage(0, '관측', '관측한 배치')]
     moves = plan.result['moves'] if plan and plan.result['status'] == 'READY' else []
@@ -73,7 +73,7 @@ def _spatial_stages(order, plan, source):
 
     def stage(index, phase, label, move=None):
         view = spatial_yard_view(current, target=order.cargo.code, blockers=blockers)
-        return dict(view, index=index, phase=phase, label=label, move=move, panel_id=f'yard-{order.pk}-{index}')
+        return present_stage(dict(view, index=index, phase=phase, label=label, move=move, panel_id=f'yard-{order.pk}-{index}'), source.condition.payload)
 
     stages, display_moves = [stage(0, '관측', '관측한 배치')], []
     for i, move in enumerate(moves):

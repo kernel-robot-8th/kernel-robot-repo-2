@@ -238,17 +238,44 @@ def order_detail(request, pk):
 @require_http_methods(['GET'])
 def inventory(request):
     observations = Observation.objects.select_related('condition').order_by('-id')
-    selected = selected_observation(request, default_latest=True)
+    condition = None
+    if 'condition' in request.GET:
+        value = request.GET['condition']
+        if not value.isascii() or not value.isdigit():
+            raise Http404('Invalid condition.')
+        condition = get_object_or_404(Condition, pk=value)
+        observations = observations.filter(condition=condition)
+    selected = selected_observation(request)
+    if selected and condition and selected.condition_id != condition.pk:
+        return HttpResponseBadRequest('Observation does not belong to the selected condition.')
+    if selected is None:
+        selected = observations.first()
+    condition = selected.condition if selected else condition or (
+        Condition.objects.filter(payload__has_key='yard_layout').order_by('-pk').first()
+        or Condition.objects.order_by('-pk').first())
     choices = list(observations[:100])
     if selected and all(item.pk != selected.pk for item in choices):
         choices.insert(0, selected)
     from harbor_web.yard_view import yard_view, spatial_yard_view
+    from harbor_web.yard_scene import present_stage, scene_for
+    from harbor_web.map_config import map_scene
     view = (spatial_yard_view(services.spatial_snapshot(selected)) if selected.payload.get('schema') == 'grid-placement-v1'
             else yard_view(selected.payload['bays'], selected.condition.payload)) if selected else None
-    stage = dict(view, panel_id='inventory-yard', label='관측한 배치', index=0) if view else None
-    from harbor_web.yard_scene import scene_for
+    stage = present_stage(dict(view, panel_id='inventory-yard', label='관측한 배치', index=0), condition.payload) if view else None
+    scene = scene_for([stage]) if stage else map_scene(condition.payload) if condition else None
+    definition_rows = []
+    if scene and not selected:
+        for area in scene['areas']:
+            for level in range(1, area['levels'] + 1):
+                cells = (condition.payload['yard_layout']['cells'] if area['id'] == 'yard' else
+                    [dict(bay_id=f"{area['id']}-R{r}C{c}", row=r, column=c)
+                     for r in range(1, area['rows'] + 1) for c in range(1, area['columns'] + 1)])
+                definition_rows.extend(dict(area=area['label'], position_id=f"{cell['bay_id']}-L{level}",
+                    row=cell['row'], column=cell['column'], level=level) for cell in cells)
     return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices,
-                yard_stage=stage, yard_scene=scene_for([stage]) if stage else None)
+                condition=condition, condition_filter='condition' in request.GET,
+                conditions=Condition.objects.order_by('-pk'), definition_rows=definition_rows,
+                yard_stage=stage, yard_scene=scene)
 
 
 @require_roles('admin')

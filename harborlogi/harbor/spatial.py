@@ -8,6 +8,7 @@ from harbor.model import (YARD_ARMS, CargoHolding, OutboundRequest, aware_time,
 
 
 SPATIAL_SEARCH_LIMIT = 20_000
+SPATIAL_CANDIDATE_LIMIT = 20_000
 
 
 def _integer(value, low, high):
@@ -40,8 +41,8 @@ class Placement:
     def __post_init__(self):
         identifier(self.cargo_id)
         identifier(self.area_id)
-        for n in (self.row, self.column, self.level):
-            _integer(n, 1, 3)
+        for n, limit in ((self.row, 12), (self.column, 12), (self.level, 6)):
+            _integer(n, 1, limit)
         if type(self.orientation) is not int or self.orientation not in (0, 90):
             raise ValueError('Orientation must be 0 or 90')
 
@@ -55,8 +56,8 @@ class Area:
 
     def __post_init__(self):
         identifier(self.area_id)
-        for n in (self.rows, self.columns, self.levels):
-            _integer(n, 1, 3)
+        for n, limit in ((self.rows, 12), (self.columns, 12), (self.levels, 6)):
+            _integer(n, 1, limit)
 
 
 @dataclass(frozen=True)
@@ -83,8 +84,14 @@ class SpatialSnapshot:
         identifiers(tuple(p.cargo_id for p in self.placements) + tuple(h.cargo_id for h in self.holdings))
         identifiers(tuple(h.holder_id for h in self.holdings if h.holder_id is not None))
         areas = {a.area_id: a for a in self.areas}
-        if areas.get('yard') != Area('yard', 3, 3, 3):
-            raise ValueError('The yard requires 3 rows, columns and levels')
+        if len(areas) > 16 or sum(a.rows*a.columns*a.levels for a in self.areas) > 4096:
+            raise ValueError('Map workload exceeds the configured bounds')
+        if len(self.placements) + len(self.holdings) > 256:
+            raise ValueError('Observation exceeds the cargo limit')
+        if areas.get('yard') != Area('yard', self.layout.rows, self.layout.columns, self.layout.levels):
+            raise ValueError('The yard dimensions must match its layout')
+        if (areas.keys() - {'yard'}) & {c.bay_id for c in self.layout.cells}:
+            raise ValueError('Auxiliary areas must not alias primary yard cell identifiers')
         placed = {p.cargo_id for p in self.placements}
         shaped = {s.cargo_id for s in self.shapes}
         if not placed <= shaped <= placed | {h.cargo_id for h in self.holdings}:
@@ -135,10 +142,14 @@ class SpatialPolicy:
     allowed_moves: frozenset[tuple[str, str]]
     arm_reach: frozenset[tuple[str, str]]
     max_observation_age: timedelta
+    storage_areas: tuple[str, ...] = ('yard',)
 
     def __post_init__(self):
         identifier(self.outbound_area)
         identifiers(self.temporary_areas)
+        identifiers(self.storage_areas)
+        if 'yard' not in self.storage_areas or set(self.storage_areas) & {*self.temporary_areas, self.outbound_area, 'conveyor'}:
+            raise ValueError('Storage, temporary and outbound roles must be disjoint')
         if self.outbound_area == 'yard' or any(a in ('yard', 'conveyor', self.outbound_area)
                                                for a in self.temporary_areas):
             raise ValueError('Temporary storage must exclude yard, conveyor and outbound areas')
@@ -184,7 +195,7 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
     """Search complete legal plans; exhausted or impossible searches emit no moves."""
     aware_time(now)
     areas = {a.area_id: a for a in snapshot.areas}
-    referenced = {policy.outbound_area, *policy.temporary_areas}
+    referenced = {policy.outbound_area, *policy.temporary_areas, *policy.storage_areas}
     referenced.update(a for edge in policy.allowed_moves for a in edge)
     if not referenced <= areas.keys():
         raise ValueError('Policy references an unknown area')
@@ -203,7 +214,7 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
     target = snapshot.placement(request.cargo_id)
     if target.area_id == policy.outbound_area:
         return hold('OUTBOUND_ALREADY_ON_STAND_REQUIRES_EVIDENCE')
-    if target.area_id != 'yard':
+    if target.area_id not in policy.storage_areas:
         return hold('OUTBOUND_NOT_IN_A_BAY')
     if not policy.arm_reach:
         return hold('ARM_REACH_UNVERIFIED')
@@ -223,6 +234,7 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
     originals = {p.cargo_id: p for p in snapshot.placements}
     visited = set()
     count = 0
+    candidates = 0
 
     def reach(p):
         if p.area_id != 'yard':
@@ -230,6 +242,7 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
         return {snapshot.layout.at(r, c).bay_id for _, r, c, _ in snapshot.cells(p)}
 
     def destinations(current, cargo, area_ids, restore):
+        nonlocal candidates
         origin = current.placement(cargo)
         choices = []
         for area_id in area_ids:
@@ -239,10 +252,14 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
             for level in range(1, area.levels+1):
                 for row in range(1, area.rows+1):
                     for column in range(1, area.columns+1):
+                        candidates += 1
+                        if candidates > SPATIAL_CANDIDATE_LIMIT:
+                            raise SearchLimit
                         choices.append(Placement(cargo, area_id, row, column, level, origin.orientation))
         if restore:
             original = originals[cargo]
             choices.sort(key=lambda p: (p != original,
+                                       p.area_id != original.area_id,
                                        (p.row, p.column) != (original.row, original.column),
                                        p.level, p.row, p.column))
         return choices
@@ -267,7 +284,7 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
         elif not exported:
             tasks = [(target.cargo_id, (policy.outbound_area,), '반출')]
         else:
-            tasks = [(cargo, ('yard',), '복귀') for cargo in sorted(restoring)]
+            tasks = [(cargo, policy.storage_areas, '복귀') for cargo in sorted(restoring)]
         for cargo, area_ids, phase in tasks:
             origin = current.placement(cargo)
             if any((a, r, c, l+1) in occupied for a, r, c, l in current.cells(origin)):

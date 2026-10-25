@@ -3,7 +3,7 @@
   {% if stage.move %}<p class="stage-description"><strong>{{ stage.move.cargo_id }}</strong> · {{ stage.move.source }}{% if not stage.move.spatial %} {{ stage.move.source_level }}층{% endif %} → {{ stage.move.destination }}{% if not stage.move.spatial %} {{ stage.move.destination_level }}층{% endif %} · 계획한 팔 {{ stage.move.primary_arm }}</p>{% endif %}
   {% if stage.layout %}
     {% include 'yard_grid.html' %}
-    {% if stage.auxiliary_areas %}<h4 class="auxiliary-heading">맵 밖 보조 구역 · 크기를 명시한 위치</h4><div class="spatial-auxiliary">{% for area in stage.auxiliary_areas %}<section><h4>{{ area.area_id }}</h4>{% include 'yard_grid.html' with stage=area grid_prefix=stage.panel_id %}</section>{% endfor %}</div>{% endif %}
+    {% if stage.auxiliary_areas %}<h4 class="auxiliary-heading">추가 구역 · 크기를 명시한 위치</h4><div class="spatial-auxiliary">{% for area in stage.auxiliary_areas %}<section><h4>{{ area.area_label|default:area.area_id }}</h4>{% include 'yard_grid.html' with stage=area grid_prefix=stage.panel_id %}</section>{% endfor %}</div>{% endif %}
     {% if stage.auxiliary_bays %}<h4 class="auxiliary-heading">맵 밖 보조 위치</h4><div class="yard-grid yard-auxiliary">{% for bay in stage.auxiliary_bays %}{% include 'bay_stack.html' %}{% endfor %}</div>{% endif %}
   {% else %}
     <p class="helptext">배치 좌표 미등록 · 원본 칸 목록입니다. ID나 나열 순서로 행·열을 추측하지 않습니다.</p>

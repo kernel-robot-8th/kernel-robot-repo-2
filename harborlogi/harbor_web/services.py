@@ -1,6 +1,7 @@
 """Persist declared inputs and planning results; never issue physical commands."""
 import hashlib
 import json
+import math
 from dataclasses import asdict
 from datetime import timedelta
 
@@ -41,10 +42,10 @@ def _domain(call):
         raise ValidationError('Invalid structured input: ' + str(error)) from error
 
 
-def constraints(payload):
+def constraints(payload, *, _validate_spatial=True):
     def build():
         required = {'outbound_stand', 'temporary_bays', 'allowed_moves', 'max_observation_age_seconds', 'conveyor', 'arm_reach'}
-        if not isinstance(payload, dict) or not required <= set(payload) <= required | {'yard_layout', 'spatial_areas', 'spatial_moves'}:
+        if not isinstance(payload, dict) or not required <= set(payload) <= required | {'yard_layout', 'spatial_areas', 'spatial_moves', 'storage_areas', 'area_presentation'}:
             raise ValueError('Condition requires exactly the documented keys.')
         for name in ('temporary_bays', 'allowed_moves', 'arm_reach'):
             if not isinstance(payload[name], list):
@@ -67,14 +68,15 @@ def constraints(payload):
             mapped = {cell.bay_id for cell in layout.cells}
             for cell in layout.cells:
                 clean_text(cell.bay_id)
-            if mapped & {payload['outbound_stand'], payload['conveyor']}:
-                raise ValueError('Outbound stand and conveyor must remain outside the storage grid.')
-            known = mapped | {payload['outbound_stand'], payload['conveyor'], *payload['temporary_bays']}
+            if mapped & {payload['outbound_stand'], payload['conveyor'], *payload['temporary_bays']}:
+                raise ValueError('Auxiliary locations must remain outside the storage grid.')
+            known = mapped | {payload['outbound_stand'], payload['conveyor'], *payload['temporary_bays'], *payload.get('storage_areas', [])}
             referenced = {p for edge in payload['allowed_moves'] for p in edge} | {edge[1] for edge in payload['arm_reach']}
             if not referenced <= known:
                 raise ValueError('Moves and reach must reference configured grid or auxiliary locations.')
-        if 'spatial_areas' in payload or 'spatial_moves' in payload:
+        if _validate_spatial and any(k in payload for k in ('spatial_areas', 'spatial_moves', 'storage_areas', 'area_presentation')):
             spatial_policy(payload)
+            area_presentation(payload)
         return PortConstraints(payload['outbound_stand'], tuple(payload['temporary_bays']),
                                frozenset(tuple(e) for e in payload['allowed_moves']), timedelta(seconds=age),
                                payload['conveyor'], frozenset(tuple(e) for e in payload['arm_reach']))
@@ -84,6 +86,8 @@ def constraints(payload):
 def snapshot(observation):
     if isinstance(observation.payload, dict) and observation.payload.get('schema') == 'grid-placement-v1':
         return spatial_snapshot(observation)
+    if any(k in observation.condition.payload for k in ('storage_areas', 'area_presentation')):
+        raise ValidationError('This map requires a grid-placement-v1 observation.')
     def build():
         payload = observation.payload
         if not isinstance(payload, dict) or set(payload) != {'bays', 'holdings'}:
@@ -117,22 +121,75 @@ def snapshot(observation):
     return _domain(build)
 
 
-def _spatial_areas(payload):
+def map_areas(payload):
+    return _domain(lambda: _map_areas(payload))
+
+
+def _map_areas(payload):
     from harbor.spatial import Area
     layout = YardLayout.from_dict(payload['yard_layout'])
     items = payload['spatial_areas']
-    if not isinstance(items, list) or any(not isinstance(a, dict) or
+    if not isinstance(items, list) or len(items) > 15 or any(not isinstance(a, dict) or
             set(a) != {'area_id', 'rows', 'columns', 'levels'} for a in items):
         raise ValueError('Spatial areas require explicit dimensions.')
     areas = (Area('yard', layout.rows, layout.columns, layout.levels), *(Area(**a) for a in items))
     identifiers = [a.area_id for a in areas]
     if len(set(identifiers)) != len(identifiers):
         raise ValueError('Spatial areas must be unique; yard is configured by yard_layout.')
-    if set(identifiers) != {'yard', payload['outbound_stand'], *payload['temporary_bays']}:
-        raise ValueError('Every temporary and outbound area requires explicit dimensions.')
+    if {a.area_id for a in areas[1:]} & {c.bay_id for c in layout.cells}:
+        raise ValueError('Auxiliary areas must not alias primary yard cell identifiers.')
+    if len(areas) > 16 or sum(a.rows*a.columns*a.levels for a in areas) > 4096:
+        raise ValueError('Map workload exceeds configured bounds.')
+    storage = payload.get('storage_areas', ['yard'])
+    if not isinstance(storage, list) or not storage or any(not isinstance(a, str) for a in storage) or len(set(storage)) != len(storage):
+        raise ValueError('Storage areas require unique text identifiers.')
+    roles = [*storage, *payload['temporary_bays'], payload['outbound_stand']]
+    if 'yard' not in storage or len(roles) != len(set(roles)) or set(identifiers) != set(roles):
+        raise ValueError('Storage, temporary and outbound roles must disjointly cover every area.')
+    if payload['conveyor'] in identifiers:
+        raise ValueError('The conveyor must remain outside configured areas.')
     for identifier in identifiers:
         clean_text(identifier)
-    return layout, areas
+    return areas
+
+
+def _spatial_areas(payload):
+    return YardLayout.from_dict(payload['yard_layout']), _map_areas(payload)
+
+
+def area_presentation(payload):
+    """Resolve display rectangles independently of physical robot coordinates."""
+    def build():
+        areas = _map_areas(payload)
+        if 'area_presentation' not in payload:
+            result = {'yard': dict(label='장치 야드', x=0, y=0)}
+            right, y = areas[0].columns + 1.2, 0
+            for area in areas[1:]:
+                result[area.area_id] = dict(label={'temp': '임시 장치', 'stand': '반출대'}.get(area.area_id, area.area_id), x=right, y=y)
+                y += area.rows + 1.2
+            return result
+        source = payload['area_presentation']
+        if not isinstance(source, dict) or set(source) != {a.area_id for a in areas}:
+            raise ValueError('Presentation must describe every configured area exactly once.')
+        result = {}
+        for area in areas:
+            item = source[area.area_id]
+            if not isinstance(item, dict) or set(item) != {'label', 'x', 'y'}:
+                raise ValueError('Presentation requires exactly label, x and y.')
+            if not isinstance(item['label'], str) or not item['label'].strip() or len(item['label']) > 80:
+                raise ValueError('Area labels require 1 to 80 characters.')
+            clean_text(item['label'])
+            if any(type(item[k]) not in (int, float) or not math.isfinite(item[k]) or abs(item[k]) > 1000 for k in ('x', 'y')):
+                raise ValueError('Presentation coordinates must be finite and within 1000.')
+            result[area.area_id] = dict(item)
+        for index, left in enumerate(areas):
+            a = result[left.area_id]
+            for right in areas[index+1:]:
+                b = result[right.area_id]
+                if a['x'] < b['x']+right.columns and b['x'] < a['x']+left.columns and a['y'] < b['y']+right.rows and b['y'] < a['y']+left.rows:
+                    raise ValueError('Presentation area rectangles must not overlap.')
+        return result
+    return _domain(build)
 
 
 def spatial_policy(payload):
@@ -140,7 +197,7 @@ def spatial_policy(payload):
     def build():
         if not isinstance(payload, dict):
             raise ValueError('Expected a condition object.')
-        legacy = constraints({k: v for k, v in payload.items() if k not in {'spatial_areas', 'spatial_moves'}})
+        legacy = constraints(payload, _validate_spatial=False)
         _, areas = _spatial_areas(payload)
         pairs = payload['spatial_moves']
         if not isinstance(pairs, list) or any(not isinstance(p, list) or len(p) != 2 or
@@ -152,7 +209,8 @@ def spatial_policy(payload):
         if any(v not in known for pair in pairs for v in pair):
             raise ValueError('Spatial moves must reference configured areas.')
         return SpatialPolicy(legacy.outbound_stand, legacy.temporary_bays,
-            frozenset(tuple(p) for p in pairs), legacy.arm_reach, legacy.max_observation_age)
+            frozenset(tuple(p) for p in pairs), legacy.arm_reach, legacy.max_observation_age,
+            tuple(payload.get('storage_areas', ['yard'])))
     return _domain(build)
 
 
@@ -169,6 +227,8 @@ def spatial_snapshot(observation):
             raise ValueError('Spatial observation must cover every configured area exactly once.')
         if not isinstance(payload['placements'], list) or not isinstance(payload['holdings'], list):
             raise ValueError('Expected observation lists.')
+        if len(payload['placements']) + len(payload['holdings']) > 256:
+            raise ValueError('Observation exceeds the cargo limit.')
         placements, shapes, holdings = [], [], []
         fields = {'cargo_id', 'area_id', 'row', 'column', 'level', 'orientation', 'footprint_revision'}
         for item in payload['placements']:
