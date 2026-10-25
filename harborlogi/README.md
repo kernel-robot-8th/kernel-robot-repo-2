@@ -77,9 +77,11 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 | [docs/execution.md](docs/execution.md) | 공정 제안과 업무 장부 사용법 |
 | [docs/observation-acceptance.md](docs/observation-acceptance.md) | 물리 관측 연동의 수용 조건 |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | 실행 연결 계획 |
-| [docs/adr/](docs/adr/) | 설계 결정 기록 (0001 공정 binding과 완료 근거, 0002 고정 소스 Fleet 계약 시험, 0003 자체 Fleet 계약 하네스, 0004 도메인 중립 ROSY 위의 항만 앱 경계(제안), 0005 Harbor·ROSY 책임 지도) |
-
+| [docs/adr/](docs/adr/) | 설계 결정 기록 (0001 공정 binding과 완료 근거, 0002 고정 소스 Fleet 계약 시험, 0003 Harbor가 가진 Fleet 계약 시험 하네스, 0004 도메인 중립 ROSY 위의 항만 앱 경계(제안), 0005 Harbor·ROSY 책임 지도) |
+| [docs/plans/](docs/plans/) | 작업 계획 (2026-10-21 항만 앱 분할) |
 | [docs/validation/](docs/validation/) | 날짜별 검증 기록 |
+
+코드와 함께 바뀌는 문서(용어 · ADR · 사용법 · 검증 기록)는 이 폴더에 둔다. 팀 기획 · 설계 본문과 회의록은 팀 Confluence(SP) 위키, 할 일은 Jira가 정본이다. GitHub 저장소 위키는 쓰지 않는다.
 
 ## 데이터와 라이선스
 
