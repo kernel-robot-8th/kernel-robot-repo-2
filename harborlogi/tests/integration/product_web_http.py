@@ -48,10 +48,14 @@ class ProductWebHttpTests(unittest.TestCase):
             from django.core.wsgi import get_wsgi_application
             from django.utils import timezone
             from harbor.web import QuietHandler
+            from harbor.rosy_http import RosyClient
             from harbor_web import commands
             from harbor_web.models import Audit, Cargo, Command, CommandFact, Condition, FleetConnection, Observation, Order, Plan
             call_command('migrate', verbosity=0)
             call_command('bootstrap_roles', verbosity=0)
+            # The fixture's operator-named token belongs to a machine service; approval uses a separate human role.
+            self.assertEqual(RosyClient(config['origin'], config['operator']).session(),
+                             {'principal_id': 'operator', 'role': 'service'})
             passwords = {}
             for role in ('admin', 'operator', 'viewer'):
                 passwords[role] = secrets.token_urlsafe(32)
