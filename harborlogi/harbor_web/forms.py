@@ -75,7 +75,7 @@ class ObservationForm(forms.ModelForm):
         fields = ['condition', 'source_id', 'source_revision', 'observed_at', 'provenance', 'payload']
         labels = dict(condition='설치 조건', source_id='원본 출처', source_revision='출처 revision', observed_at='관측 시각', provenance='자료 구분', payload='관측 원본 (JSON)')
         widgets = {'observed_at': forms.DateTimeInput(attrs={'type': 'datetime-local'}, format='%Y-%m-%dT%H:%M'), 'payload': forms.Textarea(attrs={'rows': 12, 'spellcheck': 'false'})}
-        help_texts = {'payload': 'bays와 holdings만 받습니다. cargo 순서는 아래→위입니다. 이 수동 등록은 인증된 운영 관측으로 승격되지 않습니다.'}
+        help_texts = {'payload': '기존 관측은 bays와 holdings를 사용하며 cargo 순서는 아래→위입니다. 다칸 관측은 schema=grid-placement-v1과 observed_areas, placements, holdings를 사용하고 각 배치에 footprint_revision을 지정합니다. 이 수동 등록은 인증된 운영 관측으로 승격되지 않습니다.'}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

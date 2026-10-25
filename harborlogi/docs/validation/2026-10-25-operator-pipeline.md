@@ -15,9 +15,9 @@
 
 | 검사 | 실제 결과 |
 |---|---|
-| Django 전체 | `django test harbor_web.tests --settings=harbor_web.settings --verbosity 0`: **125통과** |
+| Django 전체 | `django test harbor_web.tests --settings=harbor_web.settings --verbosity 0`: **126통과** |
 | 도메인/기존 계약 | `python -m unittest discover -s tests -q`:131수집, **129실행 통과 / 명시적 통합2skip**. skip을 실행으로 세지 않음 |
-| 원본/역할 회귀 | 새 context5 + pipeline9 + operator journey4. reviewer가 발견한 폼 action의 선택 유실, 계획 URL 검증 누락, viewer의403 링크를 수정하고 회귀 확인 |
+| 원본/역할 회귀 | 새 context6 + pipeline9 + operator journey4. reviewer가 발견한 폼 action의 선택 유실, 계획 URL 검증 누락, viewer의403 링크를 수정하고 회귀 확인. 최근100건 밖의 원본이 재고 dropdown에도 selected로 유지되는 실제 HTML을 추가 확인 |
 | 제품 브라우저 | `product_web_browser_check.py`,1440/1280/768/390, **통과**. JS/console/실패 요청/오류 HTTP/넘침0; 현장 회차·CSRF·직접 경로·관리 계정·뒤로 가기·메뉴 키보드 확인 |
 | 공간·맥락 브라우저 | `multicell_browser_check.py`,같은4개 폭 **통과**. 실제 관측→요청→원본 선택 유지, 원자적3회 이동, colspan/rowspan, 독립 층, JS 없는 조회, 안내 화면 넘침0 |
 | 토큰·migration·공백 | 생성 CSS 일치, `makemigrations --check --dry-run` 변경 없음, `git diff --check` 통과 |

@@ -43,6 +43,19 @@ class ContextFlowTests(TestCase):
         form = forms.PlanForm(review_observation=old)
         self.assertIn(old, form.fields['observation'].queryset)
 
+    def test_inventory_keeps_selected_old_source_in_rendered_options(self):
+        self.cargo()
+        old = self.observation()
+        Observation.objects.bulk_create([Observation(created_by=self.admin, source_id='batch',
+            source_revision=str(i), observed_at=self.now, provenance='DECLARED', condition=old.condition,
+            payload=old.payload) for i in range(101)])
+        self.client.force_login(self.operator)
+        response = self.client.get(f'/inventory/?observation={old.pk}')
+        self.assertEqual(response.context['observation'], old)
+        self.assertEqual(len(response.context['observations']), 101)
+        self.assertContains(response, f'<option value="{old.pk}" selected>')
+        self.assertContains(response, f'/requests/?kind=OUTBOUND&amp;observation={old.pk}')
+
     def test_request_redirect_keeps_selected_source_and_footprint_defaults_to_latest(self):
         cargo = self.cargo()
         source = self.observation()

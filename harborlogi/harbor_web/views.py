@@ -239,11 +239,14 @@ def order_detail(request, pk):
 def inventory(request):
     observations = Observation.objects.select_related('condition').order_by('-id')
     selected = selected_observation(request, default_latest=True)
+    choices = list(observations[:100])
+    if selected and all(item.pk != selected.pk for item in choices):
+        choices.insert(0, selected)
     from harbor_web.yard_view import yard_view, spatial_yard_view
     view = (spatial_yard_view(services.spatial_snapshot(selected)) if selected.payload.get('schema') == 'grid-placement-v1'
             else yard_view(selected.payload['bays'], selected.condition.payload)) if selected else None
     stage = dict(view, panel_id='inventory-yard', label='관측한 배치', index=0) if view else None
-    return page(request, 'inventory.html', section='inventory', observation=selected, observations=observations[:100], yard_stage=stage)
+    return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices, yard_stage=stage)
 
 
 @require_roles('admin')
