@@ -116,7 +116,7 @@ def main():
             before_rotation = page.locator('canvas').evaluate('(c)=>c.toDataURL()')
             page.locator('canvas').focus()
             page.keyboard.press('ArrowLeft')
-            assert page.locator('canvas').evaluate('(c)=>c.toDataURL()') != before_rotation
+            page.wait_for_function('(before) => document.querySelector("canvas").toDataURL() !== before', arg=before_rotation)
             page.keyboard.press('Home')
             page.locator('[data-scene-cargo]').select_option('')
             canvas = page.locator('canvas')
@@ -147,6 +147,8 @@ def main():
             page.wait_for_function('() => document.querySelector("canvas").dataset.frame === "2" && document.querySelector("canvas").dataset.moving === "false"')
             result['checks'].append('3D Canvas renders six atomic cuboids; footprint selection, real projected hit selection, keyboard camera and complete explicit playback stay synchronized')
             result['checks'].append('Explicit stop snaps to selected endpoint; manual step interrupts automatic playback without another step')
+            from tools.integration.workbench_browser_checks import exercise_workbench
+            result['checks'].extend(exercise_workbench(page, output))
             for width, height in [(1440, 1000), (1280, 800), (768, 1024), (390, 844)]:
                 page.set_viewport_size(dict(width=width, height=height))
                 page.goto(origin + plan_path)
@@ -211,9 +213,23 @@ def main():
             unsupported.add_init_script('HTMLCanvasElement.prototype.getContext = () => null;')
             fallback_page = unsupported.new_page()
             fallback_page.goto(origin + plan_path)
-            assert fallback_page.locator('[data-yard-3d-fallback]').is_visible()
+            fallback_page.locator('[data-yard-3d-fallback]').wait_for(state='visible')
             assert fallback_page.locator('[data-yard-panel="0"]').is_visible()
             unsupported.close()
+            lost_context = browser.new_context()
+            lost_context.add_cookies(page.context.cookies())
+            lost_page = lost_context.new_page()
+            lost_page.goto(origin + plan_path)
+            lost_page.locator('[data-yard-3d][data-ready=true]').wait_for()
+            if lost_page.locator('[data-scene-action="fullscreen"]').is_visible():
+                lost_page.locator('[data-scene-action="fullscreen"]').click()
+                lost_page.wait_for_function('() => Boolean(document.fullscreenElement)')
+            assert lost_page.locator('canvas').evaluate('(c) => { const e=c.getContext("webgl2").getExtension("WEBGL_lose_context"); if(!e)return false; e.loseContext(); return true; }')
+            lost_page.locator('[data-yard-3d-fallback]').wait_for(state='visible')
+            lost_page.wait_for_function('() => !document.fullscreenElement')
+            assert lost_page.locator('[data-yard-panel="0"]').is_visible()
+            lost_context.close()
+            result['checks'].append('Lost WebGL context exits fullscreen, releases viewer and restores original plane view')
             result['checks'].append('Reduced-motion stage changes are instant; Canvas-unavailable and no-JS preserve original readable plane view')
             page.goto(origin + '/inventory/')
             assert page.locator('[data-grid-area="yard"] [data-yard-layer="1"] [data-cargo-id="C1"]').get_attribute('colspan') == '2'

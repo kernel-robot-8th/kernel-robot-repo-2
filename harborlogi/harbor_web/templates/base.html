@@ -4,7 +4,7 @@
 <link rel="icon" href="{% static 'harbor-app-icon-20261023.png' %}">
 <link rel="stylesheet" href="{% static 'tokens.css' %}">
 <link rel="stylesheet" href="{% static 'harbor_web/product.css' %}">
-<script src="{% static 'harbor_web/product.js' %}" defer></script><script src="{% static 'harbor_web/yard-3d.js' %}" defer></script></head>
+<script src="{% static 'harbor_web/product.js' %}" defer></script><script type="module" src="{% static 'harbor_web/yard-3d.js' %}"></script></head>
 <body><a class="skip" href="#main">본문으로 이동</a>
 <header class="topbar"><a class="brand" href="/"><img src="{% static 'harbor-app-icon-20261023.png' %}" alt="" width="32" height="32"><strong>HarborLogi</strong><span>항만 물류 관제</span></a>
 {% if user.is_authenticated %}<div class="account"><span class="environment">{% if web_mode == 'live' %}운영 연결{% else %}개발 환경{% endif %}</span><a href="{% url 'password_change' %}">{{ user.username }}</a><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="quiet" type="submit">로그아웃</button></form></div>{% endif %}</header>

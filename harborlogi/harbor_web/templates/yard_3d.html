@@ -1,11 +1,29 @@
-{% if yard_scene %}
-<div class="yard-view-switch" data-yard-views hidden aria-label="배치 보기 방식"><button type="button" class="quiet" data-yard-view="3d" aria-pressed="true">3D 배치</button><button type="button" class="quiet" data-yard-view="flat" aria-pressed="false">층별 평면</button></div>
-{{ yard_scene|json_script:'yard-scene-data' }}
-<section class="yard-3d" data-yard-3d data-scene="yard-scene-data" hidden aria-label="컨테이너 3D 배치">
-  <div class="scene-heading"><div><strong data-scene-step>관측한 배치</strong><span>논리 배치 · 실측 크기·현장 좌표 아님</span></div><button class="quiet" type="button" data-scene-play aria-pressed="false">계획 재생</button></div>
-  <canvas tabindex="0" role="img" aria-label="회전 가능한 컨테이너 배치. 드래그 또는 방향키로 회전, 더하기·빼기로 확대, Home으로 초기화. 화물 선택은 아래 목록에서도 가능합니다."></canvas>
-  <div class="scene-toolbar"><div class="scene-camera" role="group" aria-label="보기 각도"><button class="quiet" type="button" data-scene-camera="iso">입체</button><button class="quiet" type="button" data-scene-camera="front">정면</button><button class="quiet" type="button" data-scene-camera="top">위에서</button></div><div role="group" aria-label="확대"><button class="quiet" type="button" data-scene-zoom="-0.15" aria-label="축소">−</button><button class="quiet" type="button" data-scene-zoom="0.15" aria-label="확대">+</button></div><span>드래그 회전 · 박스 선택</span></div>
-  <div class="scene-selection"><label>화물 살펴보기<select data-scene-cargo><option value="">화물 선택</option></select></label><p data-scene-info role="status">박스를 선택하면 크기와 위치를 확인할 수 있습니다.</p></div>
-  <p class="scene-motion" data-scene-motion role="status">원본 관측 배치</p><p class="helptext">재생은 계획 순서 설명입니다. 실제 로봇 이동 경로나 수행 상태가 아니며, 관측 원본은 바뀌지 않습니다.</p>
-</section><p class="notice" data-yard-3d-fallback hidden>이 환경에서는 3D를 표시할 수 없습니다. 같은 원본의 평면도로 확인하세요.</p>
-{% endif %}
+{% if yard_scene %}{% with scene_id=yard_scene_id|default:'yard-scene-data' %}
+<div class="yard-view-switch" data-yard-views hidden aria-label="배치 보기 방식"><button type="button" class="quiet" data-yard-view="3d" aria-pressed="true">3D 모델</button><button type="button" class="quiet" data-yard-view="flat" aria-pressed="false">층별 평면</button></div>
+{{ yard_scene|json_script:scene_id }}
+<section class="yard-3d model-workbench" data-yard-3d data-scene="{{ scene_id }}" hidden aria-label="컨테이너 모델 작업 공간">
+  <header class="scene-heading"><div><p class="eyebrow">컨테이너 모델 뷰어</p><strong data-scene-step>관측한 배치</strong><span>논리 배치 · 실측 모델 아님</span></div><div class="actions"><button class="quiet" type="button" data-scene-action="fullscreen" aria-pressed="false">전체 화면</button><button type="button" data-scene-play aria-pressed="false">계획 재생</button></div></header>
+  <div class="model-draft" data-scene-draft role="status" hidden></div>
+  <div class="model-layout">
+    <div class="model-viewport">
+      <div class="model-tools" role="group" aria-label="카메라 도구"><button class="quiet" type="button" data-scene-action="orbit" aria-pressed="true">회전</button><button class="quiet" type="button" data-scene-action="pan" aria-pressed="false">화면 이동</button><button class="quiet" type="button" data-scene-action="fit">전체 맞춤</button></div>
+      <canvas tabindex="0" role="img" aria-label="컨테이너 모델. 드래그 회전, 오른쪽 또는 Shift 드래그 화면 이동, 휠 확대. 방향키 이동, Shift 방향키 회전, 더하기·빼기 확대, Home 전체 맞춤. 아래 목록에서도 화물을 선택할 수 있습니다."></canvas>
+      <div class="scene-toolbar"><div class="scene-camera" role="group" aria-label="보기 각도"><button class="quiet" type="button" data-scene-camera="iso">입체</button><button class="quiet" type="button" data-scene-camera="front">정면</button><button class="quiet" type="button" data-scene-camera="top">위에서</button></div><div role="group" aria-label="확대"><button class="quiet" type="button" data-scene-zoom="-0.15" aria-label="축소">−</button><button class="quiet" type="button" data-scene-zoom="0.15" aria-label="확대">+</button></div></div>
+      <p class="model-gestures">오른쪽 드래그: 이동 · 휠: 확대 · 터치 두 손가락: 이동·확대</p>
+    </div>
+    <aside class="model-inspector" aria-label="선택 화물 확인과 가상 편집">
+      <label class="model-cargo">화물 살펴보기<select data-scene-cargo><option value="">화물 선택</option></select></label>
+      <p class="model-info" data-scene-info role="status">선택한 박스의 크기와 위치를 확인합니다.</p>
+      <div class="model-selection-tools"><button class="quiet" type="button" data-scene-action="focus" disabled>선택 맞춤</button><button class="quiet" type="button" data-scene-action="isolate" aria-pressed="false" disabled>선택만 보기</button></div>
+      <div class="model-edit-head"><button class="quiet" type="button" data-scene-action="edit" aria-pressed="false">가상 배치 편집</button><p>브라우저 안에서만 옮겨 봅니다. 관측과 계획은 보존됩니다.</p></div>
+      <form class="scene-editor" data-scene-editor hidden novalidate><fieldset disabled><legend>가상 위치</legend>
+        <label>구역<select name="area"></select></label>
+        <div class="model-coordinates"><label>행<input type="number" name="row" min="1" step="1"></label><label>열<input type="number" name="column" min="1" step="1"></label><label>층<input type="number" name="level" min="1" step="1"></label></div>
+        <label>방향<select name="orientation"><option value="0">0도</option><option value="90">90도</option></select></label><button type="submit">가상 배치 적용</button>
+        <p class="helptext">박스의 화살표 핸들로도 옮길 수 있습니다. 열(X)·층(Y)·행(Z) 방향입니다.</p>
+      </fieldset></form><p class="model-error" data-scene-error role="alert"></p>
+    </aside>
+  </div>
+  <footer class="model-footer"><p class="scene-motion" data-scene-motion role="status">원본 관측 배치</p><p class="helptext">모델과 이동은 계획 이해용입니다. 가상 배치의 논리 지지 검사는 물리 안정성·실제 로봇 경로를 검증하지 않습니다.</p></footer>
+</section><p class="notice" data-yard-3d-fallback hidden>이 환경에서는 3D 모델을 표시할 수 없습니다. 같은 원본의 평면도로 확인하세요.</p>
+{% endwith %}{% endif %}
