@@ -12,7 +12,7 @@ const before = structuredClone(source);
 const moved = moveBox(areas,source,'A',place());
 assert.equal(moved.valid,true);
 assert.deepEqual([moved.boxes[0].x,moved.boxes[0].y,moved.boxes[0].z],[1,1,0]);
-assert.deepEqual(moved.boxes[0].positions,['source-bay']);
+assert.deepEqual(moved.boxes[0].positions,['yard · 2행 2열 1층']);
 assert.equal(moved.boxes[0].footprint_revision,7);
 moved.boxes[0].positions.push('local');
 assert.deepEqual(source,before);

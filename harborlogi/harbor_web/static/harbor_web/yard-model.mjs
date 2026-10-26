@@ -83,6 +83,11 @@ export function moveBox(areas, boxes, id, placement) {
     orientation:placement.orientation,width:placement.orientation === 90 ? 1 : length,
     depth:placement.orientation === 90 ? length : 1,
     x:area.x+placement.column-1,y:area.y+placement.row-1,z:placement.level-1};
+  draft[index].positions = [];
+  for (let row=placement.row; row<placement.row+draft[index].depth; row++)
+    for (let column=placement.column; column<placement.column+draft[index].width; column++)
+      draft[index].positions.push(area.addresses?.[`${row},${column},${placement.level}`] ||
+        `${area.id} · ${row}행 ${column}열 ${placement.level}층`);
   const result = validatePlacement(areas,draft);
   return result.valid ? {...result,boxes:draft} : reject(result.reason);
 }
