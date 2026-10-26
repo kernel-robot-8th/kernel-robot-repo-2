@@ -46,6 +46,8 @@ Harbor 설치 담당자는 HTTPS origin/인증서·허용 주소·principal·서
 
 같은 principal의 토큰 회전은 기존 creator scope를 유지하지만 현재 Registry는 변경 뒤 재시작과 원래 실행 대조가 필요하다. principal이나 Fleet origin 교체는 이관이다. 과거 의도를 새 신원으로 다시 제출하거나 DB 값을 덮어쓰지 않는다. 발급·폐기·회전·재시작·원래 요청 조회의 증거를 운영자가 남긴다. 현재 Fleet service 역할에 없는 앱별 scope·만료 정책을 Harbor가 발명하지 않는다.
 
+기존에 사람 operator 자격을 서버 연결에 사용하던 설치는 그대로 rolling upgrade하지 않는다. 강화된 웹 Registry에서는 그 자격의 조회·취소도 거절된다. 기존 버전/원래 Fleet 콘솔에서 원래 실행의 대조·취소/정지·점유와 업무 복구를 완료하고 인계 기록을 보존한 뒤 전용 service로 새 운영을 시작한다. 미해결 실행이 있으면 기존 소유 경로를 유지하고 이관을 보류한다. 사람 principal의 역할을 service로 바꾸거나 Command의 creator/key를 덮어써 해결하지 않는다. 현재 격리된 service 시험을 이 legacy 이관의 운영 수용으로 세지 않는다.
+
 ## 구현 상태와 다음 수용
 
 | 항목 | 현재 근거 | 남은 확인 |
