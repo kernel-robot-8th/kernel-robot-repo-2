@@ -2,6 +2,8 @@
 import hashlib
 import json
 import os
+import socket
+import ssl
 import uuid
 from urllib.error import HTTPError, URLError
 
@@ -118,8 +120,13 @@ def check_connection(actor, *, expected_version):
                     'AUTHORIZATION_FAILED' if status == 403 else
                     'ARM_NOT_INSTALLED' if stage == 'arm' and status == 503 and code == 'ARM_TRANSFER_JOB_UNAVAILABLE' else
                     'ARM_API_UNCONFIRMED' if stage == 'arm' else 'SESSION_API_UNCONFIRMED')
-        except (URLError, TimeoutError, OSError):
-            result['reason'] = 'FLEET_UNREACHABLE'
+        except (URLError, TimeoutError, OSError) as error:
+            cause = error.reason if isinstance(error, URLError) else error
+            result['reason'] = (
+                'FLEET_DNS_UNRESOLVED' if isinstance(cause, socket.gaierror) else
+                'FLEET_TLS_UNTRUSTED' if isinstance(cause, ssl.SSLCertVerificationError) else
+                'FLEET_TLS_FAILED' if isinstance(cause, ssl.SSLError) else
+                'FLEET_TIMEOUT' if isinstance(cause, TimeoutError) else 'FLEET_UNREACHABLE')
         except (ValueError, TypeError, AttributeError):
             result['reason'] = 'INVALID_FLEET_RESPONSE'
     elif not config['allowed'] and config['origin']:
