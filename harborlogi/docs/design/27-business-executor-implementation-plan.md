@@ -78,7 +78,7 @@
 | 항목 | 결과 |
 |---|---|
 | P0① 미병합 커밋 `a60ac79` | main 미포함 확인(플랫폼 `application-contract-support.md`가 아직 없는 0004 A11을 참조 중). `docs/adr0004-a11-admission` 브랜치에 cherry-pick(`a8ae82b`)해 PR로 반영 제안. 본체 브랜치는 보존. |
-| P0② 하네스 재검증 | Windows 로컬(주입 가짜 장치)로 재실행: ① 셀/TRIP 기준 `584251615d…`(v1.292) 3 tests OK, ② 중립 TRIP `a8a7d6612…`(v1.298) `--transport-only` 1 test OK. 실행: 임시 깨끗한 고정 clone + `python -m tools.integration.real_fleet_http --platform-root <경로> --platform-sha <SHA>`. 중립 ARM `bb38fdcd…`(v1.312, `--arm-only`)과 web-arm은 실제 UDS가 필요해 **팀 시험 PC(Linux)에서 재실행 예정**. 기본 unittest 156 OK(skip 2, 고정 소스 없는 통합 시험). |
+| P0② 하네스 재검증 | Windows 로컬(주입 가짜 장치)로 재실행: ① 셀/TRIP 기준 `584251615d…`(v1.292) 3 tests OK, ② 중립 TRIP `a8a7d6612…`(v1.298) `--transport-only` 1 test OK. 실행: 임시 깨끗한 고정 clone + `python -m tools.integration.real_fleet_http --platform-root <경로> --platform-sha <SHA>`. 중립 ARM `bb38fdcd…`(v1.312, `--arm-only`)과 web-arm은 실제 UDS가 필요해 팀 시험 PC(Linux)로 미뤘고, 2026-10-27 모델 시험 PC에서 스택 tip `a4465b8`으로 재실행해 각 1통과했다([기록](../validation/2026-10-27-neutral-arm-modelpc-reverify.md)). 기본 unittest 156 OK(skip 2, 고정 소스 없는 통합 시험). |
 | P0③ 팀 검토 | 계획 문서(P27)와 ADR0004 A11 cherry-pick 두 PR로 요청. |
 
 ## P1·P2 착지 기록과 P3·P4 상태 (2026-10-27)
@@ -88,7 +88,7 @@
 | P1 업무 실행기 최소 루프 | 구현 완료([PR #37](https://github.com/kernel-robot-8th/kernel-robot-repo-2/pull/37)): 상시 실행기, `resume_arm`(서류상 HOLD 재개, 원래 key GET 대조), `COMPLETED` 상태, 수용 시험 7건. 구현 중 발견: HOLD에서 WAITING으로 돌아오는 경로가 없어 일시 오류가 영구 멈춤이었음 — `resume_arm`으로 해소. |
 | P2 업무 근거 어댑터 | 앱 쪽 구현 완료([PR #38](https://github.com/kernel-robot-8th/kernel-robot-repo-2/pull/38), #37 위 스택): 설치자 출처 설정(`HARBOR_PLACEMENT_SOURCES`·`HARBOR_RETREAT_SOURCES`), `EvidenceSubmission` 원본 보존 intake, 결속·신선·미소모 검사 provider. 운영 producer 전송·자격 계약은 여전히 설치 통합 담당(관측 수용 조건 산출물 1). |
 | P3 재계획·취소·불명 | 불명·원래 key 대조·취소 ACK 차단은 P1에 포함. 나머지(주문당 명령 이력, CANCELLED 종착, 재계획 착수 조건)는 [설계28](28-replan-and-cancel-structures.md)([PR #39](https://github.com/kernel-robot-8th/kernel-robot-repo-2/pull/39))로 확정 후 구현. 열린 질문: ARM 취소 뒤 Fleet 원장의 최종 상태 표기. |
-| P4 확장 게이트 | 전항목 대기: ARM 정책 admission은 ROSY D-865 확장(팔 단계 포함 범위)이 ADR0012 완료조건을 채운 뒤. 다칸 binding은 ADR0008 실행 binding 설계 필요. 중립 ARM(v1.312) 하네스 재검증은 팀 시험 PC(UDS) 예정. |
+| P4 확장 게이트 | 부분 진전: 다칸·팔 배정은 설계29(PR #41)로 결정·구현했다(다칸 `target_ref`=기준 칸 주소, 이동별 팔 설치는 설치 binding의 `yard_arm` 순서). 남은 대기는 ARM 정책 admission(ROSY D-865 확장이 ADR0012 완료조건을 채운 뒤)이다. 중립 ARM(v1.312) 하네스 재검증은 2026-10-27 모델 시험 PC에서 완료했다([기록](../validation/2026-10-27-neutral-arm-modelpc-reverify.md)). |
 | P4 도달 사전검사 전환 (2026-10-27 계약 확인) | 단순 교체 불가. v1.299 preflight는 **시뮬레이션 전용**(비시뮬레이션 배포 503 `ARM_PREFLIGHT_CLOSED`)이고 요청이 물리 참조(`workcell_id`·`instance_id`·`catalog_digest`·`source`·`target`) 단위다. `arm_reach`표의 (칸×팔) 도달 대체에는 팔별 설치 참조·배정 모델 재설계가 필요하고, 운영 배포는 여전히 별도 검증된 도달 원본이 필요하다. 착수 전 전용 설계 노트가 먼저다. |
 
 ## ADR0013 대조 결론 (2026-10-26 검토)
