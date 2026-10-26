@@ -1,5 +1,6 @@
 import {mountLinkedGrid, selectionFor, atPosition} from './yard-selection.mjs';
 import {cloneBoxes, transit, moveBox, placementFromWorld} from './yard-model.mjs';
+import {DraftSession} from './yard-draft.mjs';
 
 function fallback(figure) {
   const preview = figure.closest('[data-yard-preview]');
@@ -10,6 +11,7 @@ function fallback(figure) {
   preview.classList.remove('yard-linked');
   preview.querySelector('[data-yard-flat]').hidden = false;
   preview.querySelector('[data-yard-views]').hidden = true;
+  preview.querySelector('[data-yard-edit-tools]').hidden = true;
   preview.querySelector('[data-yard-3d-fallback]').hidden = false;
 }
 
@@ -29,7 +31,11 @@ export async function mountYardViewer(figure) {
   const animateMotion = figure.querySelector('[data-scene-animate]');
   const progress = figure.querySelector('[data-scene-progress]');
   const editor = figure.querySelector('[data-scene-editor]');
-  const editButton = figure.querySelector('[data-scene-action="edit"]');
+  const editTools = preview.querySelector('[data-yard-edit-tools]');
+  const editButton = editTools.querySelector('[data-scene-action="edit"]');
+  const loadPlan = editTools.querySelector('[data-scene-load-plan]');
+  const undo = editTools.querySelector('[data-scene-undo]');
+  const redo = editTools.querySelector('[data-scene-redo]');
   const draftState = figure.querySelector('[data-scene-draft]');
   const error = figure.querySelector('[data-scene-error]');
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -47,7 +53,7 @@ export async function mountYardViewer(figure) {
   let location = null, linked = null;
   let selected = '', current = cloneBoxes(scene.frames[index].boxes), draft = null;
   let playing = false, internalStep = false, isolated = false, timer = 0, raf = 0, animation = null;
-  let destroyed = false, draftHistory = [], replayIndex = 0;
+  let destroyed = false, draftHistory = [], replayIndex = 0, session = null;
   const ceiling = Math.max(...scene.areas.map(a => a.levels)) + .6;
   let renderer = null;
   renderer = createRenderer(canvas, scene.areas, {
@@ -70,20 +76,33 @@ export async function mountYardViewer(figure) {
     play.textContent = draft ? '가상 변경 재생' : '계획 재생'; play.setAttribute('aria-pressed', 'false');
     editButton.disabled = scene.kind === 'map-definition';
     if (draft && !destroyed) { renderer?.setEditable(true); editor.querySelector('fieldset').disabled = !selected; paint(draft); }
+    updateDraftState();
   }
   function status(text) { motion.textContent = text; }
   function boxes() { return draft || scene.frames[index].boxes; }
   function changedCount() {
-    return draft ? draft.filter(box => {
-      const original = scene.frames[index].boxes.find(b => b.id === box.id);
-      return ['area','row','column','level','orientation'].some(key => box[key] !== original[key]);
-    }).length : 0;
+    return session ? session.changes.length : 0;
   }
   function updateDraftState() {
     draftState.hidden = !draft;
     draftState.textContent = draft ? '가상 배치 · 변경 ' + changedCount() + '개 · 서버에 저장되지 않음' : '';
     figure.dataset.editing = String(Boolean(draft));
     figure.dataset.draftChanges = String(changedCount());
+    undo.disabled = !session || !session.cursor || playing;
+    redo.disabled = !session || session.cursor === session.history.length - 1 || playing;
+    loadPlan.disabled = Boolean(draft) || playing;
+    editTools.querySelector('[data-scene-change-panel]').hidden = !draft;
+    editTools.querySelector('[data-scene-change-count]').textContent = String(changedCount());
+    const changes = editTools.querySelector('[data-scene-changes]');
+    changes.replaceChildren();
+    for (const {before,after} of session?.changes || []) {
+      const item = document.createElement('li');
+      item.textContent = `${after.id} · ${before.positions.join(' / ')} → ${after.positions.join(' / ')}`;
+      changes.append(item);
+    }
+    editTools.querySelector('[data-scene-edit-help]').textContent = draft ?
+      `${selected || '화물 미선택'} · 화물을 고른 뒤 평면의 ‘여기로 이동’ 칸을 누르세요. 이동 불가 칸을 누르면 이유를 확인합니다.` :
+      '화물을 선택하고 가상 배치 편집을 시작하세요. 저장된 계획 결과도 불러와 수정할 수 있습니다.';
   }
   const selection = () => selectionFor(boxes().find(b => b.id === selected)) || location;
   const mode = () => scene.kind === 'map-definition' ? 'map-definition' : draft ? 'local-draft' : index ? 'predicted' : 'original';
@@ -127,14 +146,16 @@ export async function mountYardViewer(figure) {
   }
   function applyDraft(id, placement) {
     if (playing) return;
-    const result = moveBox(scene.areas, draft, id, placement);
+    const result = session.move(id, placement);
     error.textContent = result.valid ? '' : result.reason;
     if (result.valid) {
-      if (JSON.stringify(result.boxes) !== JSON.stringify(draft)) draftHistory.push(cloneBoxes(result.boxes));
+      draftHistory = session.frames;
       play.disabled = draftHistory.length < 2;
-      draft = result.boxes; status(id + ' 가상 위치 변경 · 논리 점유·지지 검사 통과');
+      draft = cloneBoxes(session.boxes); status(id + ' 가상 위치 변경 · 논리 점유·지지 검사 통과');
     }
-    paint(draft); select(id);
+    paint(draft);
+    if (result.valid) select(id); else details();
+    linked?.feedback(result.valid ? `${id} 이동 완료 · ${draft.find(box=>box.id===id).positions.join(' / ')} · 되돌리기로 복원할 수 있습니다.` : result.reason);
   }
   function lockDraft(value) {
     controls.forEach(button => { button.disabled = value; });
@@ -145,16 +166,24 @@ export async function mountYardViewer(figure) {
     editButton.textContent = value ? '원본 복원·편집 끝내기' : '가상 배치 편집';
     editor.hidden = !value; renderer.setEditable(value);
   }
-  function toggleEdit() {
+  function toggleEdit(usePlan = false) {
     stop(); cancelAnimationFrame(raf); animation = null; canvas.dataset.moving = 'false';
     if (draft) {
-      draft = null; draftHistory = []; lockDraft(false); paint(scene.frames[index].boxes);
+      draft = null; session = null; draftHistory = []; lockDraft(false); paint(scene.frames[index].boxes);
       status('가상 변경을 버리고 선택한 기준 배치를 복원했습니다.');
     } else {
-      draft = cloneBoxes(scene.frames[index].boxes); draftHistory = [cloneBoxes(draft)]; lockDraft(true); paint(draft);
-      status('박스를 선택하고 이동 핸들을 드래그하거나 아래 위치를 입력하세요.');
+      if (usePlan) controls[0]?.click();
+      const next = new DraftSession(scene.areas,scene.frames[index].boxes);
+      if (usePlan) {
+        const result = next.load(scene.frames.map(frame=>frame.boxes));
+        if (!result.valid) { error.textContent = result.reason; return; }
+      }
+      session = next; draft = cloneBoxes(session.boxes); draftHistory = session.frames; lockDraft(true); paint(draft);
+      selected ||= draft.find(box=>box.role==='target')?.id || draft[0]?.id || '';
+      status(usePlan ? '저장된 이동 순서와 결과를 불러왔습니다. 되돌리거나 이어서 편집하세요.' : '목적 칸 클릭·3D 이동 핸들·좌표 입력으로 배치하세요.');
     }
     error.textContent = ''; fillCargo(); select(selected);
+    showFlat(flatView);
   }
   function advance(delay = 550) {
     if (!playing) return;
@@ -248,7 +277,8 @@ export async function mountYardViewer(figure) {
       stop();
       if (!draft) selectFrame(index, false);
     }
-    figure.hidden = !desktop.matches && value;
+    figure.hidden = !desktop.matches && value && !draft;
+    figure.classList.toggle('flat-edit', !desktop.matches && value && Boolean(draft));
     if (linked) linked.grid.hidden = !desktop.matches && !value;
     flat.hidden = true;
     views.querySelectorAll('[data-yard-view]').forEach(button => button.setAttribute('aria-pressed', String((button.dataset.yardView === 'flat') === value)));
@@ -257,13 +287,19 @@ export async function mountYardViewer(figure) {
   on(desktop, 'change', () => showFlat(flatView));
   linked = mountLinkedGrid(preview, scene, value => {
     if (animation || playing) { stop(); selectFrame(index, false); }
-    if (value.cargoId) { select(value.cargoId); renderer.fit(value.cargoId); }
+    if (draft && selected && !value.cargoId) {
+      const box = draft.find(item=>item.id===selected);
+      applyDraft(selected,{...value,orientation:box.orientation});
+      return;
+    }
+    if (value.cargoId) { error.textContent = ''; select(value.cargoId); renderer.fit(value.cargoId); }
     else {
       selected = ''; location = value; renderer.select(null); renderer.isolate(null);
       isolated = false; figure.querySelector('[data-scene-action="isolate"]').setAttribute('aria-pressed', 'false');
       details(); syncLinked(); renderer.fitLocation(value);
     }
-  });
+  }, position => draft && selected && !playing ? moveBox(scene.areas,draft,selected,
+    {...position,orientation:draft.find(box=>box.id===selected).orientation}) : null);
   scene.areas.forEach(area => editor.elements.area.add(new Option(area.label + ' · ' + area.id, area.id)));
   on(editor, 'submit', event => {
     event.preventDefault();
@@ -273,12 +309,20 @@ export async function mountYardViewer(figure) {
       orientation: Number(editor.elements.orientation.value)});
   });
   on(cargo, 'change', () => { error.textContent = ''; select(cargo.value); });
+  on(editButton, 'click', () => toggleEdit());
+  on(loadPlan, 'click', () => { if (!draft && scene.frames.length > 1) toggleEdit(true); });
+  for (const [button,action] of [[undo,'undo'],[redo,'redo']]) on(button,'click',()=>{
+    if (!session || playing) return;
+    stop(); session[action](); draft = cloneBoxes(session.boxes); draftHistory = session.frames;
+    play.disabled = draftHistory.length < 2; error.textContent = '';
+    paint(draft); select(selected); status(action === 'undo' ? '직전 이동을 되돌렸습니다.' : '이동을 다시 적용했습니다.');
+  });
   on(play, 'click', () => {
     if (playing || animation) { stop(); if (!draft) selectFrame(index, false); return; }
     playing = true; play.textContent = '재생 중지'; play.setAttribute('aria-pressed', 'true');
     if (draft) {
       replayIndex = 0; paint(draftHistory[0]); renderer.setEditable(false);
-      editor.querySelector('fieldset').disabled = true; editButton.disabled = true; advance(); return;
+      editor.querySelector('fieldset').disabled = true; editButton.disabled = true; updateDraftState(); advance(); return;
     }
     if (index === scene.frames.length - 1) { internalStep = true; controls[0].click(); internalStep = false; }
     else if (!animation) advance();
@@ -288,7 +332,6 @@ export async function mountYardViewer(figure) {
   views.querySelectorAll('[data-yard-view]').forEach(button => on(button, 'click', () => showFlat(button.dataset.yardView === 'flat')));
   figure.querySelectorAll('[data-scene-action]').forEach(button => on(button, 'click', async () => {
     const action = button.dataset.sceneAction;
-    if (action === 'edit') toggleEdit();
     if (action === 'focus') renderer.fit(selected);
     if (action === 'fit') renderer.fit();
     if (action === 'isolate') {
@@ -324,6 +367,8 @@ export async function mountYardViewer(figure) {
     figure.querySelector('[data-scene-step]').textContent = scene.frames[index].label;
     status(scene.frames[index].label);
   }
+  editTools.hidden = scene.kind === 'map-definition';
+  loadPlan.hidden = scene.frames.length < 2 || controls.length !== scene.frames.length;
   figure.querySelector('[data-scene-action="fullscreen"]').hidden = !document.fullscreenEnabled;
   preview.classList.add('yard-linked');
   paint(current); fillCargo(); syncLinked(); views.hidden = false; showFlat(false);

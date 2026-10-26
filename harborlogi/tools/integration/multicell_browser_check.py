@@ -110,6 +110,8 @@ def main():
             result['checks'].append('Actual browser creates complete atomic spatial plan: blocker, target, restore; three cargo moves, never per-cell moves')
             from tools.integration.candidate_browser_checks import exercise_candidate_preview
             result['checks'].extend(exercise_candidate_preview(page, origin, plan, output))
+            from tools.integration.direct_placement_browser_checks import exercise_direct_placement
+            result['checks'].extend(exercise_direct_placement(page, origin, plan, output))
             page.locator('[data-yard-3d][data-ready=true]').wait_for()
             assert page.locator('canvas[data-box-count="6"]').count() == 1
             page.locator('[data-scene-cargo]').select_option('C1')

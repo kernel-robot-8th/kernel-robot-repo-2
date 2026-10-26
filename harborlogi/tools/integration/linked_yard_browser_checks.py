@@ -115,7 +115,8 @@ def exercise_linked_views(page, output):
 
     page.set_viewport_size(dict(width=390, height=844))
     page.locator('[data-yard-view="flat"]').click()
-    assert grid.is_visible() and figure.is_hidden()
+    assert grid.is_visible() and figure.is_visible()
+    assert page.locator('.model-viewport').is_hidden() and editor.is_visible(), 'Flat editing keeps its controls available'
     assert grid.get_attribute('data-source') == 'local-draft'
     grid.locator('[data-cargo-id="C2"]').click()
     page.locator('[data-yard-view="3d"]').click()
