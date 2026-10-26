@@ -3,6 +3,7 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.http import Http404
 from django.views.decorators.http import require_http_methods
 
 from harbor_web import commands, services
@@ -75,6 +76,27 @@ def plan_detail(request, pk):
     return page(request, 'plan.html', section='inventory', plan=plan, display_moves=[], gate=gate,
                 gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']), command=None,
                 observation_stage=observation_stage, yard_scene=scene_for([observation_stage]) if observation_stage else None)
+
+
+@require_roles('viewer', 'operator', 'admin')
+@require_http_methods(['GET'])
+def candidate_preview(request, pk, rank):
+    from harbor_web.recommendation_view import candidate_details
+    from harbor_web.workspace import spatial_stages, plan_changes
+    from harbor_web.yard_scene import scene_for
+    plan = get_object_or_404(Plan.objects.select_related('order__cargo', 'observation__condition', 'condition'), pk=pk)
+    details = candidate_details(plan.result, rank)
+    if details is None or not isinstance(plan.observation.payload, dict) or plan.observation.payload.get('schema') != 'grid-placement-v1':
+        raise Http404('저장된 공간 비교 후보가 없습니다.')
+    try:
+        stages, moves = spatial_stages(plan.order, plan.observation, details['candidate']['moves'])
+    except (KeyError, TypeError, ValueError, ValidationError) as error:
+        raise Http404('저장된 후보의 배치 자료를 읽을 수 없습니다.') from error
+    return page(request, 'candidate_preview.html', section='outbound', plan=plan, rank=rank,
+        is_recommended=rank == 1, score_rows=details['score_rows'],
+        optimization_quality=details['quality_label'], search_complete=details['search_complete'],
+        candidate_ranks=range(1, details['candidate_count'] + 1), plan_changes=plan_changes(plan.order, plan),
+        yard_stages=stages, display_moves=moves, yard_scene=scene_for(stages))
 
 
 @require_roles('viewer', 'operator', 'admin')

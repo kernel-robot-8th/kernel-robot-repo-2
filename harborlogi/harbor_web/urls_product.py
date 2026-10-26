@@ -22,6 +22,7 @@ urlpatterns = [
     path('settings/conditions/<int:pk>/map/validate/', map_pages.map_validate, name='map_validate'),
     path('settings/conditions/new/', views.condition_new, name='condition_new'),
     path('plans/<int:pk>/', planning_pages.plan_detail, name='plan_detail'),
+    path('plans/<int:pk>/candidates/<int:rank>/', planning_pages.candidate_preview, name='candidate_preview'),
     path('work/', planning_pages.work_list, name='work'),
     path('work/<int:pk>/', planning_pages.work_detail, name='work_detail'),
     path('field/', field_pages.field_list, name='field'),

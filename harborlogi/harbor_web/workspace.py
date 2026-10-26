@@ -36,7 +36,7 @@ def _yard_stages(order, plan, source):
     if not source:
         return [], []
     if source.payload.get('schema') == 'grid-placement-v1':
-        return _spatial_stages(order, plan, source)
+        return spatial_stages(order, source, plan.result['moves'] if plan and plan.result['status'] == 'READY' else [])
     target = order.cargo.code
     blockers = set()
     for bay in source.payload['bays']:
@@ -65,10 +65,9 @@ def _yard_stages(order, plan, source):
     return stages, display_moves
 
 
-def _spatial_stages(order, plan, source):
+def spatial_stages(order, source, moves):
     from harbor.spatial import Placement
     current = services.spatial_snapshot(source)
-    moves = plan.result['moves'] if plan and plan.result['status'] == 'READY' else []
     blockers = {m['cargo_id'] for m in moves if m['phase_label'] == '재취급'}
 
     def stage(index, phase, label, move=None):
@@ -77,7 +76,13 @@ def _spatial_stages(order, plan, source):
 
     stages, display_moves = [stage(0, '관측', '관측한 배치')], []
     for i, move in enumerate(moves):
+        source_placement = Placement(**move['source_placement'])
         destination = Placement(**move['destination_placement'])
+        actual = next((placed for placed in current.placements if placed.cargo_id == move['cargo_id']), None)
+        if actual != source_placement or source_placement.cargo_id != move['cargo_id'] or destination.cargo_id != move['cargo_id']:
+            raise ValueError('Stored move does not match its source cargo placement')
+        if destination.orientation != source_placement.orientation or move.get('footprint_revision') != current.shape(move['cargo_id']).footprint_revision:
+            raise ValueError('Stored move changes the fixed cargo footprint or orientation')
         current = current.with_placements(tuple(destination if p.cargo_id == move['cargo_id'] else p for p in current.placements))
         display = dict(move, number=i + 1, source_level=move['source_placement']['level'],
                        destination_level=destination.level, spatial=True)
