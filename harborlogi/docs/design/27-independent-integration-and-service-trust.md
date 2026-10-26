@@ -52,7 +52,7 @@ Harbor 설치 담당자는 HTTPS origin/인증서·허용 주소·principal·서
 
 | 항목 | 현재 근거 | 남은 확인 |
 |---|---|---|
-| Harbor 신원 결속 | 호출 전 expected principal/service 검사와 응답 결속 | 고정 양 끝 최신 실제 HTTP 재검증 |
+| Harbor 신원 결속 | 호출 전 expected principal/service 검사·응답 결속, Harbor4713a925/ROSY13503545 실제 HTTP2 PASS | 운영 자격/설치 수용 |
 | Fleet 중립 ARM·service bootstrap | ROSY 로컬 main에 검증된13503545 포함 | 공개 게시/정식 설치 증거 |
 | 운영 연결 | 과거221aedf1 운영 기준 조사 기록 | 최신 DNS·자격 발급·설치·원래 요청 대조 |
 | 설치 대응/관측 | 논리 맵·크기 원본·검증된 simulation 경로 | production 다칸 binding·인증된 업무 producer |
