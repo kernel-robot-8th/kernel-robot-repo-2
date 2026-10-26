@@ -79,7 +79,7 @@
 |---|---|
 | P0① 미병합 커밋 `a60ac79` | main 미포함 확인(플랫폼 `application-contract-support.md`가 아직 없는 0004 A11을 참조 중). `docs/adr0004-a11-admission` 브랜치에 cherry-pick(`a8ae82b`)해 PR로 반영 제안. 본체 브랜치는 보존. |
 | P0② 하네스 재검증 | Windows 로컬(주입 가짜 장치)로 재실행: ① 셀/TRIP 기준 `584251615d…`(v1.292) 3 tests OK, ② 중립 TRIP `a8a7d6612…`(v1.298) `--transport-only` 1 test OK. 실행: 임시 깨끗한 고정 clone + `python -m tools.integration.real_fleet_http --platform-root <경로> --platform-sha <SHA>`. 중립 ARM `bb38fdcd…`(v1.312, `--arm-only`)과 web-arm은 실제 UDS가 필요해 팀 시험 PC(Linux)로 미뤘고, 2026-10-27 모델 시험 PC에서 스택 tip `a4465b8`으로 재실행해 각 1통과했다([기록](../validation/2026-10-27-neutral-arm-modelpc-reverify.md)). 기본 unittest 156 OK(skip 2, 고정 소스 없는 통합 시험). |
-| P0③ 팀 검토 | 계획 문서(P27)와 ADR0004 A11 cherry-pick 두 PR로 요청. |
+| P0③ 팀 검토 | 계획 문서(P31)와 ADR0004 A11 cherry-pick 두 PR로 요청. |
 
 ## P1·P2 착지 기록과 P3·P4 상태 (2026-10-27)
 

@@ -71,6 +71,7 @@ class FleetConnectionTests(TransactionTestCase):
         for session, error, expected in [
             ({'principal_id': 'other', 'role': 'service'}, None, 'PRINCIPAL_MISMATCH'),
             ({'principal_id': 'harbor-service', 'role': 'viewer'}, None, 'ROLE_NOT_SUITABLE'),
+            ({'principal_id': 'harbor-service', 'role': 'operator'}, None, 'ROLE_NOT_SUITABLE'),
             ({'principal_id': 'harbor-service', 'role': 'service'}, self.missing('Not Found'), 'ARM_API_UNCONFIRMED'),
             ({'principal_id': 'harbor-service', 'role': 'service'}, self.missing('ARM_TRANSFER_JOB_UNAVAILABLE', 503), 'ARM_NOT_INSTALLED'),
         ]:
