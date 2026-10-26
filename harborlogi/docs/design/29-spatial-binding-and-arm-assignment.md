@@ -36,7 +36,7 @@
 
 남은 열린 질문(구현 착수 전 설치 통합 담당 확정):
 
-3. preflight `catalog_digest`의 발급·갱신 절차 — preflight 소비(설치 검증 보조)를 여는 별도 변경에서 확정한다.
+3. preflight `catalog_digest`의 발급·갱신 절차 — [설계 30](30-arm-preflight-catalog-digest.md)으로 선택지와 결정 요청을 분리했다. 결정 전에는 preflight 소비 코드를 열지 않는다.
 
 ## 수용 시험 (구현의 완료 기준)
 
