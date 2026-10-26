@@ -25,11 +25,18 @@
 - binding을 **이동당 하나**에서 **(이동, 팔)당 하나**로 설치한다. 주 팔·대체 팔은 설치 대응의 순서로 정해지고 `plan_outbound`는 (칸×팔) 표 대신 "이 이동의 binding 후보 집합"으로 배정한다. `arm_reach` 표는 이 대응이 검증·설치되는 순간 폐지한다.
 - 운영 배포의 도달 원본은 **검증된 설치 대응**이다. v1.299 preflight는 시뮬레이션 전용이므로 운영 원본이 될 수 없고, 설치 대응 검증(설계24의 검토 단계)을 보조하는 조회로만 쓴다. preflight를 소비하려면 `catalog_digest` 발급 절차와 함께 별도 변경으로 열고, 그때 기준 플랫폼 핀을 v1.299 이상으로 올려 하네스로 양 끝을 확인한다.
 
-## 열린 질문 (구현 착수 전 설치 통합 담당 확정)
+## 결정 기록과 열린 질문
 
-1. 다칸 `target_ref`의 설치 명명 규약 — 앵커 칸 주소인지 전체 점유 영역의 digest 참조인지.
-2. `instance_id` → 암 A/B 대응(퇴피 근거 검증용)의 정본을 어디에 둘지 — binding 파일 안인지 설치 문서인지.
-3. preflight `catalog_digest`의 발급·갱신 절차.
+2026-10-27 사용자 확정:
+
+1. **다칸 `target_ref` 명명 규약 — 앵커 칸 주소.** `target_ref`는 배치 앵커 칸의 정규 주소(`area-rR-cC-lL`)를 가리킨다. footprint revision·방향이 나머지 점유를 유일하게 결정하므로 사람이 읽고 설치 검증·감사할 수 있다. binding은 이 일치를 구조적으로 강제한다.
+2. **`instance_id` → 암 A/B 대응의 정본 — binding 파일 안.** 각 binding 항목이 `yard_arm`(A|B) 필드를 가진다. 설치 검증이 한 파일에서 끝나고 퇴피 근거 검증(`move_arms`)이 바로 이어진다.
+
+제안 1은 이 결정으로 구현되었다([PR #43](https://github.com/kernel-robot-8th/kernel-robot-repo-2/pull/43)). 제안 2(팔별 binding 전환·`arm_reach` 폐지)는 후속 구현이다.
+
+남은 열린 질문(구현 착수 전 설치 통합 담당 확정):
+
+3. preflight `catalog_digest`의 발급·갱신 절차 — preflight 소비(설치 검증 보조)를 여는 별도 변경에서 확정한다.
 
 ## 수용 시험 (구현의 완료 기준)
 
