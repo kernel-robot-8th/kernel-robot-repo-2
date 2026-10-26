@@ -1,6 +1,6 @@
 # 재계획과 취소의 상태 구조
 
-2026-10-27. 결정: [ADR0013](../adr/0013-independent-business-execution-and-platform.md). 상위 계획: [설계27 P3](27-business-executor-implementation-plan.md). 상태: **상세설계(제안)** — 구현 전 확정 사항과 열린 질문을 적는다. 실행기(P1)와 근거 어댑터(P2)는 이미 착지했다.
+2026-10-27. 결정: [ADR0013](../adr/0013-independent-business-execution-and-platform.md). 상위 계획: [설계31 P3](31-business-executor-implementation-plan.md). 상태: **상세설계(제안)** — 구현 전 확정 사항과 열린 질문을 적는다. 실행기(P1)와 근거 어댑터(P2)는 이미 착지했다.
 
 ## 현재 제약
 

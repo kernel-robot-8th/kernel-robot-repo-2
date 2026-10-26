@@ -32,6 +32,7 @@
 | 24 | [업무 실행기와 플랫폼 경계](24-business-execution-boundary.md), [ADR0013](../adr/0013-independent-business-execution-and-platform.md) | 목표 달성까지의 업무 운용, 연동 어댑터, 지속 실행·복구·재계획, ROSY의 독립 실행 권한. 구현 전 설계 |
 | 25 | [Fleet 연결 설정과 계약 확인](25-fleet-connection-bridge.md) | 관리자 연결 프로필·서버 자격·명시적 신원/ARM 조회 검사·기존 제출/대조 설정의 일치 |
 | 26 | [2D·3D 공통 보기와 계산 추천](26-linked-yard-and-ranked-recommendation.md), [ADR0014](../adr/0014-linked-spatial-views-and-ranked-planning.md) | 정확한 전체 점유 주소·양방향 선택·가상 편집, 완전한 반출 후보 비교·지지 그래프·탐색 한계 |
+| 27 | [독립 서비스 인증과 협력](27-independent-integration-and-service-trust.md), [ADR0015](../adr/0015-service-identity-and-independent-integration.md) | 사람/기계/승인/관측 신원 분리, 공개 계약·데이터 소유·자격 교체·실제 수용 단계 |
 | 28 | [재계획과 취소의 상태 구조](28-replan-and-cancel-structures.md) | 주문당 명령 이력(활성 유일 제약), 취소 종착 상태와 열린 계약 질문, 재계획 착수 조건과 수용 시험. 구현 전 상세설계 |
 
 새 화면을 설계할 때는 07→08→09를 먼저 읽고 01~05의 역할·계약·수용 조건과 대조한다. 운영 현황/업무/사용 안내와 토큰은 10에서 로컬 페이지로 구현했다. 전체 제품 메뉴·운영 권한·실물 수용까지 완료한 것은 아니다.
