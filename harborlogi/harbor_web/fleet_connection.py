@@ -96,7 +96,7 @@ def check_connection(actor, *, expected_version):
                 result['reason'] = 'SESSION_SCHEMA_UNCONFIRMED'
             elif session['principal_id'] != config['principal']:
                 result['reason'] = 'PRINCIPAL_MISMATCH'
-            elif session['role'] not in {'operator', 'service'}:
+            elif session['role'] != 'service':
                 result['reason'] = 'ROLE_NOT_SUITABLE'
             else:
                 result['session'] = 'MATCHED'
