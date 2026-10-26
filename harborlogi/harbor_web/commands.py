@@ -16,7 +16,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from harbor.ownership import WriterLease
-from harbor.process import ArmTransferBinding, bind_plan
+from harbor.process import ArmTransferBinding, SpatialPlacementBinding, anchor_address, bind_plan, load_bindings
 from harbor.outbound import CargoMove, OutboundProposal
 from harbor.rosy_http import RosyClient
 from harbor.workflow import BusinessLedger
@@ -56,12 +56,50 @@ def _identity(config):
     return hashlib.sha256(str(config['path']).casefold().encode()).hexdigest()
 
 
-def _bound(plan, config):
+def _bindings(config):
     with open(config['bindings'], encoding='utf-8') as source:
-        bindings = tuple(ArmTransferBinding(**item) for item in json.load(source))
+        return load_bindings(json.load(source))
+
+
+def _matching_spatial(plan, installed):
+    """The one installed spatial binding that authorizes exactly this placement, or None.
+
+    Design 29: the recommendation tuple, footprint revision, and cargo must all
+    match a single installed binding; anything else keeps the execution gate.
+    """
+    recommendation = plan.result.get('recommendation')
+    if not isinstance(recommendation, dict) or plan.result.get('status') != 'READY':
+        return None
+    matches = [binding for binding in installed
+               if isinstance(binding, SpatialPlacementBinding)
+               and binding.matches(recommendation, plan.result.get('footprint_revision'), plan.order.cargo.code)]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _spatial_from_path(plan, path):
+    if not path:
+        return None
+    try:
+        with open(path, encoding='utf-8') as source:
+            return _matching_spatial(plan, load_bindings(json.load(source)))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _spatial_binding(plan, config):
+    return _spatial_from_path(plan, config['bindings'])
+
+
+def _bound(plan, config):
+    bindings = _bindings(config)
+    if plan.result.get('model') == 'grid-placement-v1':
+        spatial = _matching_spatial(plan, bindings)
+        if spatial is None:
+            raise ValueError('No installed spatial binding matches this placement')
+        return (spatial.move(),)
     proposal = OutboundProposal(plan.result['status'], plan.result['reason'], plan.result['source_revision'],
                                tuple(CargoMove(**move) for move in plan.result['moves']))
-    return bind_plan(proposal, bindings)
+    return bind_plan(proposal, tuple(b for b in bindings if not isinstance(b, SpatialPlacementBinding)))
 
 
 @serialized
@@ -75,14 +113,17 @@ def capability(plan):
         if blocked:
             raise ValidationError(blocked)
         if plan.result.get('model') == 'grid-placement-v1':
-            raise ValidationError('SPATIAL_EXECUTION_BINDINGS_REQUIRED')
-        from harbor_web.models import CargoFootprint
-        source_codes = {plan.order.cargo.code}
-        for bay in plan.observation.payload.get('bays', []):
-            source_codes.update(bay['cargo'])
-        source_codes.update(h['cargo_id'] for h in plan.observation.payload.get('holdings', []))
-        if CargoFootprint.objects.filter(cargo__code__in=source_codes, length_cells__gt=1).exists():
-            raise ValidationError('SPATIAL_OBSERVATION_REQUIRED')
+            # Answerable from the installed bindings alone, before execution configuration.
+            if _spatial_from_path(plan, os.environ.get('HARBOR_BINDINGS_PATH', '')) is None:
+                raise ValidationError('SPATIAL_EXECUTION_BINDINGS_REQUIRED')
+        else:
+            from harbor_web.models import CargoFootprint
+            source_codes = {plan.order.cargo.code}
+            for bay in plan.observation.payload.get('bays', []):
+                source_codes.update(bay['cargo'])
+            source_codes.update(h['cargo_id'] for h in plan.observation.payload.get('holdings', []))
+            if CargoFootprint.objects.filter(cargo__code__in=source_codes, length_cells__gt=1).exists():
+                raise ValidationError('SPATIAL_OBSERVATION_REQUIRED')
         config = _config()
         origin = config['origin']
         if plan.result.get('status') != 'READY':
@@ -198,10 +239,17 @@ def prepare_command(actor, *, plan_id, expected_version):
         if not capability(plan)['enabled']:
             Audit.objects.create(actor=actor, action='command.blocked', object_type='Plan', object_id=str(plan.pk))
             raise ValidationError('Execution inputs unavailable.')
-        bindings = _bound(plan, registry.config)
-        body = dict(moves=[b.__dict__ for b in bindings], revision=plan.result['source_revision'],
-                    outbound_id=plan.order.cargo.code, outbound_stand=constraints(plan.condition.payload).outbound_stand,
-                    move_arms=[[m['primary_arm'], *m.get('alternate_arms', [])] for m in plan.result['moves']])
+        if plan.result.get('model') == 'grid-placement-v1':
+            spatial = _spatial_binding(plan, registry.config)
+            body = dict(moves=[spatial.move().__dict__], revision=plan.result['source_revision'],
+                        outbound_id=plan.order.cargo.code, outbound_stand=spatial.anchor(),
+                        move_arms=[[spatial.yard_arm]])
+        else:
+            bindings = _bound(plan, registry.config)
+            body = dict(moves=[b.__dict__ for b in bindings], revision=plan.result['source_revision'],
+                        outbound_id=plan.order.cargo.code,
+                        outbound_stand=constraints(plan.condition.payload).outbound_stand,
+                        move_arms=[[m['primary_arm'], *m.get('alternate_arms', [])] for m in plan.result['moves']])
         with transaction.atomic():
             command = Command.objects.create(plan=plan, order=plan.order, actor=actor, plan_version=expected_version,
                 ledger_identity=_identity(registry.config), fleet_origin=registry.config['origin'],

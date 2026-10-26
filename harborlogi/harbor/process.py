@@ -3,7 +3,7 @@ import hashlib
 import json
 import re
 
-from harbor.model import identifier
+from harbor.model import YARD_ARMS, identifier
 from harbor.outbound import OutboundProposal
 
 
@@ -102,6 +102,82 @@ class ArmTransferBinding:
         for key in ("receipt_id", "action_id", "attempt_id"):
             identifier(receipt.get(key))
         return receipt
+
+
+def anchor_address(area_id, row, column, level):
+    """Canonical placement-anchor address naming convention (user decision 2026-10-27)."""
+    return f'{area_id}-r{row}-c{column}-l{level}'
+
+
+@dataclass(frozen=True)
+class SpatialPlacementBinding:
+    """An inbound placement bound to installed physical references (design 29).
+
+    The business key is the full placement tuple; the physical target reference
+    names the placement anchor address, and the yard arm for retreat evidence
+    lives in the binding (user decision 2026-10-27). The ledger-facing move is
+    a plain ARM transfer to that anchor address.
+    """
+    cargo_id: str
+    footprint_revision: int
+    area_id: str
+    row: int
+    column: int
+    level: int
+    orientation: int
+    source: str
+    yard_arm: str
+    workcell_id: str
+    instance_id: str
+    object_ref: str
+    source_ref: str
+    target_ref: str
+
+    def __post_init__(self):
+        for value in (self.cargo_id, self.area_id, self.source, self.workcell_id,
+                      self.instance_id, self.object_ref, self.source_ref, self.target_ref):
+            identifier(value)
+            if len(value) > 192 or value != value.strip() or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value):
+                raise ValueError('Invalid spatial placement binding reference')
+        if self.yard_arm not in YARD_ARMS:
+            raise ValueError('Spatial placement binding names one yard arm A/B')
+        if self.orientation not in (0, 90):
+            raise ValueError('Spatial orientation is 0 or 90 degrees')
+        if type(self.footprint_revision) is not int or self.footprint_revision < 1:
+            raise ValueError('Footprint revision must be positive')
+        for name in ('row', 'column', 'level'):
+            value = getattr(self, name)
+            if type(value) is not int or value < 1:
+                raise ValueError('Placement grid coordinates are positive integers')
+        if self.source_ref == self.target_ref:
+            raise ValueError('Physical source and target must differ')
+        if self.target_ref != anchor_address(self.area_id, self.row, self.column, self.level):
+            raise ValueError('Physical target must name the placement anchor address')
+
+    def anchor(self):
+        return anchor_address(self.area_id, self.row, self.column, self.level)
+
+    def matches(self, recommendation, footprint_revision, cargo_id):
+        """The binding authorizes exactly this placement tuple (design 29)."""
+        return (self.cargo_id == cargo_id and self.footprint_revision == footprint_revision
+                and self.area_id == recommendation['area_id'] and self.row == recommendation['row']
+                and self.column == recommendation['column'] and self.level == recommendation['level']
+                and self.orientation == recommendation.get('orientation', 0))
+
+    def move(self):
+        return ArmTransferBinding(self.cargo_id, self.source, self.anchor(), self.workcell_id,
+                                  self.instance_id, self.object_ref, self.source_ref, self.target_ref)
+
+
+def load_bindings(items):
+    """Installed binding entries: a footprint key makes a spatial placement binding."""
+    bindings = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError('Installed bindings are objects')
+        bindings.append(SpatialPlacementBinding(**item) if 'footprint_revision' in item
+                        else ArmTransferBinding(**item))
+    return tuple(bindings)
 
 
 def bind_plan(proposal: OutboundProposal,
