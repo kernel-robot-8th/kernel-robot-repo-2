@@ -64,3 +64,16 @@ class CommandFact(Immutable):
     job = models.JSONField()
     receipt = models.JSONField(null=True)
     read_at = models.DateTimeField()
+
+
+class EvidenceSubmission(Immutable):
+    """One submitted placement/retreat observation pair, original identity preserved.
+
+    The raw payloads are stored exactly as submitted; the adapter revalidates and binds
+    them to the current business execution at consumption time (design 24/27 P2).
+    """
+    command = models.ForeignKey(Command, on_delete=models.PROTECT, related_name='evidence_submissions')
+    placement = models.JSONField()
+    retreat = models.JSONField()
+    received_at = models.DateTimeField(auto_now_add=True)
+

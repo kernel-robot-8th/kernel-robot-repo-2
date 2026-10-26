@@ -177,11 +177,22 @@ def tick(*, evidence=None, now=None, registry=None):
     return dict(ran=True, reason='', results=results)
 
 
+def _loop_evidence():
+    """The production provider (P2): intake-backed when the deployment opts in."""
+    if os.environ.get('HARBOR_EXECUTOR_EVIDENCE') != 'intake':
+        return None
+    try:
+        from harbor_web.evidence import intake_provider
+        return intake_provider()
+    except Exception:
+        return None
+
+
 def _run(interval):
     while not _stop.wait(interval):
         try:
             close_old_connections()
-            tick()
+            tick(evidence=_loop_evidence())
         except Exception:
             pass  # Never die; the next interval retries.
 

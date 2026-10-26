@@ -34,6 +34,7 @@ def _digest(value):
 
 def _config():
     from harbor_web.fleet_connection import connection_settings
+    from harbor_web.evidence import configured_sources
     connection = connection_settings()
     if connection['origin'] and not connection['allowed']:
         raise ValidationError('ORIGIN_NOT_ALLOWED')
@@ -45,8 +46,9 @@ def _config():
     RosyClient(origin, token)
     if len(principal) > 192 or not principal.strip() or any(ord(c) < 32 for c in principal):
         raise ValidationError('INVALID_FLEET_PRINCIPAL')
+    evidence_sources = configured_sources()  # Raises on malformed or overlapping sets.
     return dict(path=Path(path).resolve(), origin=origin.rstrip('/'), token=token,
-                principal=principal, bindings=bindings)
+                principal=principal, bindings=bindings, evidence_sources=evidence_sources)
 
 
 def _identity(config):
@@ -118,9 +120,12 @@ class Registry:
         self.lease = WriterLease(config['path'])
         self.lease.__enter__()
         try:
-            # These sources cannot authorize anything: no confirm/finish endpoint exists.
-            self.ledger = BusinessLedger(config['path'], placement_sources=('web-unconfigured-placement',),
-                                         retreat_sources=('web-unconfigured-retreat',))
+            from harbor_web.evidence import ledger_sources
+            # Unconfigured deployments keep placeholder sources that cannot authorize
+            # anything: no real submission ever carries them.
+            placement_sources, retreat_sources = ledger_sources()
+            self.ledger = BusinessLedger(config['path'], placement_sources=placement_sources,
+                                         retreat_sources=retreat_sources)
             self.client = RosyClient(config['origin'], config['token'])
             self.client.expected_principal = config['principal']
             self.locks = {}
