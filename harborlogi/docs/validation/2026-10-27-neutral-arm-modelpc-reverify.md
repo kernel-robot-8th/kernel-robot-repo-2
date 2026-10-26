@@ -1,6 +1,6 @@
 # 중립 ARM·웹 경로의 재검증 (모델 시험 PC)
 
-2026-10-27. 설계 [27](../design/27-business-executor-implementation-plan.md) P0②가 "팀 시험 PC(Linux)에서 재실행 예정"으로 남긴 중립 ARM `--arm-only`와 `--web-arm-only`를 실제로 실행한 기록이다. 실행 대상은 Harbor 스택의 끝 `a4465b81f973a8d50506eb374f50c8ddcf8ec228`(실행기·근거·이력·다칸·팔별 대응, PR #44 head)와 플랫폼 고정 commit `bb38fdcdd0140873e4e9d0133662982c1d6a30e0`(API v1.312)이다.
+2026-10-27. 설계 [31](../design/31-business-executor-implementation-plan.md) P0②가 "팀 시험 PC(Linux)에서 재실행 예정"으로 남긴 중립 ARM `--arm-only`와 `--web-arm-only`를 실제로 실행한 기록이다. 실행 대상은 Harbor 스택의 끝 `a4465b81f973a8d50506eb374f50c8ddcf8ec228`(실행기·근거·이력·다칸·팔별 대응, PR #44 head)와 플랫폼 고정 commit `bb38fdcdd0140873e4e9d0133662982c1d6a30e0`(API v1.312)이다.
 
 [2026-10-24 기록](2026-10-24-neutral-arm-http.md)·[2026-10-25 기록](2026-10-25-operator-pipeline.md)과 플랫폼 고정은 같고 Harbor 쪽이 실행기·근거·이력·다칸·팔별 대응까지 쌓인 지금의 tip이라는 점이 다르다.
 
