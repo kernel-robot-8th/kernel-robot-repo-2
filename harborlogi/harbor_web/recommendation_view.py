@@ -10,13 +10,17 @@ SCORE_LABELS = (
 )
 
 
+def _valid_score(score):
+    return isinstance(score, dict) and all(type(score.get(key)) is int and score[key] >= 0
+                                         for key, _, _ in SCORE_LABELS)
+
+
 def explain_optimization(saved):
     if not isinstance(saved, dict) or saved.get('objective_version') != 'restoration_lex_v1':
         return None
     report = deepcopy(saved)
     score, first = report.get('score'), report.get('first_feasible_score')
-    if score is not None and (not isinstance(score, dict) or any(
-            type(score.get(key)) is not int or score[key] < 0 for key, _, _ in SCORE_LABELS)):
+    if score is not None and not _valid_score(score):
         return None
     report['score_rows'] = [dict(label=label, value=score[key], unit=unit,
         first=first.get(key) if isinstance(first, dict) else None) for key, label, unit in SCORE_LABELS] if score else []
@@ -25,3 +29,25 @@ def explain_optimization(saved):
         type(first.get(key)) is int for key, _, _ in SCORE_LABELS) and
         tuple(score[key] for key, _, _ in SCORE_LABELS) < tuple(first[key] for key, _, _ in SCORE_LABELS))
     return report
+
+
+def candidate_details(result, rank):
+    """Read a bounded saved alternative, without replacing the authoritative plan."""
+    if not isinstance(result, dict):
+        return None
+    report = explain_optimization(result.get('optimization'))
+    alternatives = report.get('alternatives') if report else None
+    if result.get('status') != 'READY' or not isinstance(alternatives, list) or not 1 <= rank <= min(5, len(alternatives)):
+        return None
+    first, candidate = alternatives[0], alternatives[rank - 1]
+    if not isinstance(first, dict) or first.get('moves') != result.get('moves') or first.get('score') != report.get('score'):
+        return None
+    if not isinstance(candidate, dict) or not _valid_score(candidate.get('score')):
+        return None
+    moves = candidate.get('moves')
+    if not isinstance(moves, list) or not moves or any(not isinstance(move, dict) for move in moves):
+        return None
+    return dict(candidate=candidate, candidate_count=min(5, len(alternatives)),
+        quality_label=report['quality_label'], search_complete=report.get('search_complete') is True,
+        score_rows=[dict(label=label, value=candidate['score'][key], recommended=report['score'][key], unit=unit)
+                    for key, label, unit in SCORE_LABELS]) if _valid_score(report.get('score')) else None

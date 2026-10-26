@@ -108,6 +108,8 @@ def main():
             assert [m['cargo_id'] for m in plan.result['moves']] == ['C2', 'C1', 'C2']
             plan_path = f'/plans/{plan.pk}/'
             result['checks'].append('Actual browser creates complete atomic spatial plan: blocker, target, restore; three cargo moves, never per-cell moves')
+            from tools.integration.candidate_browser_checks import exercise_candidate_preview
+            result['checks'].extend(exercise_candidate_preview(page, origin, plan, output))
             page.locator('[data-yard-3d][data-ready=true]').wait_for()
             assert page.locator('canvas[data-box-count="6"]').count() == 1
             page.locator('[data-scene-cargo]').select_option('C1')
@@ -317,7 +319,8 @@ def main():
             child.wait(timeout=10)
         log.close()
         (output / 'report.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    # Keep redirected Windows console output safe; the report file remains UTF-8.
+    print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0 if result['status'] == 'PASSED' else 1
 
 
