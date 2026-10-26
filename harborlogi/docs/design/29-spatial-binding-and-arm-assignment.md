@@ -32,7 +32,7 @@
 1. **다칸 `target_ref` 명명 규약 — 앵커 칸 주소.** `target_ref`는 배치 앵커 칸의 정규 주소(`area-rR-cC-lL`)를 가리킨다. footprint revision·방향이 나머지 점유를 유일하게 결정하므로 사람이 읽고 설치 검증·감사할 수 있다. binding은 이 일치를 구조적으로 강제한다.
 2. **`instance_id` → 암 A/B 대응의 정본 — binding 파일 안.** 각 binding 항목이 `yard_arm`(A|B) 필드를 가진다. 설치 검증이 한 파일에서 끝나고 퇴피 근거 검증(`move_arms`)이 바로 이어진다.
 
-제안 1은 이 결정으로 구현되었다([PR #43](https://github.com/kernel-robot-8th/kernel-robot-repo-2/pull/43)). 제안 2(팔별 binding 전환·`arm_reach` 폐지)는 후속 구현이다.
+제안 1은 이 결정으로 구현되었다([PR #43](https://github.com/kernel-robot-8th/kernel-robot-repo-2/pull/43)). 제안 2(팔별 binding 전환·`arm_reach` 폐지)도 2026-10-27 구현했다([PR #44](https://github.com/kernel-robot-8th/kernel-robot-repo-2/pull/44)): `yard_arm`을 가진 binding 여러 개가 한 이동을 나눠 가지며 설치 순서가 주 팔·대체를 정하고, `plan_outbound`는 이 대응을 우선한다. `arm_reach` 표는 대응이 하나라도 설치되면 더 이상 참조되지 않고(수용 시험 4의 보류 규칙은 대응이 전혀 없는 구성에 그대로 남는다), 표 삭제는 각 설치의 변경으로 한다.
 
 남은 열린 질문(구현 착수 전 설치 통합 담당 확정):
 
