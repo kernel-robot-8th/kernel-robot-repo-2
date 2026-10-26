@@ -33,6 +33,11 @@ class Fleet:
         return {'job': dict(job, status=self.status)}
 
     def __call__(self, method, path, body):
+        if method == 'GET' and path == '/api/fleet/session':
+            # The client verifies the configured application identity before every
+            # operation (ADR0015); fakes must answer that check like the real Fleet.
+            # Identity probes stay out of `calls`, which is the ARM operation log.
+            return {'principal_id': PRINCIPAL, 'role': 'service'}
         self.calls.append((method, path, body))
         if method == 'POST' and path == '/api/fleet/arm-transfers/jobs':
             request_key = body['request_key']
