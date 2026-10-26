@@ -27,7 +27,7 @@ class Command(models.Model):
     body_digest = models.CharField(max_length=64)
     binding = models.JSONField()
     state = models.CharField(max_length=16, default='PREPARED', choices=[(s, s) for s in (
-        'PREPARED', 'DISPATCHING', 'RECONCILED', 'UNKNOWN', 'BLOCKED', 'CANCEL_PENDING')])
+        'PREPARED', 'DISPATCHING', 'RECONCILED', 'UNKNOWN', 'BLOCKED', 'CANCEL_PENDING', 'COMPLETED')])
     mission_id = models.CharField(max_length=192, null=True)
     reason = models.CharField(max_length=192, blank=True)
     version = models.PositiveIntegerField(default=1)
