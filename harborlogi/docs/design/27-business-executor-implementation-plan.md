@@ -81,4 +81,15 @@
 | P0② 하네스 재검증 | Windows 로컬(주입 가짜 장치)로 재실행: ① 셀/TRIP 기준 `584251615d…`(v1.292) 3 tests OK, ② 중립 TRIP `a8a7d6612…`(v1.298) `--transport-only` 1 test OK. 실행: 임시 깨끗한 고정 clone + `python -m tools.integration.real_fleet_http --platform-root <경로> --platform-sha <SHA>`. 중립 ARM `bb38fdcd…`(v1.312, `--arm-only`)과 web-arm은 실제 UDS가 필요해 **팀 시험 PC(Linux)에서 재실행 예정**. 기본 unittest 156 OK(skip 2, 고정 소스 없는 통합 시험). |
 | P0③ 팀 검토 | 계획 문서(P27)와 ADR0004 A11 cherry-pick 두 PR로 요청. |
 
+## P1·P2 착지 기록과 P3·P4 상태 (2026-10-27)
+
+| 단계 | 상태 |
+|---|---|
+| P1 업무 실행기 최소 루프 | 구현 완료([PR #37](https://github.com/kernel-robot-8th/kernel-robot-repo-2/pull/37)): 상시 실행기, `resume_arm`(서류상 HOLD 재개, 원래 key GET 대조), `COMPLETED` 상태, 수용 시험 7건. 구현 중 발견: HOLD에서 WAITING으로 돌아오는 경로가 없어 일시 오류가 영구 멈춤이었음 — `resume_arm`으로 해소. |
+| P2 업무 근거 어댑터 | 앱 쪽 구현 완료([PR #38](https://github.com/kernel-robot-8th/kernel-robot-repo-2/pull/38), #37 위 스택): 설치자 출처 설정(`HARBOR_PLACEMENT_SOURCES`·`HARBOR_RETREAT_SOURCES`), `EvidenceSubmission` 원본 보존 intake, 결속·신선·미소모 검사 provider. 운영 producer 전송·자격 계약은 여전히 설치 통합 담당(관측 수용 조건 산출물 1). |
+| P3 재계획·취소·불명 | 불명·원래 key 대조·취소 ACK 차단은 P1에 포함. 나머지(주문당 명령 이력, CANCELLED 종착, 재계획 착수 조건)는 [설계28](28-replan-and-cancel-structures.md)([PR #39](https://github.com/kernel-robot-8th/kernel-robot-repo-2/pull/39))로 확정 후 구현. 열린 질문: ARM 취소 뒤 Fleet 원장의 최종 상태 표기. |
+| P4 확장 게이트 | 전항목 대기: ARM 정책 admission은 ROSY D-865 확장(팔 단계 포함 범위)이 ADR0012 완료조건을 채운 뒤. 다칸 binding은 ADR0008 실행 binding 설계 필요. 도달 사전검사 전환(`arm_reach` 설치자 표 → 플랫폼 사전검사)은 플랫폼 계약 소비·하네스 검증과 같은 변경. 중립 ARM(v1.312) 하네스 재검증은 팀 시험 PC(UDS) 예정. |
+
+## ADR0013 대조 결론 (2026-10-26 검토)
+
 ADR0013의 소유 표·결합 제한 규칙·검증 기준은 main 구현(ADR0006 ARM 연결, ADR0012 즉시 제출, `workflow.py` 장부)과 일치하고 보강이 필요하지 않다. 0013·설계24가 남긴 결손(상시 실행기, 인증된 근거 연결)은 이 계획의 P1·P2가 담당한다. 추가로 발견한 이행 항목(설치자 도달 표의 플랫폼 사전검사 전환, ADR0005 결정 4)은 P4로 추적하며 새 ADR을 만들지 않는다.
