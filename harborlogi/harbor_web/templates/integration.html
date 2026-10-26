@@ -27,6 +27,10 @@
 <details><summary>설치 담당자용 서버 설정</summary><p>UI에서 선택할 주소는 <code>HARBOR_FLEET_ALLOWED_ORIGINS</code>에 쉼표로 구분합니다. <code>HARBOR_FLEET_ORIGIN</code>을 지정하면 배포 서버가 연결을 고정합니다. 토큰은 화면과 DB에 저장하지 않고 서버에서만 관리합니다.</p>
 <ul>{% for item in server_inputs %}<li>{{ item.label }}: {% if item.present %}설정 있음{% else %}설정 필요{% endif %} · <code>{{ item.variable }}</code></li>{% endfor %}</ul><p>주소·신원은 제출과 결과 대조가 같은 설정을 사용합니다. 원래 실행이 있는 동안 연결 신원을 바꾸지 않습니다.</p></details>
 </section></div>
+<details><summary>사람의 로그인과 서비스 권한은 어떻게 연결되나요?</summary>
+<dl class="facts"><div><dt>Harbor 사용자</dt><dd>팀 계정으로 업무를 결정합니다. Harbor가 역할과 확정 이력을 관리합니다.</dd></div><div><dt>Harbor 서비스 신원</dt><dd>Fleet이 발급한 전용 service 역할로 API를 호출합니다. 사람의 비밀번호·세션을 전달하지 않습니다.</dd></div><div><dt>Fleet·ROSY</dt><dd>각 요청의 자격·소유 범위와 설치·자원·안전 조건을 검증합니다. Harbor 역할이 Fleet 권한으로 바뀌지 않습니다.</dd></div></dl>
+<p>연결 검사와 실제 API 호출은 같은 서비스 신원·역할을 확인합니다. Fleet 콘솔은 별도로 로그인합니다. 토큰은 링크나 브라우저에 전달하지 않으며, 작업 receipt를 Harbor 업무 완료로 바로 바꾸지 않습니다.</p>
+</details>
 <dl class="facts"><div><dt>실행 인계 설정</dt><dd>{% if connection.configured %}설정 있음 · 검증 별도{% else %}설정 필요{% endif %}</dd></div><div><dt>Fleet 콘솔</dt><dd>{% if connection.links.console %}<a href="{{ connection.links.console }}" target="_blank" rel="noreferrer">ROSY Fleet 열기 ↗</a>{% else %}유효한 연결 주소 필요{% endif %}</dd></div><div><dt>ARM 승인 화면 설치 선언</dt><dd>{% if connection.arm_console_enabled %}선언됨 · 검증 별도{% else %}미선언{% endif %}</dd></div></dl>
 <div class="table-wrap"><table><caption>인계 단계별 책임과 수용 조건</caption><thead><tr><th scope="col">단계·담당</th><th scope="col">필요한 결과</th></tr></thead><tbody>
 <tr><td>관측·계획 · Harbor</td><td>같은 화물 크기·배치 revision, 유효 시각과 검증된 설치 대응</td></tr>
