@@ -1,6 +1,6 @@
 # 실행 binding 확장 — 다칸 배치와 팔 배정
 
-2026-10-27. 결정: [ADR0008](../adr/0008-multicell-cargo-occupancy.md)(다칸 실행 차단 유지), [ADR0005](../adr/0005-harbor-rosy-responsibility-map.md) 결정 3·4(팔 배정·도달 정보). 상위 계획: [설계27 P4](27-business-executor-implementation-plan.md). 상태: **상세설계(제안)** — 두 게이트(다칸 실행 binding, 팔 배정 원본)를 여는 구조를 먼저 정한다.
+2026-10-27. 결정: [ADR0008](../adr/0008-multicell-cargo-occupancy.md)(다칸 실행 차단 유지), [ADR0005](../adr/0005-harbor-rosy-responsibility-map.md) 결정 3·4(팔 배정·도달 정보). 상위 계획: [설계31 P4](31-business-executor-implementation-plan.md). 상태: **상세설계(제안)** — 두 게이트(다칸 실행 binding, 팔 배정 원본)를 여는 구조를 먼저 정한다.
 
 ## 현재 차단
 
@@ -8,7 +8,7 @@
 |---|---|---|
 | `SPATIAL_EXECUTION_BINDINGS_REQUIRED` | `capability()` — `plan.result['model'] == 'grid-placement-v1'` | 공간 계획에 대응하는 검증된 설치 binding이 없다(ADR0008: legacy ARM binding 재사용 금지) |
 | `SPATIAL_OBSERVATION_REQUIRED` | `capability()` — 화물 점유 `length_cells > 1` | 같은 이유로 다칸 화물이 legacy bays 관측에 있어도 실행 차단 |
-| `ARM_REACH_UNVERIFIED` / `NO_ARM_REACHES_MOVE` | `plan_outbound` — 설치자 `arm_reach` 표 | (칸×팔) 도달 원본이 임시 수단(ADR0005 결정 4). v1.299 preflight는 시뮬레이션 전용(비시뮬레이션 503 `ARM_PREFLIGHT_CLOSED`)이라 운영 원본이 못 된다(설계27 P4 기록) |
+| `ARM_REACH_UNVERIFIED` / `NO_ARM_REACHES_MOVE` | `plan_outbound` — 설치자 `arm_reach` 표 | (칸×팔) 도달 원본이 임시 수단(ADR0005 결정 4). v1.299 preflight는 시뮬레이션 전용(비시뮬레이션 503 `ARM_PREFLIGHT_CLOSED`)이라 운영 원본이 못 된다(설계31 P4 기록) |
 
 ## 제안 1 — 다칸 입고 배치 binding
 
