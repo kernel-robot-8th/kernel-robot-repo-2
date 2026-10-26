@@ -88,3 +88,18 @@ class CommandHistoryTests(TestCase):
         result = executor.tick(registry=self.registry, evidence=test_executor.evidence_provider(timezone.now()),
                                now=timezone.now())
         self.assertNotIn(closed.pk, result['results'])
+
+    def test_work_page_closes_a_pending_cancellation_for_operators_only(self):
+        command = self.confirmed()
+        commands.cancel_command(self.operator, command_id=command.pk, expected_version=command.version, reason='halt')
+        command.refresh_from_db()
+        self.client.force_login(self.field)
+        response = self.client.post(f'/work/{command.pk}/', {'action': 'close', 'expected_version': command.version})
+        self.assertEqual(response.status_code, 403)
+        command.refresh_from_db()
+        self.assertEqual(command.state, 'CANCEL_PENDING')
+        self.client.force_login(self.operator)
+        response = self.client.post(f'/work/{command.pk}/', {'action': 'close', 'expected_version': command.version})
+        self.assertEqual(response.status_code, 302)
+        command.refresh_from_db()
+        self.assertEqual(command.state, 'CANCELLED')
