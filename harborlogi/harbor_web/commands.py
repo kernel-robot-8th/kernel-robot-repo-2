@@ -20,6 +20,7 @@ from harbor.process import ArmTransferBinding, bind_plan
 from harbor.outbound import CargoMove, OutboundProposal
 from harbor.rosy_http import RosyClient
 from harbor.workflow import BusinessLedger
+from harbor_web.command_models import ACTIVE_COMMAND_STATES
 from harbor_web.models import Plan, Command, CommandFact, Audit, Observation
 from harbor_web.services import _role, Conflict, queue_digest, constraints
 from harbor_web.coordination import serialized
@@ -67,7 +68,7 @@ def _bound(plan, config):
 def capability(plan):
     reason, origin = '', None
     try:
-        if Command.objects.filter(order_id=plan.order_id).exclude(plan=plan).exists():
+        if Command.objects.filter(order_id=plan.order_id, state__in=ACTIVE_COMMAND_STATES).exclude(plan=plan).exists():
             raise ValidationError('EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION')
         from harbor_web.runtime import execution_block_reason
         blocked = execution_block_reason()
@@ -183,7 +184,8 @@ def prepare_command(actor, *, plan_id, expected_version):
     registry = acquire_registry()
     with registry.lock('plan:' + str(plan_id)):
         plan = Plan.objects.select_related('order', 'order__cargo', 'observation', 'condition').get(pk=plan_id)
-        existing = Command.objects.filter(order=plan.order).first()
+        # Design 28: only an ACTIVE command occupies the order; terminal commands are history.
+        existing = Command.objects.filter(order=plan.order, state__in=ACTIVE_COMMAND_STATES).first()
         if existing:
             _validate(existing, registry.config)
             if existing.plan_id != plan.pk:
@@ -203,7 +205,8 @@ def prepare_command(actor, *, plan_id, expected_version):
         with transaction.atomic():
             command = Command.objects.create(plan=plan, order=plan.order, actor=actor, plan_version=expected_version,
                 ledger_identity=_identity(registry.config), fleet_origin=registry.config['origin'],
-                fleet_principal=registry.config['principal'], binding=body, body_digest=_digest(body))
+                fleet_principal=registry.config['principal'], binding=body, body_digest=_digest(body),
+                supersedes=Command.objects.filter(order=plan.order).order_by('-pk').first())
             Audit.objects.create(actor=actor, action='command.prepare', object_type='Command', object_id=str(command.pk))
     return command
 
@@ -330,6 +333,27 @@ def reconcile_command(actor, *, command_id, expected_version):
 
 def cancel_command(actor, *, command_id, expected_version, reason):
     return _operation(actor, command_id, expected_version, 'cancel', reason)
+
+
+@serialized
+def close_cancelled(actor, *, command_id, expected_version):
+    """Close a pending cancellation as CANCELLED after the operator confirmed the stop.
+
+    The Fleet ARM contract has no cancelled terminal status and cancel/HOLD retain
+    occupancy (API reference v1.312), so this transition is a human decision recorded
+    with its actor — never an automatic readback. Design 28.
+    """
+    registry = acquire_registry()
+    with registry.lock(command_id):
+        _role(actor, 'operator')
+        command = Command.objects.get(pk=command_id)
+        if command.version != expected_version:
+            raise Conflict('Command changed; reload.')
+        _validate(command, registry.config)
+        if command.state != 'CANCEL_PENDING':
+            raise Conflict('Only a pending cancellation can be closed.')
+        registry.ledger.hold(_key(command))
+        return _save(command, actor, 'CANCELLED', 'CANCELLATION_CONFIRMED_BY_OPERATOR')
 
 
 def command_detail(command):
