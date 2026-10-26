@@ -46,7 +46,13 @@ class ProcessBinding:
 
 @dataclass(frozen=True)
 class ArmTransferBinding:
-    """Harbor move names map to installed physical references at this boundary."""
+    """Harbor move names map to installed physical references at this boundary.
+
+    Entries may be installed per (move, arm): several entries share the business key
+    with different instance references, and installation order names the primary arm
+    followed by alternates (design 29). Entries without a yard arm keep the legacy
+    single-binding shape.
+    """
     cargo_id: str
     source: str
     destination: str
@@ -55,12 +61,18 @@ class ArmTransferBinding:
     object_ref: str
     source_ref: str
     target_ref: str
+    yard_arm: str = ''
 
     def __post_init__(self):
-        for value in self.__dict__.values():
+        for value in (self.cargo_id, self.source, self.destination, self.workcell_id, self.instance_id,
+                      self.object_ref, self.source_ref, self.target_ref):
             identifier(value)
             if len(value) > 192 or value != value.strip() or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value):
                 raise ValueError("Invalid physical transfer binding reference")
+        if self.yard_arm and self.yard_arm not in YARD_ARMS:
+            raise ValueError("A per-arm transfer binding names one yard arm A/B")
+        if self.source_ref == self.target_ref:
+            raise ValueError("Physical source and target must differ")
         if self.source_ref == self.target_ref:
             raise ValueError("Physical source and target must differ")
 
@@ -180,16 +192,42 @@ def load_bindings(items):
     return tuple(bindings)
 
 
+def arm_candidates(bindings):
+    """Ordered per-move arm correspondence from installed per-arm bindings (design 29).
+
+    Installation order names the primary arm first; the legacy arm_reach table is
+    replaced by this correspondence once it is verified and installed.
+    """
+    candidates = {}
+    for binding in bindings:
+        if isinstance(binding, ArmTransferBinding) and binding.yard_arm:
+            key = (binding.cargo_id, binding.source, binding.destination)
+            arms = candidates.setdefault(key, [])
+            if binding.yard_arm not in arms:
+                arms.append(binding.yard_arm)
+    return {key: tuple(arms) for key, arms in candidates.items()}
+
+
 def bind_plan(proposal: OutboundProposal,
               bindings: tuple[ProcessBinding | ArmTransferBinding, ...]) -> tuple[ProcessBinding | ArmTransferBinding, ...]:
     if proposal.status != "READY" or not proposal.moves:
         raise ValueError("Only a ready nonempty inventory proposal can be bound")
     if not isinstance(bindings, tuple) or not all(isinstance(b, (ProcessBinding, ArmTransferBinding)) for b in bindings):
         raise ValueError("Expected immutable installed bindings")
-    by_move = {(b.cargo_id, b.source, b.destination): b for b in bindings}
-    if len(by_move) != len(bindings):
-        raise ValueError("Ambiguous process binding")
+    by_move = {}
+    for binding in bindings:
+        key = (binding.cargo_id, binding.source, binding.destination)
+        entries = by_move.setdefault(key, [])
+        if isinstance(binding, ProcessBinding) or not binding.yard_arm:
+            if entries:
+                raise ValueError("Ambiguous process binding")  # One legacy entry per move.
+            entries.append(binding)
+        else:
+            if any(isinstance(entry, ArmTransferBinding) and entry.yard_arm == binding.yard_arm for entry in entries):
+                raise ValueError("Ambiguous process binding")  # Same arm twice for one move.
+            entries.append(binding)
     try:
-        return tuple(by_move[(m.cargo_id, m.source, m.destination)] for m in proposal.moves)
+        # Per-arm entries resolve to the primary (first installed) arm's binding.
+        return tuple(by_move[(m.cargo_id, m.source, m.destination)][0] for m in proposal.moves)
     except KeyError as exc:
         raise ValueError("A move has no installed process binding") from exc
