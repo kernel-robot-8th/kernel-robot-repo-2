@@ -1,7 +1,9 @@
 import io
 import json
 import os
-from urllib.error import HTTPError
+import socket
+import ssl
+from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
@@ -100,12 +102,21 @@ class FleetConnectionTests(TransactionTestCase):
             self.assertEqual(bridge.connection_settings()['source'], 'deployment')
             with self.assertRaises(ValidationError):
                 self.save()
+        self.client.force_login(self.admin)
+        with patch.dict(os.environ, HARBOR_FLEET_ORIGIN='ftp://invalid.example', HARBOR_FLEET_PRINCIPAL='managed-service'):
+            with patch('harbor.rosy_http.RosyClient._http', side_effect=AssertionError('GET contacted Fleet')):
+                response = self.client.get('/settings/integration/')
+            self.assertFalse(response.context['connection_guidance']['can_check'])
 
     def test_missing_token_and_disallowed_saved_origin_never_contact_network(self):
         self.save()
+        self.client.force_login(self.admin)
         for override in [{'HARBOR_FLEET_TOKEN': ''}, {'HARBOR_FLEET_ALLOWED_ORIGINS': ''}]:
             with patch.dict(os.environ, override), patch('harbor.rosy_http.RosyClient._http', side_effect=AssertionError('unsafe request')):
                 result = bridge.check_connection(self.admin, expected_version=1)
+                response = self.client.get('/settings/integration/')
+                self.assertFalse(response.context['connection_guidance']['can_check'])
+                self.assertContains(response, ' disabled>Fleet 연결 확인')
             self.assertEqual(result['status'], 'FAILED')
 
     def test_existing_command_locks_identity_and_timeout_is_sanitized(self):
@@ -121,8 +132,45 @@ class FleetConnectionTests(TransactionTestCase):
             self.save(principal='different-service', expected_version=1)
         with patch('harbor.rosy_http.RosyClient._http', side_effect=TimeoutError('private-bridge-token')):
             result = bridge.check_connection(self.admin, expected_version=1)
-        self.assertEqual(result['reason'], 'FLEET_UNREACHABLE')
+        self.assertEqual(result['reason'], 'FLEET_TIMEOUT')
         self.assertNotIn('private-bridge-token', repr(list(Audit.objects.values())))
+
+    def test_network_failures_name_only_the_verified_cause(self):
+        self.save()
+        for error, reason in [
+            (URLError(socket.gaierror('private-bridge-token')), 'FLEET_DNS_UNRESOLVED'),
+            (URLError(ssl.SSLCertVerificationError('private-bridge-token')), 'FLEET_TLS_UNTRUSTED'),
+            (ssl.SSLError('private-bridge-token'), 'FLEET_TLS_FAILED'),
+            (URLError(TimeoutError('private-bridge-token')), 'FLEET_TIMEOUT'),
+            (URLError('unclassified private-bridge-token'), 'FLEET_UNREACHABLE'),
+        ]:
+            with self.subTest(reason=reason), patch('harbor.rosy_http.RosyClient._http', side_effect=error) as http:
+                result = bridge.check_connection(self.admin, expected_version=1)
+                self.assertEqual(result['reason'], reason)
+                self.assertEqual(result['status'], 'FAILED')
+                self.assertEqual(http.call_count, 1)
+                self.assertNotIn('private-bridge-token', repr(bridge.last_check().detail))
+
+    def test_saved_partial_check_keeps_identity_success_and_explains_next_step(self):
+        self.save()
+        with patch('harbor.rosy_http.RosyClient._http', side_effect=[
+            {'principal_id': 'harbor-service', 'role': 'service'},
+            self.missing('ARM_TRANSFER_JOB_UNAVAILABLE', 503),
+        ]):
+            bridge.check_connection(self.admin, expected_version=1)
+        self.client.force_login(self.admin)
+        count = Audit.objects.count()
+        with patch('harbor.rosy_http.RosyClient._http', side_effect=AssertionError('GET contacted Fleet')):
+            response = self.client.get('/settings/integration/')
+        self.assertContains(response, '서비스 신원 확인됨')
+        self.assertContains(response, '작업 조회 API')
+        self.assertContains(response, '설치 필요')
+        self.assertEqual(response.context['connection_guidance']['steps'][1]['state'], '확인됨')
+        self.assertEqual(response.context['connection_guidance']['steps'][2]['state'], '설치 필요')
+        self.assertContains(response, 'ROSY 설치 담당자')
+        self.assertContains(response, '다음 조치')
+        self.assertNotContains(response, '조회 연동 확인</span>')
+        self.assertEqual(Audit.objects.count(), count)
 
     def test_saved_profile_identity_is_in_private_backup_manifest(self):
         import tempfile

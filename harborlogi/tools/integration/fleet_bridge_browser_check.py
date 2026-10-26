@@ -56,8 +56,11 @@ def main():
             if parsed.path == '/api/fleet/session' and not parsed.query:
                 self.reply(200, dict(principal_id=principal if state['mode'] != 'mismatch' else 'synthetic-other-service', role='service'))
             elif parsed.path == '/api/fleet/arm-transfers/jobs' and set(parse_qs(parsed.query)) == {'request_key'} and parse_qs(parsed.query)['request_key'][0].startswith('harbor-probe-'):
-                self.reply(404, dict(detail='Not Found') if state['mode'] == 'generic-404'
-                           else dict(detail=dict(code='ARM_TRANSFER_JOB_NOT_FOUND')))
+                if state['mode'] == 'not-installed':
+                    self.reply(503, dict(detail=dict(code='ARM_TRANSFER_JOB_UNAVAILABLE')))
+                else:
+                    self.reply(404, dict(detail='Not Found') if state['mode'] == 'generic-404'
+                               else dict(detail=dict(code='ARM_TRANSFER_JOB_NOT_FOUND')))
             else:
                 self.reply(404, dict(detail='Not Found'))
 
@@ -94,7 +97,7 @@ def main():
         django.setup()
         from django.core.management import call_command
         from django.contrib.auth.models import User, Group
-        from harbor_web import commands
+        from harbor_web import commands, fleet_connection as bridge
         from harbor_web.guide_pages import CONNECTION_REASONS
         from harbor_web.models import Audit, Command, FleetConnection
         from playwright.sync_api import sync_playwright
@@ -155,6 +158,7 @@ def main():
             page.locator('a[href="/settings/integration/"]').click()
             page.wait_for_load_state('networkidle')
             assert not state['requests'], 'Reading settings must not contact Fleet'
+            assert page.get_by_role('button', name='Fleet 연결 확인', exact=True).is_disabled()
             safe_page()
             form = page.locator('form:has(input[name=action][value=save])')
             form.locator('[name=origin]').select_option(fleet_origin)
@@ -172,13 +176,36 @@ def main():
             check('compatible', 'READ_API_VERIFIED', 2)
             assert page.get_by_text('조회 연동 확인', exact=True).is_visible()
             check('generic-404', 'ARM_API_UNCONFIRMED', 2)
-            assert page.get_by_text('연결 확인 필요', exact=True).is_visible()
+            assert page.get_by_text('서비스 신원 확인됨 · API 준비 필요', exact=True).is_visible()
             page.screenshot(path=str(output / 'generic-404-rejected.png'), full_page=True)
             check('mismatch', 'PRINCIPAL_MISMATCH', 1)
             assert page.get_by_text('연결 확인 필요', exact=True).is_visible()
             page.screenshot(path=str(output / 'identity-mismatch-rejected.png'), full_page=True)
             check('compatible', 'READ_API_VERIFIED', 2)
             result['checks'].append('Authenticated service session plus coded ARM request-key 404 verifies read API; generic route 404 and principal mismatch fail closed; mismatch never calls ARM')
+            check('not-installed', 'ARM_NOT_INSTALLED', 2)
+            assert page.get_by_text('서비스 신원 확인됨 · API 준비 필요', exact=True).is_visible()
+            assert page.get_by_text('설치 필요', exact=True).is_visible()
+            assert page.get_by_text('담당 · ROSY 설치 담당자', exact=True).is_visible()
+            page.screenshot(path=str(output / 'identity-confirmed-api-unavailable.png'), full_page=True)
+            Audit.objects.create(actor=users['admin'], action='fleet.check', object_type='FleetConnection', object_id='1',
+                detail=dict(status='FAILED', session='NOT_CHECKED', arm='NOT_CHECKED', reason='FLEET_DNS_UNRESOLVED',
+                            fingerprint=bridge.fingerprint(bridge.connection_settings())))
+            before = len(state['requests'])
+            page.set_viewport_size(dict(width=390, height=844))
+            page.reload()
+            page.wait_for_load_state('networkidle')
+            assert page.get_by_text(CONNECTION_REASONS['FLEET_DNS_UNRESOLVED'], exact=True).is_visible()
+            assert page.get_by_text('다음 조치', exact=True).is_visible()
+            result['mobile_next_action_y'] = page.get_by_role('heading', name='다음 조치').bounding_box()['y']
+            page.screenshot(path=str(output / 'saved-dns-failure-mobile.png'), full_page=True)
+            assert result['mobile_next_action_y'] < 844, result['mobile_next_action_y']
+            assert page.get_by_text('담당 · Harbor 설치 담당자', exact=True).is_visible()
+            assert len(state['requests']) == before
+            assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+            safe_page()
+            result['checks'].append('Real synthetic HTTP503 preserves verified identity and identifies ROSY installation action; saved DNS fixture gives server-side recovery on mobile without network traffic')
+            check('compatible', 'READ_API_VERIFIED', 2)
             for width, height in ((1440, 1000), (1280, 800), (768, 1024), (390, 844)):
                 page.set_viewport_size(dict(width=width, height=height))
                 page.goto(origin + '/settings/integration/')
@@ -201,10 +228,10 @@ def main():
             assert FleetConnection.objects.get(pk=1).version == 1
             assert not Command.objects.exists()
             assert all(request['method'] == 'GET' and request['authorized'] for request in state['requests'])
-            assert len(state['requests']) == 7
+            assert len(state['requests']) == 11
             assert token not in json.dumps(list(Audit.objects.values_list('detail', flat=True)))
             assert not errors, errors
-            result['checks'].append('Operator GET/save/check denied; four widths have no overflow; token absent from HTML/audit; all seven Fleet requests are authenticated GETs; no Harbor Commands or Fleet jobs created')
+            result['checks'].append('Operator GET/save/check denied; four widths have no overflow; token absent from HTML/audit; all eleven Fleet requests are authenticated GETs; no Harbor Commands or Fleet jobs created')
             result.update(status='PASSED', fleet_requests=state['requests'], browser_errors=errors)
             browser.close()
     except Exception:
