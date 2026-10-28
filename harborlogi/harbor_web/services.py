@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+import os
 from dataclasses import asdict
 from datetime import timedelta
 
@@ -404,6 +405,24 @@ def make_plan(actor, *, order_id, expected_version, observation_id, now=None, au
     return plan
 
 
+def _installed_arm_candidates():
+    """Per-(move, arm) correspondence from the installed bindings (design 29), or None.
+
+    Any per-arm entry activates the correspondence as the reach source; without one,
+    the legacy installer arm_reach table in the condition payload decides.
+    """
+    from harbor.process import arm_candidates, load_bindings
+    path = os.environ.get('HARBOR_BINDINGS_PATH', '')
+    if not path:
+        return None
+    try:
+        with open(path, encoding='utf-8') as source:
+            candidates = arm_candidates(load_bindings(json.load(source)))
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+    return candidates or None
+
+
 def _calculate_plan(actor, order, observation, *, now=None, trigger='manual', input_digest=None, hold_reason=None):
     """Trusted calculator; callers hold the serialized transaction and authorize the event."""
     current = timezone.now() if now is None else now
@@ -443,7 +462,8 @@ def _calculate_plan(actor, order, observation, *, now=None, trigger='manual', in
             cargo__code__in={order.cargo.code, *(c for b in yard.bays for c in b.cargo), *(h.cargo_id for h in yard.holdings)}).exists():
         proposal = OutboundProposal('HOLD', 'SPATIAL_OBSERVATION_REQUIRED', yard.revision)
     else:
-        proposal = _domain(lambda: plan_outbound(yard, OutboundRequest(order.cargo.code, yard.revision), constraints(observation.condition.payload), now=current))
+        proposal = _domain(lambda: plan_outbound(yard, OutboundRequest(order.cargo.code, yard.revision),
+            constraints(observation.condition.payload), now=current, arm_candidates=_installed_arm_candidates()))
     result = asdict(proposal)
     # Serialize tuples as JSON lists before returning the same representation as persisted reads.
     result = json.loads(json.dumps(result))

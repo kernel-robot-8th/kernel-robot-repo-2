@@ -3,6 +3,7 @@ import hashlib
 import json
 
 from django.utils import timezone
+from harbor_web.command_models import ACTIVE_COMMAND_STATES
 from harbor_web.models import Command, CargoFootprint, Observation, Order, Plan
 
 
@@ -16,7 +17,7 @@ def placement_reservations(order, observation):
         planning_observation__source_id=binding.source_id,
         planning_observation__condition_id=binding.condition_id).select_related('cargo')
     for request in earlier.order_by('pk'):
-        if request.cargo.code in seen or Command.objects.filter(order=request).exists():
+        if request.cargo.code in seen or Command.objects.filter(order=request, state__in=ACTIVE_COMMAND_STATES).exists():
             continue
         plan = Plan.objects.filter(order=request).select_related('observation').order_by('-pk').first()
         if (plan is None or plan.result.get('status') != 'READY'
@@ -59,7 +60,7 @@ def replan_enabled(actor, trigger, *, source_id=None):
         binding = order.planning_observation
         if binding is None or (source_id is not None and binding.source_id != source_id):
             continue
-        if Command.objects.filter(order=order).exists():
+        if Command.objects.filter(order=order, state__in=ACTIVE_COMMAND_STATES).exists():
             continue
         observation = Observation.objects.filter(source_id=binding.source_id).select_related('condition').latest('pk')
         current = timezone.now()
@@ -70,7 +71,7 @@ def replan_enabled(actor, trigger, *, source_id=None):
         reason = None
         if observation.condition_id != binding.condition_id:
             reason = 'SOURCE_CONDITION_CHANGED'
-        elif Command.objects.exclude(order=order).exists():
+        elif Command.objects.exclude(order=order).filter(state__in=ACTIVE_COMMAND_STATES).exists():
             # Command states do not prove physical completion or release of reserved space.
             reason = 'OTHER_COMMAND_REQUIRES_RECONCILIATION'
         services._calculate_plan(actor, order, observation, now=current, trigger=trigger,
