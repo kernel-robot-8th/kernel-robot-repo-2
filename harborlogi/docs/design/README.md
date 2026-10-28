@@ -34,6 +34,7 @@
 | 26 | [2D·3D 공통 보기와 계산 추천](26-linked-yard-and-ranked-recommendation.md), [ADR0014](../adr/0014-linked-spatial-views-and-ranked-planning.md) | 정확한 전체 점유 주소·양방향 선택·가상 편집, 완전한 반출 후보 비교·지지 그래프·탐색 한계 |
 | 27 | [독립 서비스 인증과 협력](27-independent-integration-and-service-trust.md), [ADR0015](../adr/0015-service-identity-and-independent-integration.md) | 사람/기계/승인/관측 신원 분리, 공개 계약·데이터 소유·자격 교체·실제 수용 단계 |
 | 29 | [실행 binding 확장 — 다칸 배치와 팔 배정](29-spatial-binding-and-arm-assignment.md) | 다칸 입고 배치 binding, (이동·팔)별 설치 대응으로 도달 원본 교체, preflight는 설치 검증 보조로 한정, 열린 설치 질문. 구현 전 상세설계 |
+| 31 | [업무 실행기 착수 계획](31-business-executor-implementation-plan.md) | 설계24의 P0–P4 단계별 구현·시험·수용 기준, 현재 구현 지점 대조, ADR0013 검토 결론 |
 
 새 화면을 설계할 때는 07→08→09를 먼저 읽고 01~05의 역할·계약·수용 조건과 대조한다. 운영 현황/업무/사용 안내와 토큰은 10에서 로컬 페이지로 구현했다. 전체 제품 메뉴·운영 권한·실물 수용까지 완료한 것은 아니다.
 
