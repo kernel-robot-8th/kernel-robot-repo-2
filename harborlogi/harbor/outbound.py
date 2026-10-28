@@ -26,8 +26,13 @@ class OutboundProposal:
 
 
 def plan_outbound(snapshot: YardSnapshot, request: OutboundRequest,
-                   constraints: PortConstraints, *, now: datetime) -> OutboundProposal:
-    """Propose inventory moves without changing observations or granting execution."""
+                   constraints: PortConstraints, *, now: datetime, arm_candidates=None) -> OutboundProposal:
+    """Propose inventory moves without changing observations or granting execution.
+
+    Arm assignment prefers the installed per-(move, arm) correspondence when present
+    (design 29); without it the legacy installer arm_reach table decides, and with
+    neither the plan holds unverified.
+    """
     aware_time(now)
     bays = {s.bay_id: s for s in snapshot.bays}
     referenced = {constraints.outbound_stand, *constraints.temporary_bays}
@@ -76,12 +81,15 @@ def plan_outbound(snapshot: YardSnapshot, request: OutboundRequest,
     moves.append((request.cargo_id, source.bay_id, output.bay_id))
     moves.extend((cargo, temporary, source.bay_id) for cargo, temporary in reversed(displaced))
 
-    if not constraints.arm_reach:
+    if arm_candidates is None and not constraints.arm_reach:
         return hold("ARM_REACH_UNVERIFIED")
     assigned = []
     for cargo, origin, destination in moves:
-        arms = [a for a in YARD_ARMS
-                if (a, origin) in constraints.arm_reach and (a, destination) in constraints.arm_reach]
+        if arm_candidates is None:
+            arms = [a for a in YARD_ARMS if (a, origin) in constraints.arm_reach and (a, destination) in constraints.arm_reach]
+        else:
+            named = arm_candidates.get((cargo, origin, destination), ())
+            arms = list(dict.fromkeys(a for a in named if a in YARD_ARMS))
         if not arms:
             return hold("NO_ARM_REACHES_MOVE")
         assigned.append(CargoMove(cargo, origin, destination, arms[0], tuple(arms[1:])))

@@ -122,11 +122,13 @@ def work_detail(request, pk):
             raise PermissionDenied
         form = CommandForm(request.POST)
         action = request.POST.get('action')
-        if form.is_valid() and action in {'submit', 'reconcile', 'cancel'}:
+        if form.is_valid() and action in {'submit', 'reconcile', 'cancel', 'close'}:
             try:
                 args = dict(command_id=pk, expected_version=form.cleaned_data['expected_version'])
                 if action == 'cancel':
                     commands.cancel_command(request.user, reason=form.cleaned_data['reason'], **args)
+                elif action == 'close':
+                    commands.close_cancelled(request.user, **args)
                 elif action == 'submit':
                     commands.submit_command(request.user, **args)
                 else:

@@ -238,6 +238,43 @@ class BusinessLedger:
             self._row(c, key)
             c.execute("UPDATE business SET state='HOLD',row_version=row_version+1 WHERE request_key=?", (key,))
 
+    def resume_arm(self, key, client, *, now):
+        """Re-enter WAITING from a bookkeeping HOLD after reconciling the original request key.
+
+        A stage is held by uncertainty (lost response, transient read failure), not by an
+        operator decision. Resume re-reads the original request key, adopts the mission it
+        still names, and only then re-enters WAITING with the job's current status. It never
+        posts a new request and leaves cancellation bookkeeping to hold().
+        """
+        aware_time(now)
+        row = self.read(key)
+        payload = _payload(row)
+        if row['state'] != 'HOLD' or payload.get('execution_kind') != 'ARM_TRANSFER':
+            raise ValueError('Only held physical transfers can be resumed')
+        if hashlib.sha256(_json(payload).encode()).hexdigest() != row['digest']:
+            raise ValueError('Saved business body changed')
+        binding = ArmTransferBinding(**payload['moves'][row['step_index']])
+        request_key = f"{key}:{row['step_index']}"
+        job = binding.check(client.arm_request(request_key)['job'], request_key)
+        if row['mission_id'] and row['mission_id'] != job['mission_id']:
+            raise ValueError('Resumed mission identity differs')
+        attempt = None
+        if job['status'] == 'GOAL_CONFIRMED':
+            receipt = binding.check_receipt(job, client.physical_receipt(job['mission_id'])['receipt'])
+            attempt = receipt['attempt_id']
+        if attempt is not None:
+            identifier(attempt)
+        confirmed = job['status'] == 'GOAL_CONFIRMED' and attempt is not None
+        with closing(self._connect()) as c, c:
+            c.execute("BEGIN IMMEDIATE")
+            self._check_current(c, key, row)
+            c.execute("UPDATE business SET mission_id=?,attempt_id=?,goal_confirmed=?,state=?,row_version=row_version+1 "
+                      "WHERE request_key=?",
+                      (job['mission_id'], attempt, int(confirmed),
+                       'HOLD' if job['status'] == 'HOLD' else 'WAITING', key))
+        self._reads[key] = (job['mission_id'], attempt, now, row['row_version'] + 1)
+        return job
+
     def recover_arm(self, key, client, *, now):
         aware_time(now)
         row = self.read(key)
