@@ -36,7 +36,7 @@
 
 남은 열린 질문(구현 착수 전 설치 통합 담당 확정):
 
-3. preflight `catalog_digest`의 발급·갱신 절차 — preflight 소비(설치 검증 보조)를 여는 별도 변경에서 확정한다.
+3. preflight `catalog_digest`의 발급·갱신 절차 — [설계 30](30-arm-preflight-catalog-digest.md)에서 2026-10-27 결정: **C 유지 + A(설치 산출물 digest)를 설치 표준으로 채택**. Harbor는 preflight를 소비하지 않고, 소비를 여는 것은 별도 변경이다.
 
 ## 수용 시험 (구현의 완료 기준)
 
