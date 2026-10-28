@@ -128,6 +128,7 @@ class Registry:
                                          retreat_sources=retreat_sources)
             self.client = RosyClient(config['origin'], config['token'])
             self.client.expected_principal = config['principal']
+            self.client.expected_role = 'service'
             self.locks = {}
         except BaseException:
             self.lease.__exit__()
