@@ -81,20 +81,6 @@ def _propose_next(command, registry, key):
         return commands._save(command, command.actor, 'RECONCILED')
 
 
-def _resume(command, registry, key, *, now):
-    """Re-enter WAITING from a bookkeeping HOLD once the original request key reconciles."""
-    with queue_lock, registry.lock(command.pk):
-        command.refresh_from_db()
-        if command.state != 'RECONCILED':
-            return command.state
-        job = registry.ledger.resume_arm(key, registry.client, now=now)
-        if job.get('proposal_principal_id') != command.fleet_principal:
-            raise ValueError('Principal mismatch')
-        command.mission_id = job['mission_id']
-        commands._record_fact(command, job, None)
-        return commands._save(command, command.actor, 'RECONCILED')
-
-
 def _advance(command, registry, *, now, evidence):
     """Progress one command by at most one business stage; keep every original identity."""
     from harbor_web.runtime import execution_block_reason
@@ -116,11 +102,9 @@ def _advance(command, registry, *, now, evidence):
                 return command.state  # An uncertain prior stage must reconcile first.
             return _propose_next(command, registry, key)
         if row['state'] in ('WAITING', 'HOLD'):
-            command = commands._operation(command.actor, command.pk, command.version, 'reconcile')
+            command = commands.reconcile_command(command.actor, command_id=command.pk,
+                                                  expected_version=command.version, resume=True)
             row = registry.ledger.read(key)
-            if row['state'] == 'HOLD' and command.state == 'RECONCILED':
-                command = _resume(command, registry, key, now=now)
-                row = registry.ledger.read(key)
         if row['state'] == 'WAITING' and row['goal_confirmed'] and evidence is not None:
             step = evidence(command, row, payload, 'step')
             if step is not None:

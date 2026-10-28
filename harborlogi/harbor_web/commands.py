@@ -19,6 +19,7 @@ from harbor.ownership import WriterLease
 from harbor.process import ArmTransferBinding, SpatialPlacementBinding, anchor_address, bind_plan, load_bindings
 from harbor.outbound import CargoMove, OutboundProposal
 from harbor.rosy_http import RosyClient
+from harbor.execution import validate_arm_execution
 from harbor.workflow import BusinessLedger
 from harbor_web.command_models import ACTIVE_COMMAND_STATES
 from harbor_web.models import Plan, Command, CommandFact, Audit, Observation
@@ -306,7 +307,7 @@ def _record_fact(command, job, receipt):
 
 
 @serialized
-def _operation(actor, command_id, expected_version, action, reason=''):
+def _operation(actor, command_id, expected_version, action, reason='', *, resume=False):
     registry = acquire_registry()
     with registry.lock(command_id):
         _role(actor, 'operator')
@@ -349,24 +350,14 @@ def _operation(actor, command_id, expected_version, action, reason=''):
             return command
         try:
             row = registry.ledger.read(key)
-            binding = ArmTransferBinding(**command.binding['moves'][row['step_index']])
-            request_key = f"{key}:{row['step_index']}"
-            job = binding.check(registry.client.arm_request(request_key)['job'], request_key)
-            if job.get('proposal_principal_id') != command.fleet_principal:
-                raise ValueError('Principal mismatch')
-            if row['mission_id'] and job['mission_id'] != row['mission_id']:
-                raise ValueError('Mission mismatch')
-            receipt = None
-            if job['status'] == 'GOAL_CONFIRMED':
-                receipt = binding.check_receipt(job, registry.client.physical_receipt(job['mission_id'])['receipt'])
-            if row['state'] == 'WAITING':
-                registry.ledger.refresh(key, registry.client, now=timezone.now())
-            else:
-                registry.ledger.recover_arm(key, registry.client, now=timezone.now())
-            command.mission_id = job['mission_id']
-            _record_fact(command, job, receipt)
+            can_resume = resume and command.state in ('DISPATCHING', 'RECONCILED', 'UNKNOWN')
+            execution = registry.ledger.reconcile_arm(key, registry.client, now=timezone.now(),
+                resume=can_resume, principal=command.fleet_principal)
+            command.mission_id = execution.mission_id
+            _record_fact(command, execution.job, execution.receipt)
             state = 'CANCEL_PENDING' if command.state == 'CANCEL_PENDING' else 'RECONCILED'
-            return _save(command, actor, state, 'BUSINESS_HOLD' if row['state'] == 'HOLD' else '')
+            held = row['state'] == 'HOLD' and (not can_resume or execution.held)
+            return _save(command, actor, state, 'BUSINESS_HOLD' if held else '')
         except Exception:
             registry.ledger.hold(key)
             return _save(command, actor, 'CANCEL_PENDING' if command.state == 'CANCEL_PENDING' else 'UNKNOWN', 'RECONCILIATION_REQUIRED')
@@ -376,8 +367,8 @@ def submit_command(actor, *, command_id, expected_version):
     return _operation(actor, command_id, expected_version, 'submit')
 
 
-def reconcile_command(actor, *, command_id, expected_version):
-    return _operation(actor, command_id, expected_version, 'reconcile')
+def reconcile_command(actor, *, command_id, expected_version, resume=False):
+    return _operation(actor, command_id, expected_version, 'reconcile', resume=resume)
 
 
 def cancel_command(actor, *, command_id, expected_version, reason):
@@ -418,10 +409,9 @@ def command_detail(command):
         job, receipt = None, None
         if fact and row:
             binding = ArmTransferBinding(**command.binding['moves'][row['step_index']])
-            job = binding.check(fact.job, f"{_key(command)}:{row['step_index']}")
-            if job['mission_id'] != row['mission_id'] or job.get('proposal_principal_id') != command.fleet_principal:
-                raise ValueError('Stored fact identity differs')
-            receipt = binding.check_receipt(job, fact.receipt) if fact.receipt else None
+            execution = validate_arm_execution(binding, f"{_key(command)}:{row['step_index']}",
+                fact.job, fact.receipt, mission_id=row['mission_id'], principal=command.fleet_principal)
+            job, receipt = execution.job, execution.receipt
         return dict(ledger=dict(row) if row else None, job=job, receipt=receipt, reason=command.reason,
                     read_at=fact.read_at if job else None)
     except (ValidationError, Conflict, ValueError, sqlite3.Error):

@@ -8,6 +8,7 @@ import sqlite3
 
 from harbor.model import YARD_ARMS, aware_time, identifier, identifiers, revision
 from harbor.process import ArmTransferBinding, ProcessBinding
+from harbor.execution import read_arm_execution
 
 
 def _json(value):
@@ -246,54 +247,41 @@ class BusinessLedger:
         still names, and only then re-enters WAITING with the job's current status. It never
         posts a new request and leaves cancellation bookkeeping to hold().
         """
-        aware_time(now)
-        row = self.read(key)
-        payload = _payload(row)
-        if row['state'] != 'HOLD' or payload.get('execution_kind') != 'ARM_TRANSFER':
+        if self.read(key)['state'] != 'HOLD':
             raise ValueError('Only held physical transfers can be resumed')
-        if hashlib.sha256(_json(payload).encode()).hexdigest() != row['digest']:
-            raise ValueError('Saved business body changed')
-        binding = ArmTransferBinding(**payload['moves'][row['step_index']])
-        request_key = f"{key}:{row['step_index']}"
-        job = binding.check(client.arm_request(request_key)['job'], request_key)
-        if row['mission_id'] and row['mission_id'] != job['mission_id']:
-            raise ValueError('Resumed mission identity differs')
-        attempt = None
-        if job['status'] == 'GOAL_CONFIRMED':
-            receipt = binding.check_receipt(job, client.physical_receipt(job['mission_id'])['receipt'])
-            attempt = receipt['attempt_id']
-        if attempt is not None:
-            identifier(attempt)
-        confirmed = job['status'] == 'GOAL_CONFIRMED' and attempt is not None
-        with closing(self._connect()) as c, c:
-            c.execute("BEGIN IMMEDIATE")
-            self._check_current(c, key, row)
-            c.execute("UPDATE business SET mission_id=?,attempt_id=?,goal_confirmed=?,state=?,row_version=row_version+1 "
-                      "WHERE request_key=?",
-                      (job['mission_id'], attempt, int(confirmed),
-                       'HOLD' if job['status'] == 'HOLD' else 'WAITING', key))
-        self._reads[key] = (job['mission_id'], attempt, now, row['row_version'] + 1)
-        return job
+        return self.reconcile_arm(key, client, now=now, resume=True).job
 
     def recover_arm(self, key, client, *, now):
+        if self.read(key)['state'] != 'HOLD':
+            raise ValueError('Only held physical transfers can be recovered')
+        return self.reconcile_arm(key, client, now=now).job
+
+    def reconcile_arm(self, key, client, *, now, resume=False, principal=None):
+        """Apply one validated read; a bookkeeping HOLD only resumes when requested."""
         aware_time(now)
         row = self.read(key)
         payload = _payload(row)
-        if row['state'] != 'HOLD' or payload.get('execution_kind') != 'ARM_TRANSFER':
-            raise ValueError('Only held physical transfers can be recovered')
+        if row['state'] not in ('WAITING', 'HOLD') or payload.get('execution_kind') != 'ARM_TRANSFER':
+            raise ValueError('No current physical transfer to reconcile')
         if hashlib.sha256(_json(payload).encode()).hexdigest() != row['digest']:
             raise ValueError('Saved business body changed')
         binding = ArmTransferBinding(**payload['moves'][row['step_index']])
         request_key = f"{key}:{row['step_index']}"
-        job = binding.check(client.arm_request(request_key)['job'], request_key)
-        if row['mission_id'] and row['mission_id'] != job['mission_id']:
-            raise ValueError('Recovered mission identity differs')
+        execution = read_arm_execution(client, binding, request_key,
+                                       mission_id=row['mission_id'], principal=principal)
+        progressing = row['state'] == 'WAITING' or resume
+        state = 'WAITING' if progressing and not execution.held else 'HOLD'
+        attempt = execution.attempt_id if progressing else row['attempt_id']
+        confirmed = execution.goal_confirmed if progressing else row['goal_confirmed']
         with closing(self._connect()) as c, c:
             c.execute('BEGIN IMMEDIATE')
             self._check_current(c, key, row)
-            c.execute('UPDATE business SET mission_id=?,row_version=row_version+1 WHERE request_key=?',
-                      (job['mission_id'], key))
-        return job
+            c.execute('UPDATE business SET mission_id=?,attempt_id=?,goal_confirmed=?,state=?,'
+                      'row_version=row_version+1 WHERE request_key=?',
+                      (execution.mission_id, attempt, int(confirmed), state, key))
+        if progressing:
+            self._reads[key] = (execution.mission_id, attempt, now, row['row_version'] + 1)
+        return execution
 
     def refresh(self, key, client, *, now):
         aware_time(now)
@@ -302,14 +290,7 @@ class BusinessLedger:
             raise ValueError("No current execution to reconcile")
         payload = _payload(row)
         if payload.get("execution_kind") == "ARM_TRANSFER":
-            binding = ArmTransferBinding(**payload["moves"][row["step_index"]])
-            job = binding.check(client.arm_job(row["mission_id"])["job"], f"{key}:{row['step_index']}")
-            if job["mission_id"] != row["mission_id"]:
-                raise ValueError("Physical job identity changed")
-            attempt = None
-            if job["status"] == "GOAL_CONFIRMED":
-                receipt = binding.check_receipt(job, client.physical_receipt(row["mission_id"])["receipt"])
-                attempt = receipt["attempt_id"]
+            return self.reconcile_arm(key, client, now=now)
         else:
             job = client.job(row["mission_id"])["job"]
             if job["mission_id"] != row["mission_id"] or len(job["steps"]) != 1:

@@ -43,7 +43,21 @@
 5. 물리 결과와 업무 근거가 갖춰지면 해당 단계를 완료한다. 후속 단계는 동일한 확정 범위 안에서 자동 진행한다. 전체 목표 배치 검증이 끝나야 업무가 완료된다.
 6. 서비스 재시작·복원·버전 변경 시 저장 의도·원래 실행부터 대조한다. 기존 restore reconciliation 차단과 WriterLease를 유지한다. 네트워크 단절에서 실행기를 계속 바쁘게 재시도하거나 불명을 성공으로 바꾸지 않는다.
 
-현재 `BusinessLedger.refresh()`는 수행 조회와 장부 상태를 갱신한다. `confirm()`은 단계 근거를, `finish()`는 최종 업무 근거를 검증한다. 웹은 이 두 업무 근거 적용을 연결하지 않으며 Registry의 placement/retreat 출처도 미수용 placeholder다. 업무 근거 어댑터와 confirm/finish 연결은 실행기 구현에 포함해야 한다. Fleet 조회만으로 다음 단계가 열리지 않는다. 현재 Command가 Order당 하나이며 binding이 불변이므로 재계획을 원래 Command에 덮어쓰는 방식도 불가하다.
+`BusinessLedger`는 실행 대조와 업무 전이를 맡는다. `confirm()`은 단계 근거를,
+`finish()`는 최종 업무 근거를 검증한다. 현재 상시 실행기는 이 두 전이를 연결하며,
+업무 근거 provider는 명시적으로 설정해야 한다. 미설정 Registry는 진행을 허용하지
+않는 placeholder 출처를 유지한다. Fleet 조회만으로 다음 단계가 열리지 않는다.
+Command binding은 불변이므로 재계획을 원래 Command에 덮어쓰지 않는다.
+
+2026-10-28 ARM 대조 구현: `harbor/execution.py`가 기존 binding 검증으로
+job·physical receipt를 원래 request key·mission·principal에 결속하고,
+`ArmExecution`으로 실행 참조·물리 목표 확인·HOLD를 제공한다. 원본 job·receipt와
+attempt·digest·epoch·generation은 감사 근거로 보존한다.
+`BusinessLedger.reconcile_arm()`은 이 한 번의 조회 결과로 장부를 갱신한다.
+웹과 상시 실행기는 `reconcile_command()`를 함께 사용하며, 감사 기록에도 같은
+결과를 저장한다. 상시 실행기만 bookkeeping HOLD의 재진입을 요청하고, Fleet HOLD와
+취소 대기는 유지한다. 물리 목표 확인은 `confirm()`·`finish()`의 독립 업무 근거를
+대신하지 않는다. 이 구현은 아래의 실물·운영 수용 조건을 충족했다는 뜻이 아니다.
 
 ## 상태와 변경 정책
 
@@ -69,7 +83,9 @@
 
 ## 검증과 현재 결손
 
-현재 UI와 즉시 제출은 구현됐지만, 상시 실행기·내구 의도 복구·인증된 업무 근거 연결·다칸 binding·ARM 정책 admission은 이 설계만으로 구현되지 않는다. 인프라 변경 없이 실행기부터 켜는 배포도 하지 않는다.
+이 설계 문서와 ARM 대조 구현만으로 실물·운영 수용이나 ARM 정책 admission이
+완료되지는 않는다. 상시 실행기와 업무 근거 연결의 구현 존재를 실제 producer의
+인증·설치·현장 수용으로 계산하지 않는다. 배포 차단과 명시적 활성화 조건을 유지한다.
 
 수용 시험은 다음을 포함한다: 화면 종료 뒤 3단계 합성 업무 진행, 동일 이벤트/조회 반복의 단일 전이, 전송 전후 crash와 재시작, timeout 뒤 중복 없는 대조, 부분 완료 후 재계획, 취소 ACK 뒤 후속 단계 차단, 잘못된 identity/schema/근거 거절, restore 차단 유지. Harbor 단독 시험과 고정 양 끝 HTTP 계약 시험, 실제 장치·현장 수용은 각각 기록한다.
 
