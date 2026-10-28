@@ -32,3 +32,8 @@ Base: upstream/main `ca2f207`; results apply to this worktree's uncommitted chan
 - Real Fleet contract suite, robot behavior and operational acceptance: not run.
 - CE: 해당 없음 — the refactor and regression tests capture the reasoning; no
   separately verified device or operational recovery lesson was established.
+
+2026-10-29 followup: committed the implementation, preserved the compatibility
+entry points' original ledger version, and passed the pinned ARM and authenticated
+web→Fleet HTTP suites on the model test PC. See
+[the revision-bound verification record](../../validation/2026-10-29-execution-reconciliation.md).
