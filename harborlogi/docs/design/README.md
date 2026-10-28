@@ -33,6 +33,7 @@
 | 25 | [Fleet 연결 설정과 계약 확인](25-fleet-connection-bridge.md) | 관리자 연결 프로필·서버 자격·명시적 신원/ARM 조회 검사·기존 제출/대조 설정의 일치 |
 | 26 | [2D·3D 공통 보기와 계산 추천](26-linked-yard-and-ranked-recommendation.md), [ADR0014](../adr/0014-linked-spatial-views-and-ranked-planning.md) | 정확한 전체 점유 주소·양방향 선택·가상 편집, 완전한 반출 후보 비교·지지 그래프·탐색 한계 |
 | 27 | [독립 서비스 인증과 협력](27-independent-integration-and-service-trust.md), [ADR0015](../adr/0015-service-identity-and-independent-integration.md) | 사람/기계/승인/관측 신원 분리, 공개 계약·데이터 소유·자격 교체·실제 수용 단계 |
+| 28 | [재계획과 취소의 상태 구조](28-replan-and-cancel-structures.md) | 주문당 명령 이력(활성 유일 제약), 취소 종착 상태와 열린 계약 질문, 재계획 착수 조건과 수용 시험. 구현 전 상세설계 |
 | 29 | [실행 binding 확장 — 다칸 배치와 팔 배정](29-spatial-binding-and-arm-assignment.md) | 다칸 입고 배치 binding, (이동·팔)별 설치 대응으로 도달 원본 교체, preflight는 설치 검증 보조로 한정, 열린 설치 질문. 구현 전 상세설계 |
 | 30 | [ARM preflight 소비를 위한 설치 catalog digest](30-arm-preflight-catalog-digest.md) | 결정 기록(2026-10-27): C 유지 + A(설치 산출물 digest)를 설치 표준으로 채택. preflight 소비는 별도 변경으로만 연다 |
 | 31 | [업무 실행기 착수 계획](31-business-executor-implementation-plan.md) | 설계24의 P0–P4 단계별 구현·시험·수용 기준, 현재 구현 지점 대조, ADR0013 검토 결론 |
