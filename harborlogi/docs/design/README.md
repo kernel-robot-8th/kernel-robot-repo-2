@@ -35,6 +35,7 @@
 | 27 | [독립 서비스 인증과 협력](27-independent-integration-and-service-trust.md), [ADR0015](../adr/0015-service-identity-and-independent-integration.md) | 사람/기계/승인/관측 신원 분리, 공개 계약·데이터 소유·자격 교체·실제 수용 단계 |
 | 29 | [실행 binding 확장 — 다칸 배치와 팔 배정](29-spatial-binding-and-arm-assignment.md) | 다칸 입고 배치 binding, (이동·팔)별 설치 대응으로 도달 원본 교체, preflight는 설치 검증 보조로 한정, 열린 설치 질문. 구현 전 상세설계 |
 | 30 | [ARM preflight 소비를 위한 설치 catalog digest](30-arm-preflight-catalog-digest.md) | 결정 기록(2026-10-27): C 유지 + A(설치 산출물 digest)를 설치 표준으로 채택. preflight 소비는 별도 변경으로만 연다 |
+| 31 | [업무 실행기 착수 계획](31-business-executor-implementation-plan.md) | 설계24의 P0–P4 단계별 구현·시험·수용 기준, 현재 구현 지점 대조, ADR0013 검토 결론 |
 
 새 화면을 설계할 때는 07→08→09를 먼저 읽고 01~05의 역할·계약·수용 조건과 대조한다. 운영 현황/업무/사용 안내와 토큰은 10에서 로컬 페이지로 구현했다. 전체 제품 메뉴·운영 권한·실물 수용까지 완료한 것은 아니다.
 
