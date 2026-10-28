@@ -35,7 +35,7 @@ class RankedRecommendationTests(TestCase):
         plan.refresh_from_db()
         saved = deepcopy(plan.result)
         report = saved['optimization']
-        self.assertEqual(report['objective_version'], 'restoration_lex_v1')
+        self.assertEqual(report['objective_version'], 'restoration_lex_v2')
         self.assertGreater(report['complete_plans_compared'], 1)
         self.assertEqual(report['alternatives'][0]['moves'], saved['moves'])
         self.assertEqual(len(saved['moves']), 3)
@@ -49,6 +49,20 @@ class RankedRecommendationTests(TestCase):
         self.assertEqual([m.objects.count() for m in (Plan, Observation, Audit)], counts)
         plan.refresh_from_db()
         self.assertEqual(plan.result, saved)
+
+    def test_outbound_queue_ranks_reach_the_planner_and_v1_plans_stay_readable(self):
+        from harbor.spatial import plan_spatial
+        from harbor_web.recommendation_view import explain_optimization
+        order, observed = self.prepared()
+        with patch('harbor.spatial.plan_spatial', wraps=plan_spatial) as planner:
+            plan = self.calculate(order, observed)
+        self.assertEqual(planner.call_args.kwargs['schedule'][order.cargo.code][0], order.priority_group)
+        report = deepcopy(plan.result['optimization'])
+        self.assertEqual(len(explain_optimization(report)['score_rows']), 5)
+        report['objective_version'] = 'restoration_lex_v1'
+        for score in (report['score'], report['first_feasible_score'], *(a['score'] for a in report['alternatives'])):
+            del score['earlier_outbound_buried']
+        self.assertEqual([row['label'] for row in explain_optimization(report)['score_rows']][0], '복귀 구역 변경')
 
     def test_limited_complete_candidate_is_distinguished_from_unfinished_hold(self):
         order, observed = self.prepared()
