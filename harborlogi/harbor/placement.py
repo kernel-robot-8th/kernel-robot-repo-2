@@ -2,8 +2,8 @@
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
-from harbor.model import YARD_ARMS, aware_time, identifier
-from harbor.spatial import CargoShape, Placement, SpatialPolicy, SpatialSnapshot
+from harbor.model import YARD_ARMS, aware_time
+from harbor.spatial import CargoShape, Placement, SpatialPolicy, SpatialSnapshot, validate_schedule
 
 
 PLACEMENT_CANDIDATE_LIMIT = 20_000
@@ -44,14 +44,7 @@ def plan_placement(snapshot: SpatialSnapshot, incoming: CargoShape, policy: Spat
     Reserved cells exclude pending destinations and never supply physical support.
     """
     aware_time(now)
-    if not isinstance(schedule, dict):
-        raise ValueError('Expected outbound schedule ranks')
-    for cargo, rank in schedule.items():
-        identifier(cargo)
-        if (not isinstance(rank, tuple) or len(rank) != 2
-                or type(rank[0]) is not int or rank[0] < 0
-                or (rank[1] is not None and (type(rank[1]) is not int or rank[1] < 0))):
-            raise ValueError('Expected an outbound priority group and optional sequence')
+    validate_schedule(schedule)
     areas = {a.area_id: a for a in snapshot.areas}
     referenced = {policy.outbound_area, *policy.temporary_areas, *policy.storage_areas}
     referenced.update(a for edge in policy.allowed_moves for a in edge)

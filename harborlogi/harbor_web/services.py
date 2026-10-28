@@ -404,6 +404,13 @@ def make_plan(actor, *, order_id, expected_version, observation_id, now=None, au
     return plan
 
 
+def _outbound_schedule():
+    schedule = {}
+    for outgoing in Order.objects.filter(kind='OUTBOUND').select_related('cargo').order_by('priority_group', 'sequence', 'pk'):
+        schedule.setdefault(outgoing.cargo.code, (outgoing.priority_group, outgoing.sequence if outgoing.tie_policy == 'FIXED' else None))
+    return schedule
+
+
 def _calculate_plan(actor, order, observation, *, now=None, trigger='manual', input_digest=None, hold_reason=None):
     """Trusted calculator; callers hold the serialized transaction and authorize the event."""
     current = timezone.now() if now is None else now
@@ -425,11 +432,8 @@ def _calculate_plan(actor, order, observation, *, now=None, trigger='manual', in
             proposal = OutboundProposal('HOLD', 'INCOMING_FOOTPRINT_REQUIRED', yard.revision)
         else:
             incoming_shape = CargoShape(order.cargo.code, footprint.length_cells, footprint.pk)
-            schedule = {}
-            for outgoing in Order.objects.filter(kind='OUTBOUND').select_related('cargo').order_by('priority_group', 'sequence', 'pk'):
-                schedule.setdefault(outgoing.cargo.code, (outgoing.priority_group, outgoing.sequence if outgoing.tie_policy == 'FIXED' else None))
             proposal = _domain(lambda: plan_placement(yard, incoming_shape,
-                spatial_policy(observation.condition.payload), schedule, now=current, reserved_cells=reserved_cells))
+                spatial_policy(observation.condition.payload), _outbound_schedule(), now=current, reserved_cells=reserved_cells))
     elif order.kind == 'INBOUND':
         proposal = OutboundProposal('HOLD', 'INBOUND_PLANNER_NOT_AVAILABLE', yard.revision)
     elif Order.objects.filter(kind='OUTBOUND', priority_group__lt=order.priority_group).exists() or (
@@ -438,7 +442,7 @@ def _calculate_plan(actor, order, observation, *, now=None, trigger='manual', in
     elif spatial:
         from harbor.spatial import plan_spatial
         proposal = _domain(lambda: plan_spatial(yard, OutboundRequest(order.cargo.code, yard.revision),
-            spatial_policy(observation.condition.payload), now=current))
+            spatial_policy(observation.condition.payload), now=current, schedule=_outbound_schedule()))
     elif CargoFootprint.objects.filter(length_cells__gt=1).filter(
             cargo__code__in={order.cargo.code, *(c for b in yard.bays for c in b.cargo), *(h.cargo_id for h in yard.holdings)}).exists():
         proposal = OutboundProposal('HOLD', 'SPATIAL_OBSERVATION_REQUIRED', yard.revision)

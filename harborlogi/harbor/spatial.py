@@ -181,6 +181,7 @@ class SpatialMove:
 
 @dataclass(frozen=True)
 class SpatialScore:
+    earlier_outbound_buried: int
     different_area_count: int
     different_position_count: int
     same_area_manhattan_distance: int
@@ -220,15 +221,39 @@ class SpatialProposal:
     optimization: SpatialOptimization | None = None
 
 
-def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: SpatialPolicy,
-                 *, now: datetime) -> SpatialProposal:
-    """Compare complete legal plans by restoration cost, then full move signature.
+def validate_schedule(schedule):
+    if not isinstance(schedule, dict):
+        raise ValueError('Expected outbound schedule ranks')
+    for cargo, rank in schedule.items():
+        identifier(cargo)
+        if (not isinstance(rank, tuple) or len(rank) != 2
+                or type(rank[0]) is not int or rank[0] < 0
+                or (rank[1] is not None and (type(rank[1]) is not int or rank[1] < 0))):
+            raise ValueError('Expected an outbound priority group and optional sequence')
 
-    The objective counts changed areas, changed row/column anchors, same-area
-    Manhattan displacement, and final levels, in that lexicographic order.
-    A bounded search returns its best complete incumbent, never a partial plan.
+
+def leaves_earlier(below, above):
+    """Whether known-ranked cargo below must leave before the cargo resting on it."""
+    if below is None:
+        return False
+    if above is None or below[0] < above[0]:
+        return True
+    return below[0] == above[0] and None not in (below[1], above[1]) and below[1] < above[1]
+
+
+def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: SpatialPolicy,
+                 *, now: datetime, schedule: dict[str, tuple[int, int | None]] | None = None) -> SpatialProposal:
+    """Compare complete legal plans by future obstruction, restoration cost, then move signature.
+
+    The objective first counts restored cargo resting on cargo scheduled to leave
+    earlier, then changed areas, changed row/column anchors, same-area Manhattan
+    displacement, and final levels, in that lexicographic order. Without a
+    schedule the first term is zero. A bounded search returns its best complete
+    incumbent, never a partial plan.
     """
     aware_time(now)
+    schedule = {} if schedule is None else schedule
+    validate_schedule(schedule)
     areas = {a.area_id: a for a in snapshot.areas}
     referenced = {policy.outbound_area, *policy.temporary_areas, *policy.storage_areas}
     referenced.update(a for edge in policy.allowed_moves for a in edge)
@@ -316,7 +341,20 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
 
     def score(current):
         restored = [(originals[cargo], current.placement(cargo)) for cargo in sorted(blockers)]
-        values = (sum(a.area_id != b.area_id for a, b in restored),
+        occupied = current.occupied()
+        buried = 0
+        for cargo in sorted(blockers):
+            # Follow the full support chain, as inbound placement does for crossing cargo.
+            lower, pending = set(), [cargo]
+            while pending:
+                for a, r, c, level in current.cells(current.placement(pending.pop())):
+                    below = occupied.get((a, r, c, level-1))
+                    if below is not None and below not in lower:
+                        lower.add(below)
+                        pending.append(below)
+            buried += sum(leaves_earlier(schedule.get(other), schedule.get(cargo)) for other in lower)
+        values = (buried,
+                  sum(a.area_id != b.area_id for a, b in restored),
                   sum((a.row, a.column) != (b.row, b.column) for a, b in restored),
                   sum(abs(a.row-b.row) + abs(a.column-b.column) for a, b in restored
                       if a.area_id == b.area_id),
@@ -376,7 +414,7 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
         search(snapshot, frozenset(blockers), frozenset(blockers), False, (), ())
     except SearchLimit as exc:
         budget_reason = str(exc)
-    report = SpatialOptimization('restoration_lex_v1', alternatives[0][2].score if alternatives else None,
+    report = SpatialOptimization('restoration_lex_v2', alternatives[0][2].score if alternatives else None,
         first_score, tuple(item[2] for item in alternatives), count, candidates, complete,
         budget_reason is None, budget_reason, SPATIAL_SEARCH_LIMIT, SPATIAL_CANDIDATE_LIMIT)
     if not alternatives:

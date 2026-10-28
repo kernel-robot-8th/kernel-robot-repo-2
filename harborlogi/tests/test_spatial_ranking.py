@@ -25,13 +25,13 @@ class RankedSpatialTests(unittest.TestCase):
         original = source.placements
         result = self.plan(source)
         report = result.optimization
-        self.assertEqual(report.objective_version, 'restoration_lex_v1')
+        self.assertEqual(report.objective_version, 'restoration_lex_v2')
         self.assertTrue(report.search_complete)
         self.assertIsNone(report.budget_reason)
         self.assertGreater(report.complete_plans_compared, 1)
         self.assertEqual(len(report.alternatives), 5)
         self.assertEqual(report.alternatives[0].moves, result.moves)
-        self.assertEqual(asdict(report.score), dict(different_area_count=0,
+        self.assertEqual(asdict(report.score), dict(earlier_outbound_buried=0, different_area_count=0,
             different_position_count=0, same_area_manhattan_distance=0, final_level_sum=1))
         self.assertEqual(result, self.plan(source))
         self.assertEqual(source.placements, original)
@@ -71,8 +71,8 @@ class RankedSpatialTests(unittest.TestCase):
                 self.assertEqual(astuple(result.optimization.score), expected[0])
                 self.assertEqual(tuple(astuple(m)[:7] for m in result.moves), expected[1])
                 self.assertLess(astuple(result.optimization.score), astuple(result.optimization.first_feasible_score))
-                self.assertEqual(astuple(result.optimization.first_feasible_score), (0, 1, 1, 2))
-                self.assertEqual(astuple(result.optimization.score), (0, 0, 0, 3))
+                self.assertEqual(astuple(result.optimization.first_feasible_score), (0, 0, 1, 1, 2))
+                self.assertEqual(astuple(result.optimization.score), (0, 0, 0, 0, 3))
                 signatures = []
                 for alternative in result.optimization.alternatives:
                     final = replay(self, source, constraints, alternative.moves)
@@ -132,8 +132,8 @@ class RankedSpatialTests(unittest.TestCase):
             allowed_moves=(policy().allowed_moves-{('temp', 'yard')}) | {('temp', 'store')},
             arm_reach=policy().arm_reach | {('A', 'store')})
         for source, constraints, blockers, expected in [
-                (crossing, policy(), {'a'}, (0, 1, 1, 1)),
-                (other_area, cross_policy, {'block'}, (1, 0, 0, 1))]:
+                (crossing, policy(), {'a'}, (0, 0, 1, 1, 1)),
+                (other_area, cross_policy, {'block'}, (0, 1, 0, 0, 1))]:
             with self.subTest(expected=expected):
                 result = plan_spatial(source, OutboundRequest('target', 4), constraints, now=NOW)
                 self.assertTrue(result.optimization.search_complete)
@@ -143,10 +143,29 @@ class RankedSpatialTests(unittest.TestCase):
                 self.assertEqual(tuple(astuple(m)[:7] for m in result.moves), signature)
                 replay(self, source, constraints, result.moves)
 
+    def test_restoration_avoids_burying_cargo_that_leaves_earlier(self):
+        source = snapshot([('c', 1), ('target', 1), ('b', 1)], [
+            Placement('c', 'yard', 1, 1, 1), Placement('target', 'yard', 1, 1, 2),
+            Placement('b', 'yard', 1, 1, 3)])
+        for schedule, restored, expected in [
+                ({}, Placement('b', 'yard', 1, 1, 2), (0, 0, 0, 0, 2)),
+                ({'c': (0, None)}, Placement('b', 'yard', 1, 2, 1), (0, 0, 1, 1, 1)),
+                ({'b': (0, None), 'c': (1, None)}, Placement('b', 'yard', 1, 1, 2), (0, 0, 0, 0, 2)),
+                ({'b': (2, 1), 'c': (2, 0)}, Placement('b', 'yard', 1, 2, 1), (0, 0, 1, 1, 1))]:
+            with self.subTest(schedule=schedule):
+                result = plan_spatial(source, OutboundRequest('target', 4), policy(), now=NOW, schedule=schedule)
+                self.assertEqual(result.status, 'READY')
+                self.assertEqual(result.optimization.objective_version, 'restoration_lex_v2')
+                self.assertEqual(result.moves[-1].destination_placement, restored)
+                self.assertEqual(astuple(result.optimization.score), expected)
+                replay(self, source, policy(), result.moves)
+        with self.assertRaises(ValueError):
+            plan_spatial(source, OutboundRequest('target', 4), policy(), now=NOW, schedule={'c': (-1, None)})
+
 
 def restoration_score(original, placements, blockers):
     pairs = [(original.placement(c), next(p for p in placements if p.cargo_id == c)) for c in blockers]
-    return (sum(a.area_id != b.area_id for a, b in pairs),
+    return (0, sum(a.area_id != b.area_id for a, b in pairs),
             sum((a.row, a.column) != (b.row, b.column) for a, b in pairs),
             sum(abs(a.row-b.row)+abs(a.column-b.column) for a, b in pairs if a.area_id == b.area_id),
             sum(b.level for _, b in pairs))
