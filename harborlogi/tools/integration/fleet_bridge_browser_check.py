@@ -54,7 +54,8 @@ def main():
                 return
             parsed = urlsplit(self.path)
             if parsed.path == '/api/fleet/session' and not parsed.query:
-                self.reply(200, dict(principal_id=principal if state['mode'] != 'mismatch' else 'synthetic-other-service', role='service'))
+                self.reply(200, dict(principal_id=principal if state['mode'] != 'mismatch' else 'synthetic-other-service',
+                    role='operator' if state['mode'] == 'human-role' else 'service'))
             elif parsed.path == '/api/fleet/arm-transfers/jobs' and set(parse_qs(parsed.query)) == {'request_key'} and parse_qs(parsed.query)['request_key'][0].startswith('harbor-probe-'):
                 if state['mode'] == 'not-installed':
                     self.reply(503, dict(detail=dict(code='ARM_TRANSFER_JOB_UNAVAILABLE')))
@@ -175,6 +176,14 @@ def main():
             result['checks'].append('Admin settings link saves allowlisted profile without Fleet traffic; commands._config consumes its origin and principal with server-only token')
             check('compatible', 'READ_API_VERIFIED', 2)
             assert page.get_by_text('조회 연동 확인', exact=True).is_visible()
+            check('human-role', 'ROLE_NOT_SUITABLE', 1)
+            assert page.get_by_text('연결 확인 필요', exact=True).is_visible()
+            assert page.get_by_text('사람의 운영자 자격 대신 Harbor 전용 service 역할의 기계 신원을 발급한 뒤 다시 검사하세요.', exact=True).is_visible()
+            page.locator('details').filter(has=page.locator('summary', has_text='사람의 로그인')).locator('summary').click()
+            assert page.get_by_text('사람의 비밀번호·세션을 전달하지 않습니다.', exact=False).is_visible()
+            page.evaluate('scrollTo(0,0)')
+            page.screenshot(path=str(output / 'human-role-rejected.png'), full_page=True)
+            result['checks'].append('Same principal with human operator role is rejected before ARM traffic; independent human/service authority is explained without sharing credentials')
             check('generic-404', 'ARM_API_UNCONFIRMED', 2)
             assert page.get_by_text('서비스 신원 확인됨 · API 준비 필요', exact=True).is_visible()
             page.screenshot(path=str(output / 'generic-404-rejected.png'), full_page=True)
@@ -228,10 +237,10 @@ def main():
             assert FleetConnection.objects.get(pk=1).version == 1
             assert not Command.objects.exists()
             assert all(request['method'] == 'GET' and request['authorized'] for request in state['requests'])
-            assert len(state['requests']) == 11
+            assert len(state['requests']) == 12
             assert token not in json.dumps(list(Audit.objects.values_list('detail', flat=True)))
             assert not errors, errors
-            result['checks'].append('Operator GET/save/check denied; four widths have no overflow; token absent from HTML/audit; all eleven Fleet requests are authenticated GETs; no Harbor Commands or Fleet jobs created')
+            result['checks'].append('Operator GET/save/check denied; four widths have no overflow; token absent from HTML/audit; all twelve Fleet requests are authenticated GETs; no Harbor Commands or Fleet jobs created')
             result.update(status='PASSED', fleet_requests=state['requests'], browser_errors=errors)
             browser.close()
     except Exception:

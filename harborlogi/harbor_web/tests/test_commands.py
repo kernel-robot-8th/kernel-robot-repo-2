@@ -95,6 +95,7 @@ class CommandTests(TestCase):
     def test_prepare_idempotent_and_no_ledger_business_yet(self):
         plan = self.plan()
         command = commands.prepare_command(self.operator, plan_id=plan.pk, expected_version=1)
+        self.assertEqual(commands.acquire_registry().client.expected_role, 'service')
         self.assertEqual(commands.prepare_command(self.operator, plan_id=plan.pk, expected_version=1).pk, command.pk)
         self.assertIsNone(commands.command_detail(command)['ledger'])
         with self.assertRaises(Conflict):
