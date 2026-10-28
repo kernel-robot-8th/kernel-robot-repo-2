@@ -1,6 +1,10 @@
 # Harbor 업무 실행기와 ROSY 연동 경계
 
-2026-10-26. 책임 결정: [ADR0013](../adr/0013-independent-business-execution-and-platform.md). 상태: 상세설계. 아래 내부 인터페이스·상태는 제안이며 현재 API 필드나 구현 완료 항목이 아니다.
+2026-10-26 설계, 2026-10-29 구현 현황 정리. 책임 결정:
+[ADR0013](../adr/0013-independent-business-execution-and-platform.md).
+상시 실행기·업무 근거 연결과 ARM 대조 경계의 현재 구현은 「지속 실행과 복구」에
+구분해 적는다. 아래 개념 인터페이스는 Harbor 내부 책임을 설명하며 새로운 ROSY
+API 필드나 실물·운영 수용을 선언하지 않는다.
 
 ## 사용자가 얻는 결과
 
