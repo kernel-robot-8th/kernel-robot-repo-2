@@ -11,6 +11,10 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
+class FleetIdentityError(ValueError):
+    """The configured app identity was not authenticated; no operation was sent."""
+
+
 class RosyClient:
     def __init__(self, base_url=None, token=None, *, timeout=10, transport=None):
         if transport is not None:
@@ -49,8 +53,19 @@ class RosyClient:
     def session(self):
         return self._request('GET', '/api/fleet/session', None)
 
+    def _call(self, method, path, body):
+        expected = getattr(self, 'expected_principal', None)
+        if expected is not None:
+            identity = self.session()
+            role = getattr(self, 'expected_role', None)
+            if (not isinstance(identity, dict) or identity.get('principal_id') != expected
+                    or identity.get('role') not in ('service', 'operator')
+                    or role is not None and identity.get('role') != role):
+                raise FleetIdentityError('Configured Fleet application identity was not verified')
+        return self._request(method, path, body)
+
     def compile(self, binding):
-        result = self._request("POST", "/api/fleet/cell-app/compile", binding.compile_request())
+        result = self._call("POST", "/api/fleet/cell-app/compile", binding.compile_request())
         candidate, summary = result.get("candidate", {}), result.get("summary", {})
         if (candidate.get("kind") != "cell_job" or candidate.get("recipe_sha256") != binding.recipe_digest
                 or candidate.get("cell_sha256") != binding.cell_digest
@@ -61,24 +76,24 @@ class RosyClient:
         return result
 
     def propose(self, binding, *, request_key):
-        return self._request("POST", "/api/fleet/cell-app/proposals", binding.proposal_request(request_key))
+        return self._call("POST", "/api/fleet/cell-app/proposals", binding.proposal_request(request_key))
 
     def job(self, mission_id):
-        return self._request("GET", "/api/fleet/cell-jobs/" + quote(mission_id, safe=""), None)
+        return self._call("GET", "/api/fleet/cell-jobs/" + quote(mission_id, safe=""), None)
 
     def trip(self, candidates, steps, *, request_key):
-        return self._request("POST", "/api/fleet/trip-jobs", {
+        return self._call("POST", "/api/fleet/trip-jobs", {
             "candidate_robot_ids": list(candidates), "request_key": request_key, "steps": list(steps),
         })
 
     def trip_job(self, mission_id):
-        return self._request("GET", "/api/fleet/trip-jobs/" + quote(mission_id, safe=""), None)
+        return self._call("GET", "/api/fleet/trip-jobs/" + quote(mission_id, safe=""), None)
 
     def trip_request(self, request_key):
-        return self._request("GET", "/api/fleet/trip-jobs?request_key=" + quote(request_key, safe=""), None)
+        return self._call("GET", "/api/fleet/trip-jobs?request_key=" + quote(request_key, safe=""), None)
 
     def propose_arm(self, binding, *, request_key):
-        return self._arm_response(self._request("POST", "/api/fleet/arm-transfers/jobs", binding.proposal_request(request_key)))
+        return self._arm_response(self._call("POST", "/api/fleet/arm-transfers/jobs", binding.proposal_request(request_key)))
 
     def _arm_response(self, result):
         principal = getattr(self, 'expected_principal', None)
@@ -87,15 +102,15 @@ class RosyClient:
         return result
 
     def arm_job(self, mission_id):
-        return self._arm_response(self._request("GET", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe=""), None))
+        return self._arm_response(self._call("GET", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe=""), None))
 
     def arm_request(self, request_key):
-        return self._arm_response(self._request("GET", "/api/fleet/arm-transfers/jobs?request_key=" + quote(request_key, safe=""), None))
+        return self._arm_response(self._call("GET", "/api/fleet/arm-transfers/jobs?request_key=" + quote(request_key, safe=""), None))
 
     def physical_receipt(self, mission_id):
-        return self._request("GET", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/physical-receipt", None)
+        return self._call("GET", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/physical-receipt", None)
 
     def cancel_arm(self, mission_id, *, reason):
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 192 or any(ord(c) < 32 for c in reason):
             raise ValueError('Expected a short cancellation reason')
-        return self._request('POST', '/api/fleet/arm-transfers/jobs/' + quote(mission_id, safe='') + '/cancel', {'reason': reason})
+        return self._call('POST', '/api/fleet/arm-transfers/jobs/' + quote(mission_id, safe='') + '/cancel', {'reason': reason})

@@ -70,7 +70,7 @@ def connection_guidance(config, check, *, token_present):
         'FLEET_UNREACHABLE': ('Harbor·ROSY 설치 담당자', '연결 주소와 네트워크 상태를 확인한 뒤 다시 검사하세요.'),
         'AUTHENTICATION_FAILED': ('Harbor 설치 담당자', '서버에 설치한 서비스 토큰을 확인한 뒤 다시 검사하세요.'),
         'AUTHORIZATION_FAILED': ('ROSY 권한 담당자', '이 서비스 신원의 조회 권한을 확인한 뒤 다시 검사하세요.'),
-        'ROLE_NOT_SUITABLE': ('ROSY 권한 담당자', '작업 제안용 서비스 신원을 준비한 뒤 다시 검사하세요.'),
+        'ROLE_NOT_SUITABLE': ('ROSY 권한 담당자', '사람의 운영자 자격 대신 Harbor 전용 service 역할의 기계 신원을 발급한 뒤 다시 검사하세요.'),
         'PRINCIPAL_MISMATCH': ('Harbor 설치 담당자', '설정한 서비스 신원과 토큰의 신원을 일치시킨 뒤 다시 검사하세요.'),
         'ARM_NOT_INSTALLED': ('ROSY 설치 담당자', '호환되는 ARM 조회 API와 실행 설치 구성을 준비한 뒤 다시 검사하세요.'),
         'ARM_API_UNCONFIRMED': ('ROSY 설치 담당자', 'Fleet 버전과 ARM 조회 API 계약을 확인한 뒤 다시 검사하세요.'),
