@@ -247,19 +247,23 @@ class BusinessLedger:
         still names, and only then re-enters WAITING with the job's current status. It never
         posts a new request and leaves cancellation bookkeeping to hold().
         """
-        if self.read(key)['state'] != 'HOLD':
+        row = self.read(key)
+        if row['state'] != 'HOLD':
             raise ValueError('Only held physical transfers can be resumed')
-        return self.reconcile_arm(key, client, now=now, resume=True).job
+        return self._reconcile_arm(key, client, row, now=now, resume=True).job
 
     def recover_arm(self, key, client, *, now):
-        if self.read(key)['state'] != 'HOLD':
+        row = self.read(key)
+        if row['state'] != 'HOLD':
             raise ValueError('Only held physical transfers can be recovered')
-        return self.reconcile_arm(key, client, now=now).job
+        return self._reconcile_arm(key, client, row, now=now).job
 
     def reconcile_arm(self, key, client, *, now, resume=False, principal=None):
         """Apply one validated read; a bookkeeping HOLD only resumes when requested."""
+        return self._reconcile_arm(key, client, self.read(key), now=now, resume=resume, principal=principal)
+
+    def _reconcile_arm(self, key, client, row, *, now, resume=False, principal=None):
         aware_time(now)
-        row = self.read(key)
         payload = _payload(row)
         if row['state'] not in ('WAITING', 'HOLD') or payload.get('execution_kind') != 'ARM_TRANSFER':
             raise ValueError('No current physical transfer to reconcile')
@@ -290,7 +294,7 @@ class BusinessLedger:
             raise ValueError("No current execution to reconcile")
         payload = _payload(row)
         if payload.get("execution_kind") == "ARM_TRANSFER":
-            return self.reconcile_arm(key, client, now=now)
+            return self._reconcile_arm(key, client, row, now=now)
         else:
             job = client.job(row["mission_id"])["job"]
             if job["mission_id"] != row["mission_id"] or len(job["steps"]) != 1:

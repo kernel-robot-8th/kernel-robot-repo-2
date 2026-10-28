@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from tempfile import TemporaryDirectory
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from harbor.workflow import BusinessLedger
 from harbor.process import ArmTransferBinding
@@ -181,3 +182,28 @@ class RecoveryTests(unittest.TestCase):
             self.assertEqual(ledger.read('request')['goal_confirmed'], 0)
             self.assertEqual(calls, [('GET', '/api/fleet/arm-transfers/jobs?request_key=request%3A0'),
                                      ('GET', '/api/fleet/arm-transfers/jobs/mission-1/physical-receipt')])
+
+    def test_compatibility_entry_points_keep_the_original_ledger_version(self):
+        for operation in ('refresh', 'resume_arm', 'recover_arm'):
+            with self.subTest(operation=operation), TemporaryDirectory() as directory:
+                ledger, binding, job = self.prepared(directory)
+                client = RosyClient(transport=lambda m, p, b: {'job': dict(job)})
+                if operation == 'refresh':
+                    ledger.propose('request', client)
+                else:
+                    ledger.hold('request')
+                read = ledger.read
+                changed = False
+
+                def read_then_hold(key):
+                    nonlocal changed
+                    original = read(key)
+                    if not changed:
+                        changed = True
+                        ledger.hold(key)
+                    return original
+
+                with patch.object(ledger, 'read', side_effect=read_then_hold):
+                    with self.assertRaisesRegex(ValueError, 'changed'):
+                        getattr(ledger, operation)('request', client, now=datetime.now(timezone.utc))
+                self.assertEqual(ledger.read('request')['state'], 'HOLD')
