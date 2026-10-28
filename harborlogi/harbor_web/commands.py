@@ -16,10 +16,11 @@ from django.db import transaction
 from django.utils import timezone
 
 from harbor.ownership import WriterLease
-from harbor.process import ArmTransferBinding, bind_plan
+from harbor.process import ArmTransferBinding, SpatialPlacementBinding, anchor_address, bind_plan, load_bindings
 from harbor.outbound import CargoMove, OutboundProposal
 from harbor.rosy_http import RosyClient
 from harbor.workflow import BusinessLedger
+from harbor_web.command_models import ACTIVE_COMMAND_STATES
 from harbor_web.models import Plan, Command, CommandFact, Audit, Observation
 from harbor_web.services import _role, Conflict, queue_digest, constraints
 from harbor_web.coordination import serialized
@@ -34,6 +35,7 @@ def _digest(value):
 
 def _config():
     from harbor_web.fleet_connection import connection_settings
+    from harbor_web.evidence import configured_sources
     connection = connection_settings()
     if connection['origin'] and not connection['allowed']:
         raise ValidationError('ORIGIN_NOT_ALLOWED')
@@ -45,41 +47,83 @@ def _config():
     RosyClient(origin, token)
     if len(principal) > 192 or not principal.strip() or any(ord(c) < 32 for c in principal):
         raise ValidationError('INVALID_FLEET_PRINCIPAL')
+    evidence_sources = configured_sources()  # Raises on malformed or overlapping sets.
     return dict(path=Path(path).resolve(), origin=origin.rstrip('/'), token=token,
-                principal=principal, bindings=bindings)
+                principal=principal, bindings=bindings, evidence_sources=evidence_sources)
 
 
 def _identity(config):
     return hashlib.sha256(str(config['path']).casefold().encode()).hexdigest()
 
 
-def _bound(plan, config):
+def _bindings(config):
     with open(config['bindings'], encoding='utf-8') as source:
-        bindings = tuple(ArmTransferBinding(**item) for item in json.load(source))
+        return load_bindings(json.load(source))
+
+
+def _matching_spatial(plan, installed):
+    """The one installed spatial binding that authorizes exactly this placement, or None.
+
+    Design 29: the recommendation tuple, footprint revision, and cargo must all
+    match a single installed binding; anything else keeps the execution gate.
+    """
+    recommendation = plan.result.get('recommendation')
+    if not isinstance(recommendation, dict) or plan.result.get('status') != 'READY':
+        return None
+    matches = [binding for binding in installed
+               if isinstance(binding, SpatialPlacementBinding)
+               and binding.matches(recommendation, plan.result.get('footprint_revision'), plan.order.cargo.code)]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _spatial_from_path(plan, path):
+    if not path:
+        return None
+    try:
+        with open(path, encoding='utf-8') as source:
+            return _matching_spatial(plan, load_bindings(json.load(source)))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _spatial_binding(plan, config):
+    return _spatial_from_path(plan, config['bindings'])
+
+
+def _bound(plan, config):
+    bindings = _bindings(config)
+    if plan.result.get('model') == 'grid-placement-v1':
+        spatial = _matching_spatial(plan, bindings)
+        if spatial is None:
+            raise ValueError('No installed spatial binding matches this placement')
+        return (spatial.move(),)
     proposal = OutboundProposal(plan.result['status'], plan.result['reason'], plan.result['source_revision'],
                                tuple(CargoMove(**move) for move in plan.result['moves']))
-    return bind_plan(proposal, bindings)
+    return bind_plan(proposal, tuple(b for b in bindings if not isinstance(b, SpatialPlacementBinding)))
 
 
 @serialized
 def capability(plan):
     reason, origin = '', None
     try:
-        if Command.objects.filter(order_id=plan.order_id).exclude(plan=plan).exists():
+        if Command.objects.filter(order_id=plan.order_id, state__in=ACTIVE_COMMAND_STATES).exclude(plan=plan).exists():
             raise ValidationError('EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION')
         from harbor_web.runtime import execution_block_reason
         blocked = execution_block_reason()
         if blocked:
             raise ValidationError(blocked)
         if plan.result.get('model') == 'grid-placement-v1':
-            raise ValidationError('SPATIAL_EXECUTION_BINDINGS_REQUIRED')
-        from harbor_web.models import CargoFootprint
-        source_codes = {plan.order.cargo.code}
-        for bay in plan.observation.payload.get('bays', []):
-            source_codes.update(bay['cargo'])
-        source_codes.update(h['cargo_id'] for h in plan.observation.payload.get('holdings', []))
-        if CargoFootprint.objects.filter(cargo__code__in=source_codes, length_cells__gt=1).exists():
-            raise ValidationError('SPATIAL_OBSERVATION_REQUIRED')
+            # Answerable from the installed bindings alone, before execution configuration.
+            if _spatial_from_path(plan, os.environ.get('HARBOR_BINDINGS_PATH', '')) is None:
+                raise ValidationError('SPATIAL_EXECUTION_BINDINGS_REQUIRED')
+        else:
+            from harbor_web.models import CargoFootprint
+            source_codes = {plan.order.cargo.code}
+            for bay in plan.observation.payload.get('bays', []):
+                source_codes.update(bay['cargo'])
+            source_codes.update(h['cargo_id'] for h in plan.observation.payload.get('holdings', []))
+            if CargoFootprint.objects.filter(cargo__code__in=source_codes, length_cells__gt=1).exists():
+                raise ValidationError('SPATIAL_OBSERVATION_REQUIRED')
         config = _config()
         origin = config['origin']
         if plan.result.get('status') != 'READY':
@@ -118,9 +162,12 @@ class Registry:
         self.lease = WriterLease(config['path'])
         self.lease.__enter__()
         try:
-            # These sources cannot authorize anything: no confirm/finish endpoint exists.
-            self.ledger = BusinessLedger(config['path'], placement_sources=('web-unconfigured-placement',),
-                                         retreat_sources=('web-unconfigured-retreat',))
+            from harbor_web.evidence import ledger_sources
+            # Unconfigured deployments keep placeholder sources that cannot authorize
+            # anything: no real submission ever carries them.
+            placement_sources, retreat_sources = ledger_sources()
+            self.ledger = BusinessLedger(config['path'], placement_sources=placement_sources,
+                                         retreat_sources=retreat_sources)
             self.client = RosyClient(config['origin'], config['token'])
             self.client.expected_principal = config['principal']
             self.client.expected_role = 'service'
@@ -179,7 +226,8 @@ def prepare_command(actor, *, plan_id, expected_version):
     registry = acquire_registry()
     with registry.lock('plan:' + str(plan_id)):
         plan = Plan.objects.select_related('order', 'order__cargo', 'observation', 'condition').get(pk=plan_id)
-        existing = Command.objects.filter(order=plan.order).first()
+        # Design 28: only an ACTIVE command occupies the order; terminal commands are history.
+        existing = Command.objects.filter(order=plan.order, state__in=ACTIVE_COMMAND_STATES).first()
         if existing:
             _validate(existing, registry.config)
             if existing.plan_id != plan.pk:
@@ -192,14 +240,22 @@ def prepare_command(actor, *, plan_id, expected_version):
         if not capability(plan)['enabled']:
             Audit.objects.create(actor=actor, action='command.blocked', object_type='Plan', object_id=str(plan.pk))
             raise ValidationError('Execution inputs unavailable.')
-        bindings = _bound(plan, registry.config)
-        body = dict(moves=[b.__dict__ for b in bindings], revision=plan.result['source_revision'],
-                    outbound_id=plan.order.cargo.code, outbound_stand=constraints(plan.condition.payload).outbound_stand,
-                    move_arms=[[m['primary_arm'], *m.get('alternate_arms', [])] for m in plan.result['moves']])
+        if plan.result.get('model') == 'grid-placement-v1':
+            spatial = _spatial_binding(plan, registry.config)
+            body = dict(moves=[spatial.move().__dict__], revision=plan.result['source_revision'],
+                        outbound_id=plan.order.cargo.code, outbound_stand=spatial.anchor(),
+                        move_arms=[[spatial.yard_arm]])
+        else:
+            bindings = _bound(plan, registry.config)
+            body = dict(moves=[b.__dict__ for b in bindings], revision=plan.result['source_revision'],
+                        outbound_id=plan.order.cargo.code,
+                        outbound_stand=constraints(plan.condition.payload).outbound_stand,
+                        move_arms=[[m['primary_arm'], *m.get('alternate_arms', [])] for m in plan.result['moves']])
         with transaction.atomic():
             command = Command.objects.create(plan=plan, order=plan.order, actor=actor, plan_version=expected_version,
                 ledger_identity=_identity(registry.config), fleet_origin=registry.config['origin'],
-                fleet_principal=registry.config['principal'], binding=body, body_digest=_digest(body))
+                fleet_principal=registry.config['principal'], binding=body, body_digest=_digest(body),
+                supersedes=Command.objects.filter(order=plan.order).order_by('-pk').first())
             Audit.objects.create(actor=actor, action='command.prepare', object_type='Command', object_id=str(command.pk))
     return command
 
@@ -326,6 +382,27 @@ def reconcile_command(actor, *, command_id, expected_version):
 
 def cancel_command(actor, *, command_id, expected_version, reason):
     return _operation(actor, command_id, expected_version, 'cancel', reason)
+
+
+@serialized
+def close_cancelled(actor, *, command_id, expected_version):
+    """Close a pending cancellation as CANCELLED after the operator confirmed the stop.
+
+    The Fleet ARM contract has no cancelled terminal status and cancel/HOLD retain
+    occupancy (API reference v1.312), so this transition is a human decision recorded
+    with its actor — never an automatic readback. Design 28.
+    """
+    registry = acquire_registry()
+    with registry.lock(command_id):
+        _role(actor, 'operator')
+        command = Command.objects.get(pk=command_id)
+        if command.version != expected_version:
+            raise Conflict('Command changed; reload.')
+        _validate(command, registry.config)
+        if command.state != 'CANCEL_PENDING':
+            raise Conflict('Only a pending cancellation can be closed.')
+        registry.ledger.hold(_key(command))
+        return _save(command, actor, 'CANCELLED', 'CANCELLATION_CONFIRMED_BY_OPERATOR')
 
 
 def command_detail(command):
