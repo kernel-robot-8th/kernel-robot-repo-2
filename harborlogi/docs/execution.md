@@ -41,6 +41,20 @@ ledger = BusinessLedger(ledger_path, placement_sources=("synthetic-camera",),
 
 가동 중인 장부는 DB 파일만 복사하지 말고 SQLite online backup API 등 일관된 snapshot 방식으로 보관한다. 읽기 전용 사본의 무결성을 확인하고, 앱을 재시작하기 전 정본 경로와 미확정 요청/HOLD를 대조한다. 장부 복원이나 파일 이동을 로봇 점유 해제·자동 재전송 근거로 삼지 않는다.
 
+## 업무 실행기와 근거 출처 설정
+
+웹 앱의 상시 업무 실행기(설계24·27 P1)와 근거 어댑터(P2)는 환경 변수로 켠다. 모두 명시적 옵트인이며, 설정하지 않으면 실행기가 돌지 않고 근거 출처가 placeholder로 남아 아무 제출도 승인하지 못한다.
+
+| 변수 | 역할 | 기본 |
+|---|---|---|
+| `HARBOR_EXECUTOR_ENABLED=1` | 서비스 프로세스에서 상시 실행기 시작(사람 확정→즉시 제출 뒤 남은 단계를 진행) | 끔 |
+| `HARBOR_EXECUTOR_INTERVAL` | 실행기 조회 간격(초). 조회 간격·한 번에 처리할 업무 수·backoff를 이 값으로 제한한다 | 5 |
+| `HARBOR_EXECUTOR_BATCH` | 한 tick이 다루는 최대 활성 업무 수 | 4 |
+| `HARBOR_PLACEMENT_SOURCES` / `HARBOR_RETREAT_SOURCES` | 설치자가 등록한 배치·퇴피 근거 출처 ID(쉼표 구분, 서로 겹치지 않음). 장부의 `placement_sources`·`retreat_sources`가 이 값을 쓴다 | 미설정(placeholder) |
+| `HARBOR_EXECUTOR_EVIDENCE=intake` | 실행기가 제출된 근거(intake)를 소비해 confirm·finish를 이어간다 | 끔(근거 없이 단계가 열리지 않음) |
+
+근거 제출은 `harbor_web.evidence.submit`(현장 확인 역할)로 들어오며, mission·attempt·계획 revision에 결속되고 신선(기본 5초)하며 아직 소모되지 않은 것만 채택된다. 운영 producer의 전송·자격 계약은 [물리 관측 수용 조건](observation-acceptance.md) 산출물이 열기 전까지 설치 통합 담당 영역이다.
+
 ## 실제 Fleet 계약 시험
 
 ### 중립 이송 의도와 수행 조회 (D-856 첫 흐름)
