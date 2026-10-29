@@ -25,6 +25,14 @@ class ConnectionForm(ConnectionVersionForm):
 
 
 CONNECTION_REASONS = {
+    'FLEET_SITE_CA_REQUIRED': '사이트 CA를 Harbor 서버에 설치하고 HARBOR_FLEET_CA_FILE을 설정하세요.',
+    'FLEET_NOT_DISCOVERED': '승인된 Fleet이 이 LAN에서 보이지 않습니다. 같은 네트워크와 Fleet 광고 서비스를 확인하세요.',
+    'FLEET_DISCOVERY_CONFLICT': '같은 사이트 이름에 여러 주소 또는 포트가 광고됩니다. 중복 광고를 정리한 뒤 다시 찾으세요.',
+    'FLEET_DISCOVERY_PORT_MISMATCH': '발견한 Fleet 포트가 승인된 설치와 다릅니다. 설치 설정을 확인하세요.',
+    'FLEET_DISCOVERY_CONFIGURATION': '자동 찾기는 승인된 HTTPS .local 사이트 이름을 사용합니다. 설치 설정을 확인하세요.',
+    'FLEET_DISCOVERY_TIMEOUT': '사이트 자동 찾기 시간이 지났습니다. 네트워크와 광고 서비스를 확인하세요.',
+    'FLEET_DISCOVERY_UNAVAILABLE': '사이트 자동 찾기를 시작하지 못했습니다. 서버의 LAN 접근과 Harbor web 설치를 확인하세요.',
+    'FLEET_HEALTH_UNCONFIRMED': '사이트 인증 후 Fleet 상태가 정상인지 확인하지 못했습니다. Fleet 상태를 확인하세요.',
     'READ_API_VERIFIED': '서비스 신원과 ARM 조회 API를 확인했습니다. 제출 권한·설치 대응·실물 준비는 별도로 검증해야 합니다.',
     'PRINCIPAL_MISMATCH': '토큰의 신원이 설정과 다릅니다. 배포 자격과 서비스 신원을 확인하세요.',
     'ROLE_NOT_SUITABLE': '조회된 역할로는 작업 제안용 연결을 확인할 수 없습니다.',
@@ -80,6 +88,9 @@ def connection_guidance(config, check, *, token_present):
         'READ_API_VERIFIED': ('Harbor·ROSY 운영 담당자', '실행 전에 설치 대응·자원·승인과 독립 업무 근거를 별도로 확인하세요.'),
     }
     owner, action = actions.get(reason, ('Harbor 관리자', '현재 설정으로 Fleet 연결 확인을 실행하세요.'))
+    if reason in CONNECTION_REASONS and (reason.startswith('FLEET_DISCOVERY_') or
+            reason in {'FLEET_NOT_DISCOVERED', 'FLEET_SITE_CA_REQUIRED', 'FLEET_HEALTH_UNCONFIRMED'}):
+        owner, action = 'Harbor·ROSY 설치 담당자', CONNECTION_REASONS[reason]
     return dict(steps=steps, owner=owner, action=action, can_check=configured)
 
 
@@ -97,11 +108,12 @@ def integration(request):
     config = bridge.connection_settings()
     origins = bridge.allowed_origins()
     form = ConnectionForm(initial=dict(config, expected_version=config['version']), origins=origins)
+    discovered = None
     if request.method == 'POST':
         action = request.POST.get('action')
         form = ConnectionForm(request.POST, origins=origins) if action == 'save' else form
         command = form if action == 'save' else ConnectionVersionForm(request.POST)
-        if action not in {'save', 'check'}:
+        if action not in {'save', 'check', 'discover'}:
             from django.http import HttpResponseBadRequest
             return HttpResponseBadRequest('Unknown connection action.')
         if command.is_valid():
@@ -109,9 +121,12 @@ def integration(request):
                 if action == 'save':
                     bridge.save_connection(request.user, **command.cleaned_data)
                     messages.success(request, 'Fleet 연결 설정을 저장했습니다.')
-                else:
+                elif action == 'check':
                     bridge.check_connection(request.user, **command.cleaned_data)
-                return redirect('/settings/integration/')
+                else:
+                    discovered = bridge.discover_connections(request.user, **command.cleaned_data)
+                if action != 'discover':
+                    return redirect('/settings/integration/')
             except ValidationError as error:
                 messages.error(request, CONNECTION_REASONS.get(error.messages[0], '연결 설정을 확인하세요.'))
         else:
@@ -120,6 +135,9 @@ def integration(request):
     guidance = connection_guidance(config, check, token_present=bool(os.environ.get('HARBOR_FLEET_TOKEN')))
     return page(request, 'integration.html', section='settings', connection=connection_summary(),
         connection_config=config, connection_form=form, connection_check=check,
+        discovery_result=discovered, discovered_origins=discovered['origins'] if discovered else [],
+        discovery_failures=[dict(item, message=CONNECTION_REASONS.get(item['reason'], '사이트 연결을 확인하세요.'))
+                            for item in discovered['failures']] if discovered else [],
         check_message=CONNECTION_REASONS.get(check.detail['reason'], '') if check else '',
         connection_guidance=guidance, origins_available=bool(origins), server_inputs=[
             dict(label=label, present=bool(os.environ.get('HARBOR_' + key)), variable='HARBOR_' + key)

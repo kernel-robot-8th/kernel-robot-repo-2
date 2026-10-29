@@ -50,7 +50,7 @@ def _config():
         raise ValidationError('INVALID_FLEET_PRINCIPAL')
     evidence_sources = configured_sources()  # Raises on malformed or overlapping sets.
     return dict(path=Path(path).resolve(), origin=origin.rstrip('/'), token=token,
-                principal=principal, bindings=bindings, evidence_sources=evidence_sources)
+                principal=principal, bindings=bindings, evidence_sources=evidence_sources, ca_file=connection['ca_file'])
 
 
 def _identity(config):
@@ -169,7 +169,8 @@ class Registry:
             placement_sources, retreat_sources = ledger_sources()
             self.ledger = BusinessLedger(config['path'], placement_sources=placement_sources,
                                          retreat_sources=retreat_sources)
-            self.client = RosyClient(config['origin'], config['token'])
+            from harbor_web.fleet_connection import fleet_client
+            self.client = fleet_client(config, config['token'])
             self.client.expected_principal = config['principal']
             self.client.expected_role = 'service'
             self.locks = {}

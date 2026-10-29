@@ -2,8 +2,9 @@ import ipaddress
 import json
 import math
 import re
+import ssl
 from urllib.parse import quote, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -16,7 +17,7 @@ class FleetIdentityError(ValueError):
 
 
 class RosyClient:
-    def __init__(self, base_url=None, token=None, *, timeout=10, transport=None):
+    def __init__(self, base_url=None, token=None, *, timeout=10, transport=None, ca_file=None):
         if transport is not None:
             self._request = transport
             return
@@ -34,14 +35,21 @@ class RosyClient:
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("Expected a positive finite HTTP timeout")
         self._origin, self._token, self._timeout = base_url.rstrip("/"), token, timeout
-        self._opener = build_opener(_NoRedirect())
+        self._ca_file = ca_file
+        self._discover = bool(ca_file and parsed.scheme == 'https' and parsed.hostname.endswith('.local'))
+        self._opener = None if self._discover else build_opener(_NoRedirect(), *(
+            [HTTPSHandler(context=ssl.create_default_context(cafile=str(ca_file)))] if ca_file else []))
         self._request = self._http
 
     def _http(self, method, path, body):
         data = json.dumps(body, allow_nan=False).encode() if body is not None else None
         request = Request(self._origin + path, data=data, method=method,
                           headers={"Authorization": "Bearer " + self._token, "Content-Type": "application/json"})
-        with self._opener.open(request, timeout=self._timeout) as response:
+        opener = self._opener
+        if self._discover:
+            from harbor.fleet_discovery import discovery_opener
+            opener = discovery_opener(self._origin, self._ca_file, self._timeout)
+        with opener.open(request, timeout=self._timeout) as response:
             raw = response.read(1024 * 1024 + 1)
         if len(raw) > 1024 * 1024:
             raise ValueError("Fleet response exceeds 1 MiB")
