@@ -26,6 +26,23 @@ API 필드나 실물·운영 수용을 선언하지 않는다.
 
 ## 실행기가 보는 내부 계약
 
+현재 코드 경계는 다음과 같다. `harbor_web/executor.py`는 처리 대상·주기·backoff만
+선택하고 `commands.advance_command()`를 호출한다. 최초 제출과 다음 단계 제출은
+같은 명령 서비스에서 `BusinessLedger.submit()`의 검증된 결과를 사용한다.
+`propose()`의 mission ID 반환과 TransportLedger의 job dict 반환은 호환 진입점이다.
+
+`harbor/execution.py`가 ARM·Cell·TRIP HTTP 결과를 하나의 `ExecutionSnapshot`으로
+변환한다. Harbor 진행 의미와 원래 key/mission/attempt, 원본 job/receipt를 함께
+보존한다. 원본 wire 요청·digest·결속 검사는 `fleet_contract.py`가 소유하며 기존
+binding 메서드는 여기에 위임한다. 업무 장부는 정규화 결과와 독립 업무 근거로
+전이를 판단한다. Cell compile은 제출 의도 저장 전 수행하고, 그 뒤 stage CAS를
+통과해야 POST할 수 있다.
+
+`harbor/ledger.py`가 저장 payload 해석, read-only 조회와 소비한 근거 조회를 소유한다.
+조회는 DB를 생성하거나 복구하지 않는다. Workbench는 Fleet 조회 뒤 장부를 다시
+읽어 version·digest·mission·단계·상태가 바뀌면 STALE로 표시한다. 화면은 어댑터의
+진행 의미를 표시하며, 장부 HOLD와 Fleet 수행 상태는 각각의 소유권을 유지한다.
+
 아래 이름은 Harbor 소유의 개념 계약이다. 별도 범용 framework나 ROSY SDK를 만들라는 요구가 아니다. 기존 `rosy_http.py`와 `ArmTransferBinding`을 활용하고 필요한 최소 seam만 둔다.
 
 | 연산 | 입력 | 출력과 보장 |

@@ -177,6 +177,24 @@ class ExecutorTests(TestCase):
         self.assertFalse(any('admit' in path or 'observations' in path or 'compile' in path
                              for _, path, _ in self.fleet.calls))
 
+    def test_initial_and_next_submit_use_one_bound_readback_and_save_the_fact(self):
+        from harbor_web.models import CommandFact
+        command = self.confirmed_command()
+        self.assertEqual(len(self.fleet.calls), 2)
+        fact = CommandFact.objects.get(command=command)
+        self.assertEqual(fact.job['mission_id'], command.mission_id)
+        self.assertNotIn('payload', commands.command_detail(command)['ledger'])
+        self.fleet.status = 'GOAL_CONFIRMED'
+        executor.tick(registry=self.registry, evidence=evidence_provider(timezone.now()))
+        self.fleet.calls.clear()
+        executor.tick(registry=self.registry)
+        command.refresh_from_db()
+        # A completed receipt is read once as part of this submission snapshot.
+        self.assertEqual(len(self.fleet.calls), 3)
+        fact = CommandFact.objects.filter(command=command).latest('pk')
+        self.assertEqual(fact.job['mission_id'], command.mission_id)
+        self.assertEqual(fact.receipt['mission_id'], command.mission_id)
+
     def test_fleet_reads_alone_never_confirm_a_stage(self):
         command = self.confirmed_command()
         self.fleet.status = 'GOAL_CONFIRMED'

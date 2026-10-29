@@ -1,12 +1,12 @@
 """Durable transport intentions and Fleet references, never cargo completion or motion authority."""
 from contextlib import closing
 from dataclasses import dataclass
-import hashlib
 import json
 import re
 import sqlite3
 
 from harbor.model import identifier, identifiers
+from harbor.execution import read_trip_execution, submit_trip_execution
 
 
 def _json(value):
@@ -36,33 +36,17 @@ class TripIntent:
 
     @property
     def steps(self):
-        return [{"to": self.destination, "via": list(self.via)}]
+        from harbor.fleet_contract import trip_steps
+        return trip_steps(self)
 
     @property
     def digest(self):
-        return hashlib.sha256(_json({"candidates": list(self.candidates), "steps": self.steps}).encode()).hexdigest()
+        from harbor.fleet_contract import trip_digest
+        return trip_digest(self)
 
     def check(self, job):
-        if (not isinstance(job, dict) or job.get("request_key") != self.request_key
-                or job.get("request_digest") != self.digest or job.get("robot_id") not in self.candidates):
-            raise ValueError("Fleet transport identity does not match the saved intent")
-        identifier(job.get("mission_id"))
-        if len(job["mission_id"]) > 192 or any(ord(c) < 32 for c in job["mission_id"]):
-            raise ValueError("Invalid Fleet execution ID")
-        steps = job.get("steps")
-        if (not isinstance(steps, list) or len(steps) != 1 or not isinstance(steps[0], dict)
-                or steps[0].get("step") != self.steps[0] or steps[0].get("step_index") != 0
-                or type(job.get("current_step_index")) is not int
-                or job["current_step_index"] != (1 if job.get("status") == "GOAL_CONFIRMED" else 0)
-                or job.get("status") not in {"READY", "RUNNING", "ACTION_SUCCEEDED", "GOAL_CONFIRMED", "HOLD"}):
-            raise ValueError("Fleet transport snapshot does not match the requested step")
-        action, attempt = steps[0].get("action_id"), steps[0].get("attempt_id")
-        if action is not None:
-            identifier(action)
-        if action != attempt or job["status"] == "GOAL_CONFIRMED" and (
-                attempt is None or steps[0].get("status") != "GOAL_CONFIRMED"):
-            raise ValueError("Fleet transport attempt is not consistent")
-        return job
+        from harbor.fleet_contract import validate_trip_job
+        return validate_trip_job(self, job)
 
 
 class TransportLedger:
@@ -110,16 +94,15 @@ class TransportLedger:
             connection.execute("INSERT OR IGNORE INTO transport_intents(request_key,payload,digest,state) "
                                "VALUES(?,?,?,'PLANNED')", (intent.request_key, payload, intent.digest))
 
-    def _adopt(self, row, job):
-        job = self._intent(row).check(job)
-        if row["mission_id"] is not None and row["mission_id"] != job["mission_id"]:
+    def _adopt(self, row, execution):
+        if row["mission_id"] is not None and row["mission_id"] != execution.mission_id:
             raise ValueError("Fleet transport identity changed")
         with closing(self._connect()) as connection, connection:
             result = connection.execute("UPDATE transport_intents SET state='ACKNOWLEDGED',mission_id=?,version=version+1 "
-                "WHERE request_key=? AND version=?", (job["mission_id"], row["request_key"], row["version"]))
+                "WHERE request_key=? AND version=?", (execution.mission_id, row["request_key"], row["version"]))
             if result.rowcount != 1:
                 raise ValueError("Transport intent changed while the response was pending; reconcile again")
-        return job
+        return execution.job
 
     def submit(self, key, client, *, operator_confirmed):
         if operator_confirmed is not True:
@@ -135,10 +118,7 @@ class TransportLedger:
         row = {**row, "version": row["version"] + 1, "state": "SUBMITTING"}
         intent = self._intent(row)
         try:
-            result = client.trip(intent.candidates, intent.steps, request_key=key)
-            job = client.trip_request(key)["job"]
-            if result["job"]["mission_id"] != job["mission_id"]:
-                raise ValueError("Transport submission and readback identify different executions")
+            job = submit_trip_execution(client, intent)
             return self._adopt(row, job)
         except BaseException:
             with closing(self._connect()) as connection, connection:
@@ -150,4 +130,4 @@ class TransportLedger:
         row = self.read(key)
         if row["state"] == "SUBMITTING":
             raise ValueError("Submission is still pending")
-        return self._adopt(row, client.trip_request(key)["job"])
+        return self._adopt(row, read_trip_execution(client, self._intent(row)))

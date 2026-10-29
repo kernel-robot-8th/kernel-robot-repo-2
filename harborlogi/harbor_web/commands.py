@@ -1,6 +1,5 @@
 """Durable web intent and a single leased ledger writer. No physical proof producer."""
 import atexit
-from contextlib import closing
 import hashlib
 import ipaddress
 import json
@@ -16,10 +15,11 @@ from django.db import transaction
 from django.utils import timezone
 
 from harbor.ownership import WriterLease
+from harbor.ledger import ReadOnlyLedger, plan_payload
 from harbor.process import ArmTransferBinding, SpatialPlacementBinding, anchor_address, bind_plan, load_bindings
 from harbor.outbound import CargoMove, OutboundProposal
 from harbor.rosy_http import RosyClient
-from harbor.execution import read_arm_execution, validate_arm_execution
+from harbor.execution import read_arm_execution, validate_arm_execution, cancel_execution
 from harbor.workflow import BusinessLedger
 from harbor_web.command_models import ACTIVE_COMMAND_STATES
 from harbor_web.models import Plan, Command, CommandFact, Audit, Observation
@@ -272,7 +272,7 @@ def _prepare_ledger(command, registry):
 
 def _check_ledger_binding(command, row):
     expected = dict(command.binding, execution_kind='ARM_TRANSFER')
-    if json.loads(row['payload']) != expected or row['digest'] != _digest(expected):
+    if plan_payload(row) != expected or row['digest'] != _digest(expected):
         raise Conflict('Ledger binding differs from saved command.')
 
 
@@ -347,14 +347,10 @@ def _operation(actor, command_id, expected_version, action, reason='', *, resume
             _prepare_ledger(command, registry)
             _save(command, actor, 'DISPATCHING')
             try:
-                command.mission_id = registry.ledger.propose(key, registry.client)
-                job = registry.client.arm_request(key + ':0')['job']
-                if job.get('proposal_principal_id') != command.fleet_principal:
-                    raise ValueError('Principal mismatch')
+                return _submit_stage(command, registry)
             except Exception:
                 registry.ledger.hold(key)
                 return _save(command, actor, 'UNKNOWN', 'RECONCILIATION_REQUIRED')
-            return _save(command, actor, 'RECONCILED')
         _prepare_ledger(command, registry)
         if action == 'cancel':
             if not isinstance(reason, str) or not reason.strip() or len(reason) > 192 or any(ord(c) < 32 for c in reason):
@@ -363,7 +359,7 @@ def _operation(actor, command_id, expected_version, action, reason='', *, resume
             registry.ledger.hold(key)
             if command.mission_id:
                 try:
-                    registry.client.cancel_arm(command.mission_id, reason=reason)
+                    cancel_execution(registry.client, command.mission_id, reason)
                 except Exception:
                     return _save(command, actor, 'CANCEL_PENDING', 'CANCELLATION_OUTCOME_UNKNOWN')
             return command
@@ -419,10 +415,11 @@ def command_detail(command):
     try:
         config = _config()
         _validate(command, config)
-        uri = config['path'].as_uri() + '?mode=ro'
-        with closing(sqlite3.connect(uri, uri=True)) as connection:
-            connection.row_factory = sqlite3.Row
-            row = connection.execute('SELECT state,step_index,row_version,mission_id,goal_confirmed FROM business WHERE request_key=?', (_key(command),)).fetchone()
+        try:
+            row = ReadOnlyLedger(config['path']).read(_key(command))
+            _check_ledger_binding(command, row)
+        except KeyError:
+            row = None
         fact = CommandFact.objects.filter(command=command, command_key=command.key, body_digest=command.body_digest,
             fleet_origin=command.fleet_origin, fleet_principal=command.fleet_principal).order_by('-read_at', '-pk').first()
         job, receipt = None, None
@@ -431,7 +428,70 @@ def command_detail(command):
             execution = validate_arm_execution(binding, f"{_key(command)}:{row['step_index']}",
                 fact.job, fact.receipt, mission_id=row['mission_id'], principal=command.fleet_principal)
             job, receipt = execution.job, execution.receipt
-        return dict(ledger=dict(row) if row else None, job=job, receipt=receipt, reason=command.reason,
+        summary = {field: row[field] for field in ('state', 'step_index', 'row_version', 'mission_id', 'goal_confirmed')} if row else None
+        return dict(ledger=summary, job=job, receipt=receipt, reason=command.reason,
                     read_at=fact.read_at if job else None)
     except (ValidationError, Conflict, ValueError, sqlite3.Error):
         return dict(ledger=None, job=None, receipt=None, reason='LEDGER_UNAVAILABLE', read_at=None)
+
+
+def _submit_stage(command, registry):
+    execution = registry.ledger.submit(_key(command), registry.client, principal=command.fleet_principal)
+    command.mission_id = execution.mission_id
+    _record_fact(command, execution.job, execution.receipt)
+    return _save(command, command.actor, 'RECONCILED')
+
+
+PROPOSE_STATES = ('DISPATCHING', 'RECONCILED')
+EXECUTING_STATES = ('DISPATCHING', 'RECONCILED', 'UNKNOWN')
+
+
+@serialized
+def advance_command(command, registry, *, evidence=None):
+    """Progress one command by at most one business stage; keep every original identity."""
+    with registry.lock(command.pk):
+        from harbor_web.runtime import execution_block_reason
+        key = _key(command)
+        command.refresh_from_db()
+        if command.state not in EXECUTING_STATES or execution_block_reason():
+            return command.state
+        try:
+            _validate(command, registry.config)
+            _prepare_ledger(command, registry)
+            row = registry.ledger.read(key)
+            payload = plan_payload(row)
+            if payload.get('execution_kind') != 'ARM_TRANSFER':
+                return command.state  # Legacy cell stages stay with human reconciliation.
+            if row['state'] == 'COMPLETED':
+                return _save(command, command.actor, 'COMPLETED').state
+            if row['state'] == 'PLANNED':
+                if command.state not in PROPOSE_STATES:
+                    return command.state  # An uncertain prior stage must reconcile first.
+                return _submit_stage(command, registry).state
+            if row['state'] in ('WAITING', 'HOLD'):
+                command = reconcile_command(command.actor, command_id=command.pk,
+                                            expected_version=command.version, resume=True)
+                row = registry.ledger.read(key)
+            if row['state'] == 'WAITING' and row['goal_confirmed'] and evidence is not None:
+                step = evidence(command, row, payload, 'step')
+                if step is not None:
+                    # A fresh clock at the confirmation site: refresh stamps reconciliation
+                    # with its own now, and confirmation must not run before it.
+                    registry.ledger.confirm(key, step, now=timezone.now())
+                    row = registry.ledger.read(key)
+            if row['state'] == 'AWAITING_FINAL_EVIDENCE' and evidence is not None:
+                final = evidence(command, row, payload, 'final')
+                if final is not None:
+                    registry.ledger.finish(key, final, now=timezone.now())
+                    return _save(command, command.actor, 'COMPLETED').state
+            return command.state
+        except Exception:
+            # Uncertain outcome: hold the stage, keep the original request key, reconcile later.
+            try:
+                registry.ledger.hold(key)
+            except Exception:
+                pass
+            command.refresh_from_db()
+            if command.state in EXECUTING_STATES:
+                return _save(command, command.actor, 'UNKNOWN', 'RECONCILIATION_REQUIRED').state
+            return command.state

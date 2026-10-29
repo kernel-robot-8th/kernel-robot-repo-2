@@ -7,12 +7,11 @@ credential issuance stay with the installation integrator (observation-acceptanc
 this module is the intake store and adapter, never a producer and never an authorizer:
 only the BusinessLedger's own binding rules turn a submission into business progress.
 """
-from contextlib import closing
 from datetime import datetime, timedelta
 import json
 from pathlib import Path
+from harbor.ledger import ReadOnlyLedger
 import os
-import sqlite3
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -101,14 +100,6 @@ def submit(actor, *, command_id, placement, retreat):
     return record
 
 
-def _consumed(ledger_path, evidence_ids):
-    uri = Path(ledger_path).resolve().as_uri() + '?mode=ro'
-    with closing(sqlite3.connect(uri, uri=True)) as connection:
-        rows = connection.execute('SELECT COUNT(*) FROM evidence WHERE evidence_id IN (?, ?)',
-                                  evidence_ids).fetchone()
-    return rows[0] > 0
-
-
 def intake_provider():
     """Executor evidence provider: the freshest matching unconsumed submission, or None.
 
@@ -146,7 +137,7 @@ def intake_provider():
                 continue
             if not all(timedelta(0) <= now - arm.pose_observed_at <= FRESHNESS for arm in retreat.arms):
                 continue
-            if _consumed(ledger_path, (placement.evidence_id, retreat.evidence_id)):
+            if ReadOnlyLedger(ledger_path).consumed((placement.evidence_id, retreat.evidence_id)):
                 continue
             return MoveEvidence(placement, retreat)
         return None

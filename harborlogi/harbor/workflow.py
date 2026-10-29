@@ -6,20 +6,16 @@ import json
 import math
 import sqlite3
 
+from harbor.ledger import business_row, plan_payload as _payload
 from harbor.model import YARD_ARMS, aware_time, identifier, identifiers, revision
 from harbor.process import ArmTransferBinding, ProcessBinding
-from harbor.execution import read_arm_execution
+from harbor.execution import read_arm_execution, prepare_execution, submit_execution, read_cell_execution
 
 
 def _json(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
-def _payload(row):
-    payload = json.loads(row["payload"])
-    if "target_id" in payload or "supply_slot" in payload:
-        raise ValueError("Ledger row predates the ADR 0005 names; reconcile it and prepare a new request key")
-    return payload
 
 
 def _header(evidence):
@@ -134,10 +130,7 @@ class BusinessLedger:
 
     @staticmethod
     def _row(c, key):
-        row = c.execute("SELECT * FROM business WHERE request_key=?", (key,)).fetchone()
-        if row is None:
-            raise ValueError("Unknown business request")
-        return dict(row)
+        return business_row(c, key)
 
     def read(self, key):
         with closing(self._connect()) as c:
@@ -182,14 +175,16 @@ class BusinessLedger:
                       (key, digest, payload))
 
     def propose(self, key, client):
+        return self.submit(key, client).mission_id
+
+    def submit(self, key, client, *, principal=None):
         row = self.read(key)
         if row["state"] != "PLANNED":
             raise ValueError("Current stage cannot submit a proposal")
         payload = _payload(row)
         neutral = payload.get("execution_kind") == "ARM_TRANSFER"
         binding = (ArmTransferBinding if neutral else ProcessBinding)(**payload["moves"][row["step_index"]])
-        if not neutral:
-            client.compile(binding)
+        prepare_execution(client, binding)
         with closing(self._connect()) as c, c:
             c.execute("BEGIN IMMEDIATE")
             self._check_current(c, key, row)
@@ -197,21 +192,8 @@ class BusinessLedger:
         intent_version = row["row_version"] + 1
         request_key = f"{key}:{row['step_index']}"
         try:
-            if neutral:
-                result = binding.check(client.propose_arm(binding, request_key=request_key)["job"], request_key)
-                job = binding.check(client.arm_request(request_key)["job"], request_key)
-                mission_id = job["mission_id"]
-                if result["mission_id"] != mission_id:
-                    raise ValueError("Physical proposal and readback identify different jobs")
-            else:
-                result = client.propose(binding, request_key=request_key)
-                proposal, mission = result["proposal"], result["mission"]
-                mission_id = proposal["proposal_id"]
-                identifier(mission_id)
-                if (proposal["state"] != "RESOLVED" or proposal["request_key"] != request_key
-                        or mission["mission_id"] != mission_id
-                        or mission.get("process_artifact_digest") != binding.process_artifact_digest):
-                    raise ValueError("Proposal readback does not match the submitted stage")
+            execution = submit_execution(client, binding, request_key, principal=principal)
+            mission_id = execution.mission_id
         except BaseException:
             with closing(self._connect()) as c, c:
                 c.execute("UPDATE business SET state='HOLD',row_version=row_version+1 "
@@ -231,7 +213,7 @@ class BusinessLedger:
                       "WHERE request_key=?", (state, mission_id, key))
         if state == "HOLD":
             raise ValueError("Late proposal response retained for reconciliation; restart HOLD remains")
-        return mission_id
+        return execution
 
     def hold(self, key):
         with closing(self._connect()) as c, c:
@@ -295,19 +277,13 @@ class BusinessLedger:
         payload = _payload(row)
         if payload.get("execution_kind") == "ARM_TRANSFER":
             return self._reconcile_arm(key, client, row, now=now)
-        else:
-            job = client.job(row["mission_id"])["job"]
-            if job["mission_id"] != row["mission_id"] or len(job["steps"]) != 1:
-                raise ValueError("Fleet job does not match the bound single-transfer stage")
-            attempt = job["steps"][0].get("attempt_id")
-        if attempt is not None:
-            identifier(attempt)
-        confirmed = job["status"] == "GOAL_CONFIRMED" and attempt is not None
+        execution = read_cell_execution(client, row['mission_id'], f"{key}:{row['step_index']}")
+        attempt, confirmed = execution.attempt_id, execution.goal_confirmed
         with closing(self._connect()) as c, c:
             c.execute("BEGIN IMMEDIATE")
             self._check_current(c, key, row)
             c.execute("UPDATE business SET attempt_id=?,goal_confirmed=?,state=?,row_version=row_version+1 WHERE request_key=?",
-                      (attempt, int(confirmed), "HOLD" if job["status"] == "HOLD" else "WAITING", key))
+                      (attempt, int(confirmed), "HOLD" if execution.held else "WAITING", key))
         self._reads[key] = (row["mission_id"], attempt, now, row["row_version"] + 1)
 
     def _validate(self, row, evidence, now, *, mission_id, attempt_id, cargo_id, location, arms):
