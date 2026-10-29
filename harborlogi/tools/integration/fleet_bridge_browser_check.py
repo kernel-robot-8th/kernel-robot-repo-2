@@ -161,6 +161,11 @@ def main():
             assert not state['requests'], 'Reading settings must not contact Fleet'
             assert page.get_by_role('button', name='Fleet 연결 확인', exact=True).is_disabled()
             safe_page()
+            page.get_by_role('button', name='Fleet 자동 찾기', exact=True).click()
+            page.wait_for_load_state('networkidle')
+            assert page.get_by_text(CONNECTION_REASONS['FLEET_SITE_CA_REQUIRED'], exact=True).is_visible()
+            assert not FleetConnection.objects.exists() and not state['requests']
+            result['checks'].append('Discovery requires installed site CA and does not save identity or send bearer traffic')
             form = page.locator('form:has(input[name=action][value=save])')
             form.locator('[name=origin]').select_option(fleet_origin)
             form.locator('[name=principal]').fill(principal)
@@ -174,6 +179,16 @@ def main():
             assert config['origin'] == profile.origin and config['principal'] == profile.principal and config['token'] == token
             assert not os.environ.get('HARBOR_FLEET_ORIGIN') and not os.environ.get('HARBOR_FLEET_PRINCIPAL')
             result['checks'].append('Admin settings link saves allowlisted profile without Fleet traffic; commands._config consumes its origin and principal with server-only token')
+            discovery_config = bridge.connection_settings()
+            Audit.objects.create(actor=users['admin'], action='fleet.discover', object_type='FleetConnection', object_id='1',
+                detail=dict(origins=[fleet_origin], sites=[dict(origin=fleet_origin, api='ARM_API_NOT_ADVERTISED')], failures=[],
+                            fingerprint=bridge.fingerprint(dict(discovery_config, installed=bridge._discovery_origins(discovery_config)))))
+            page.reload()
+            page.wait_for_load_state('networkidle')
+            assert page.get_by_text('작업 API 미공개', exact=False).is_visible()
+            assert page.get_by_text('검색 시점', exact=False).is_visible()
+            assert not state['requests'], 'Reading a saved public-schema fixture must not probe Fleet'
+            result['checks'].append('Saved public-schema hint fixture is visible after GET with timestamp and no network traffic; it does not authorize or block authenticated verification')
             check('compatible', 'READ_API_VERIFIED', 2)
             assert page.get_by_text('조회 연동 확인', exact=True).is_visible()
             check('human-role', 'ROLE_NOT_SUITABLE', 1)
@@ -228,7 +243,7 @@ def main():
             login(restricted, 'operator')
             assert restricted.goto(origin + '/settings/integration/').status == 403
             csrf = next(cookie['value'] for cookie in restricted.context.cookies() if cookie['name'] == 'csrftoken')
-            for action in ('save', 'check'):
+            for action in ('save', 'check', 'discover'):
                 response = restricted.request.post(origin + '/settings/integration/',
                     form=dict(action=action, expected_version='1', origin=fleet_origin, principal=principal),
                     headers={'X-CSRFToken': csrf, 'Referer': origin + '/settings/integration/'})
@@ -240,7 +255,7 @@ def main():
             assert len(state['requests']) == 12
             assert token not in json.dumps(list(Audit.objects.values_list('detail', flat=True)))
             assert not errors, errors
-            result['checks'].append('Operator GET/save/check denied; four widths have no overflow; token absent from HTML/audit; all twelve Fleet requests are authenticated GETs; no Harbor Commands or Fleet jobs created')
+            result['checks'].append('Operator GET/save/check/discover denied; four widths have no overflow; token absent from HTML/audit; all twelve Fleet requests are authenticated GETs; no Harbor Commands or Fleet jobs created')
             result.update(status='PASSED', fleet_requests=state['requests'], browser_errors=errors)
             browser.close()
     except Exception:
