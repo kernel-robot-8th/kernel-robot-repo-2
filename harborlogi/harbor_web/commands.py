@@ -347,7 +347,7 @@ def _operation(actor, command_id, expected_version, action, reason='', *, resume
             _prepare_ledger(command, registry)
             _save(command, actor, 'DISPATCHING')
             try:
-                return _submit_stage(command, registry)
+                return _submit_stage(command, registry, actor)
             except Exception:
                 registry.ledger.hold(key)
                 return _save(command, actor, 'UNKNOWN', 'RECONCILIATION_REQUIRED')
@@ -435,11 +435,11 @@ def command_detail(command):
         return dict(ledger=None, job=None, receipt=None, reason='LEDGER_UNAVAILABLE', read_at=None)
 
 
-def _submit_stage(command, registry):
+def _submit_stage(command, registry, actor):
     execution = registry.ledger.submit(_key(command), registry.client, principal=command.fleet_principal)
     command.mission_id = execution.mission_id
     _record_fact(command, execution.job, execution.receipt)
-    return _save(command, command.actor, 'RECONCILED')
+    return _save(command, actor, 'RECONCILED')
 
 
 PROPOSE_STATES = ('DISPATCHING', 'RECONCILED')
@@ -467,7 +467,7 @@ def advance_command(command, registry, *, evidence=None):
             if row['state'] == 'PLANNED':
                 if command.state not in PROPOSE_STATES:
                     return command.state  # An uncertain prior stage must reconcile first.
-                return _submit_stage(command, registry).state
+                return _submit_stage(command, registry, command.actor).state
             if row['state'] in ('WAITING', 'HOLD'):
                 command = reconcile_command(command.actor, command_id=command.pk,
                                             expected_version=command.version, resume=True)

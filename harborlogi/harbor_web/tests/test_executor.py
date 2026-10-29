@@ -195,6 +195,18 @@ class ExecutorTests(TestCase):
         self.assertEqual(fact.job['mission_id'], command.mission_id)
         self.assertEqual(fact.receipt['mission_id'], command.mission_id)
 
+    def test_submission_audit_names_the_submitting_operator(self):
+        from django.contrib.auth.models import User, Group
+        from harbor_web.models import Audit
+        plan = self.plan()
+        command = commands.prepare_command(self.operator, plan_id=plan.pk, expected_version=1)
+        submitter = User.objects.create_user('second-operator')
+        submitter.groups.add(Group.objects.get(name='operator'))
+        command = commands.submit_command(submitter, command_id=command.pk, expected_version=command.version)
+        self.assertEqual(command.state, 'RECONCILED')
+        audit = Audit.objects.get(action='command.reconciled', object_id=str(command.pk))
+        self.assertEqual(audit.actor, submitter)
+
     def test_fleet_reads_alone_never_confirm_a_stage(self):
         command = self.confirmed_command()
         self.fleet.status = 'GOAL_CONFIRMED'
