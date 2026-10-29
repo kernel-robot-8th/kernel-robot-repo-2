@@ -1,8 +1,8 @@
 import ipaddress
+import http.client
 import json
 import math
 import re
-import ssl
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
@@ -26,8 +26,10 @@ class RosyClient:
             loopback = parsed.hostname == "localhost" or ipaddress.ip_address(parsed.hostname).is_loopback
         except ValueError:
             loopback = False
-        if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password
+        if (not isinstance(base_url, str) or any(c.isspace() or ord(c) < 32 for c in base_url)
+                or parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password
                 or parsed.query or parsed.fragment or parsed.path not in {"", "/"}
+                or parsed.port == 0
                 or parsed.scheme == "http" and not loopback):
             raise ValueError("Expected an HTTPS Fleet origin, or loopback HTTP")
         if not isinstance(token, str) or not token or any(ord(c) < 32 for c in token):
@@ -37,8 +39,11 @@ class RosyClient:
         self._origin, self._token, self._timeout = base_url.rstrip("/"), token, timeout
         self._ca_file = ca_file
         self._discover = bool(ca_file and parsed.scheme == 'https' and parsed.hostname.endswith('.local'))
-        self._opener = None if self._discover else build_opener(_NoRedirect(), *(
-            [HTTPSHandler(context=ssl.create_default_context(cafile=str(ca_file)))] if ca_file else []))
+        handlers = [_NoRedirect()]
+        if ca_file and not self._discover:
+            from harbor.fleet_discovery import site_ssl_context
+            handlers.append(HTTPSHandler(context=site_ssl_context(ca_file)))
+        self._opener = None if self._discover else build_opener(*handlers)
         self._request = self._http
 
     def _http(self, method, path, body):
@@ -49,8 +54,11 @@ class RosyClient:
         if self._discover:
             from harbor.fleet_discovery import discovery_opener
             opener = discovery_opener(self._origin, self._ca_file, self._timeout)
-        with opener.open(request, timeout=self._timeout) as response:
-            raw = response.read(1024 * 1024 + 1)
+        try:
+            with opener.open(request, timeout=self._timeout) as response:
+                raw = response.read(1024 * 1024 + 1)
+        except http.client.HTTPException as error:
+            raise ValueError('Invalid Fleet HTTP response') from error
         if len(raw) > 1024 * 1024:
             raise ValueError("Fleet response exceeds 1 MiB")
         value = json.loads(raw)

@@ -9,6 +9,7 @@ import ssl
 import threading
 import time
 from urllib.parse import urlsplit
+from urllib.error import HTTPError, URLError
 from urllib.request import HTTPSHandler, ProxyHandler, build_opener
 
 
@@ -19,6 +20,17 @@ TXT = {'product': 'rosy', 'role': 'fleet', 'proto': 'site-v1', 'tls': 'required'
 
 class DiscoveryError(ValueError):
     """A safe diagnostic code for a failed discovery or health check."""
+
+
+def site_ssl_context(ca_file):
+    try:
+        return ssl.create_default_context(cafile=str(ca_file))
+    except FileNotFoundError as error:
+        raise DiscoveryError('FLEET_SITE_CA_REQUIRED') from error
+    except ssl.SSLError as error:
+        raise DiscoveryError('FLEET_SITE_CA_INVALID') from error
+    except OSError as error:
+        raise DiscoveryError('FLEET_SITE_CA_UNREADABLE') from error
 
 
 def candidates_from_info(info):
@@ -166,20 +178,49 @@ def endpoint_opener(candidate, origin, ca_file, timeout):
     """Validate the installed name/CA and health before any bearer is sent."""
     from harbor.rosy_http import _NoRedirect
     selected = select_endpoint([candidate], origin)
-    context = ssl.create_default_context(cafile=str(ca_file))
+    context = site_ssl_context(ca_file)
     opener = build_opener(ProxyHandler({}), _NoRedirect(), _SiteHTTPSHandler(selected, context))
-    with opener.open(origin.rstrip('/') + '/healthz', timeout=timeout) as response:
-        raw = response.read(1025)
-        try:
-            value = json.loads(raw) if len(raw) <= 1024 and response.status == 200 else None
-        except ValueError:
-            value = None
-        if (not isinstance(value, dict) or value.get('status') != 'ok'
-                or value.get('role', 'fleet') != 'fleet'):
-            raise DiscoveryError('FLEET_HEALTH_UNCONFIRMED')
+    try:
+        with opener.open(origin.rstrip('/') + '/healthz', timeout=timeout) as response:
+            raw = response.read(1025)
+            try:
+                value = json.loads(raw) if len(raw) <= 1024 and response.status == 200 else None
+            except ValueError:
+                value = None
+            if (not isinstance(value, dict) or value.get('status') != 'ok'
+                    or value.get('role', 'fleet') != 'fleet'):
+                raise DiscoveryError('FLEET_HEALTH_UNCONFIRMED')
+    except HTTPError as error:
+        error.close()
+        raise DiscoveryError('FLEET_HEALTH_UNCONFIRMED') from error
+    except http.client.HTTPException as error:
+        raise DiscoveryError('FLEET_HEALTH_UNCONFIRMED') from error
     return opener
 
 
 def discovery_opener(origin, ca_file, timeout):
+    site_ssl_context(ca_file)
     candidate = select_endpoint(browse_fleets(), origin)
     return endpoint_opener(candidate, origin, ca_file, timeout)
+
+
+def public_api_status(opener, origin, timeout):
+    """A public route advertisement is a hint, never authenticated readiness."""
+    try:
+        with opener.open(origin.rstrip('/') + '/openapi.json', timeout=timeout) as response:
+            raw = response.read(3 * 1024 * 1024 + 1)
+            schema = json.loads(raw) if response.status == 200 and len(raw) <= 3 * 1024 * 1024 else None
+        if (not isinstance(schema, dict) or not isinstance(schema.get('openapi'), str)
+                or not schema['openapi'].startswith('3.') or not isinstance(schema.get('paths'), dict)):
+            return 'PUBLIC_API_UNCONFIRMED'
+        route = schema['paths'].get('/api/fleet/arm-transfers/jobs', {})
+        if not isinstance(route, dict) or any(
+                method in route and not isinstance(route[method], dict) for method in ('get', 'post')):
+            return 'PUBLIC_API_UNCONFIRMED'
+        return ('ARM_API_ADVERTISED' if all(
+            isinstance(route.get(method), dict) for method in ('get', 'post')) else 'ARM_API_NOT_ADVERTISED')
+    except HTTPError as error:
+        error.close()
+        return 'PUBLIC_API_UNCONFIRMED'
+    except (URLError, OSError, ValueError, TypeError, http.client.HTTPException):
+        return 'PUBLIC_API_UNCONFIRMED'

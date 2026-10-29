@@ -20,6 +20,8 @@
 <form method="post" data-command>{% csrf_token %}<input type="hidden" name="action" value="discover"><input type="hidden" name="expected_version" value="{{ connection_config.version }}"><button type="submit">Fleet 자동 찾기</button></form>
 {% if discovery_result %}
 <div role="status">{% if discovered_origins %}<p>이번 검색에서 사이트 인증과 정상 응답을 확인했습니다. 서비스 신원·API 확인은 별도로 진행하세요.</p><ul>{% for origin in discovered_origins %}<li>{{ origin }}</li>{% endfor %}</ul>{% else %}<p>연결 가능한 승인 사이트를 찾지 못했습니다. 사이트 CA·승인된 .local 이름·같은 LAN과 UDP 5353을 확인하세요.</p>{% endif %}
+{% if discovery_checked_at %}<p class="helptext">검색 시점 {{ discovery_checked_at|date:'Y-m-d H:i:s T' }} · 당시 관측이며 현재 실행 준비를 뜻하지 않습니다.</p>{% endif %}
+{% for site in discovery_sites %}<p>{{ site.origin }}: {{ site.message }}</p>{% endfor %}
 {% for failure in discovery_failures %}<p>{{ failure.origin }}: {{ failure.message }}</p>{% endfor %}</div>
 {% endif %}
 {% if connection_config.source == 'deployment' %}

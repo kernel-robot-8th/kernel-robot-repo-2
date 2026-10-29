@@ -26,7 +26,12 @@ class ConnectionForm(ConnectionVersionForm):
 
 CONNECTION_REASONS = {
     'FLEET_SITE_CA_REQUIRED': '사이트 CA를 Harbor 서버에 설치하고 HARBOR_FLEET_CA_FILE을 설정하세요.',
-    'FLEET_NOT_DISCOVERED': '승인된 Fleet이 이 LAN에서 보이지 않습니다. 같은 네트워크와 Fleet 광고 서비스를 확인하세요.',
+    'FLEET_SITE_CA_UNREADABLE': 'Harbor 서버가 사이트 CA 파일을 읽을 수 없습니다. 설치 담당자가 파일 경로와 읽기 권한을 확인해야 합니다.',
+    'FLEET_SITE_CA_INVALID': '사이트 CA 파일을 인증서로 읽을 수 없습니다. 설치 담당자가 올바른 PEM 사이트 CA를 설치해야 합니다.',
+    'FLEET_NOT_DISCOVERED': '승인된 Fleet이 이 LAN에서 보이지 않습니다. Harbor 서버와 Fleet의 LAN·광고 서비스를 확인하세요. VPN이나 다른 서브넷으로 접속할 수 있어도 mDNS는 전달되지 않을 수 있습니다.',
+    'ARM_API_ADVERTISED': '공개 작업 API 경로 있음 · 서비스 신원과 실제 조회·설치 조건은 별도 확인이 필요합니다.',
+    'ARM_API_NOT_ADVERTISED': '작업 API 미공개 · 공개 API 문서에서 ARM 작업 경로를 찾지 못했습니다. ROSY 설치 담당자가 호환되는 서명 릴리스·운영 설정을 확인하고 실제 조회도 별도로 검증해야 합니다.',
+    'PUBLIC_API_UNCONFIRMED': '공개 작업 API 확인 전 · API 문서를 읽을 수 없거나 형식이 달라 확인하지 못했습니다. 서비스 자격을 통한 실제 조회 확인이 필요합니다.',
     'FLEET_DISCOVERY_CONFLICT': '같은 사이트 이름에 여러 주소 또는 포트가 광고됩니다. 중복 광고를 정리한 뒤 다시 찾으세요.',
     'FLEET_DISCOVERY_PORT_MISMATCH': '발견한 Fleet 포트가 승인된 설치와 다릅니다. 설치 설정을 확인하세요.',
     'FLEET_DISCOVERY_CONFIGURATION': '자동 찾기는 승인된 HTTPS .local 사이트 이름을 사용합니다. 설치 설정을 확인하세요.',
@@ -89,7 +94,8 @@ def connection_guidance(config, check, *, token_present):
     }
     owner, action = actions.get(reason, ('Harbor 관리자', '현재 설정으로 Fleet 연결 확인을 실행하세요.'))
     if reason in CONNECTION_REASONS and (reason.startswith('FLEET_DISCOVERY_') or
-            reason in {'FLEET_NOT_DISCOVERED', 'FLEET_SITE_CA_REQUIRED', 'FLEET_HEALTH_UNCONFIRMED'}):
+            reason in {'FLEET_NOT_DISCOVERED', 'FLEET_SITE_CA_REQUIRED', 'FLEET_SITE_CA_UNREADABLE',
+                       'FLEET_SITE_CA_INVALID', 'FLEET_HEALTH_UNCONFIRMED'}):
         owner, action = 'Harbor·ROSY 설치 담당자', CONNECTION_REASONS[reason]
     return dict(steps=steps, owner=owner, action=action, can_check=configured)
 
@@ -131,11 +137,17 @@ def integration(request):
                 messages.error(request, CONNECTION_REASONS.get(error.messages[0], '연결 설정을 확인하세요.'))
         else:
             messages.error(request, '연결 입력 또는 설정 버전을 확인한 뒤 다시 시도하세요.')
+    saved_discovery = bridge.last_discovery()
+    if discovered is None and saved_discovery:
+        discovered = saved_discovery.detail
     check = bridge.last_check()
     guidance = connection_guidance(config, check, token_present=bool(os.environ.get('HARBOR_FLEET_TOKEN')))
     return page(request, 'integration.html', section='settings', connection=connection_summary(),
         connection_config=config, connection_form=form, connection_check=check,
         discovery_result=discovered, discovered_origins=discovered['origins'] if discovered else [],
+        discovery_checked_at=saved_discovery.created_at if saved_discovery else None,
+        discovery_sites=[dict(site, message=CONNECTION_REASONS.get(site['api'], CONNECTION_REASONS['PUBLIC_API_UNCONFIRMED']))
+                         for site in discovered.get('sites', [])] if discovered else [],
         discovery_failures=[dict(item, message=CONNECTION_REASONS.get(item['reason'], '사이트 연결을 확인하세요.'))
                             for item in discovered['failures']] if discovered else [],
         check_message=CONNECTION_REASONS.get(check.detail['reason'], '') if check else '',

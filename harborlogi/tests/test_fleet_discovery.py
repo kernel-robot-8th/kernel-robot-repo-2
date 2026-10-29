@@ -1,4 +1,5 @@
 import unittest
+import io
 import importlib.util
 import json
 import os
@@ -30,9 +31,21 @@ def tls_site():
         def log_message(self, *args): pass
         def do_GET(self):
             calls.append((self.path, self.headers.get('Host'), self.headers.get('Authorization')))
-            raw = json.dumps({'status': 'ok', 'role': 'fleet'} if self.path == '/healthz' else
-                             {'principal_id': 'harbor-service', 'role': 'service'}).encode()
-            self.send_response(200)
+            if self.path == getattr(self.server, 'broken_path', None):
+                self.send_response(200)
+                self.send_header('Transfer-Encoding', 'chunked')
+                self.end_headers()
+                self.wfile.write(b'10\r\n{')
+                self.close_connection = True
+                return
+            if self.path == '/healthz':
+                payload, status = getattr(self.server, 'health', {'status': 'ok', 'role': 'fleet'}), getattr(self.server, 'health_status', 200)
+            elif self.path == '/openapi.json':
+                payload, status = self.server.schema, getattr(self.server, 'schema_status', 200)
+            else:
+                payload, status = {'principal_id': 'harbor-service', 'role': 'service'}, 200
+            raw = json.dumps(payload).encode()
+            self.send_response(status)
             self.send_header('Content-Length', str(len(raw)))
             self.end_headers()
             self.wfile.write(raw)
@@ -69,6 +82,80 @@ def advertisement(host='site-pc.local.', address='192.168.50.2', port=8443, reco
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_ca_file_failures_are_classified_before_any_network(self):
+        from harbor.rosy_http import RosyClient
+        with tempfile.TemporaryDirectory() as folder:
+            bad = Path(folder) / 'ca.crt'
+            for content, expected in [(None, 'FLEET_SITE_CA_REQUIRED'), ('not a certificate', 'FLEET_SITE_CA_INVALID')]:
+                if content is not None:
+                    bad.write_text(content)
+                with self.subTest(content=content), patch.object(discovery, 'browse_fleets', side_effect=AssertionError('CA failure must precede browse')):
+                    client = RosyClient('https://site-pc.local:8443', 'private-service-token', ca_file=bad)
+                    with self.assertRaisesRegex(discovery.DiscoveryError, expected):
+                        client.session()
+
+    def test_invalid_origin_ports_or_whitespace_are_rejected_by_shared_client(self):
+        from harbor.rosy_http import RosyClient
+        for origin in ['https://site-pc.local:0', 'https://site-pc.local:no-port',
+                       'https://site-pc.local:65536', 'https://site-pc.local\n', 'https://bad host.local']:
+            with self.subTest(origin=origin), self.assertRaises(ValueError):
+                RosyClient(origin, 'private-service-token')
+
+    def test_public_schema_is_a_credential_free_hint_after_verified_health(self):
+        with tls_site() as (server, ca, calls, names):
+            origin = f'https://site-pc.local:{server.server_port}'
+            candidate = dict(hostname='site-pc.local', address='192.168.50.2', port=server.server_port)
+            dial = socket.create_connection
+            with patch('socket.create_connection', side_effect=lambda address, *a, **kw: dial(('127.0.0.1', server.server_port), *a, **kw)):
+                opener = discovery.endpoint_opener(candidate, origin, ca, 5)
+                server.schema = {'openapi': '3.1.0', 'paths': {'/api/fleet/arm-transfers/jobs': {'get': {}, 'post': {}}}}
+                self.assertEqual(discovery.public_api_status(opener, origin, 5), 'ARM_API_ADVERTISED')
+                server.schema['paths'] = {}
+                self.assertEqual(discovery.public_api_status(opener, origin, 5), 'ARM_API_NOT_ADVERTISED')
+                server.schema_status = 403
+                self.assertEqual(discovery.public_api_status(opener, origin, 5), 'PUBLIC_API_UNCONFIRMED')
+                server.broken_path = '/openapi.json'
+                self.assertEqual(discovery.public_api_status(opener, origin, 5), 'PUBLIC_API_UNCONFIRMED')
+            self.assertEqual([row[0] for row in calls], ['/healthz'] + ['/openapi.json'] * 4)
+            self.assertTrue(all(row[2] is None for row in calls))
+
+    def test_incomplete_http_response_is_a_safe_shared_client_validation_error(self):
+        from harbor.rosy_http import RosyClient
+        with tls_site() as (server, ca, calls, names):
+            server.broken_path = '/api/fleet/session'
+            dial = socket.create_connection
+            candidate = dict(hostname='site-pc.local', address='192.168.50.2', port=server.server_port)
+            with patch.object(discovery, 'browse_fleets', return_value=[candidate]), \
+                 patch('socket.create_connection', side_effect=lambda address, *a, **kw: dial(('127.0.0.1', server.server_port), *a, **kw)):
+                client = RosyClient(f'https://site-pc.local:{server.server_port}', 'private-service-token', ca_file=ca)
+                with self.assertRaisesRegex(ValueError, 'Invalid Fleet HTTP response'):
+                    client.session()
+
+    def test_malformed_or_oversized_schema_does_not_claim_an_api_is_missing(self):
+        for body in [b'not json', b'{"paths":{}}', b'{"openapi":"3.1.0","paths":[]}',
+                     b'{"openapi":"3.1.0","paths":{"/api/fleet/arm-transfers/jobs":null}}',
+                     b'x' * (3 * 1024 * 1024 + 1)]:
+            with self.subTest(size=len(body)):
+                response = io.BytesIO(body)
+                response.status = 200
+                opener = unittest.mock.Mock()
+                opener.open.return_value = response
+                self.assertEqual(discovery.public_api_status(opener, 'https://site-pc.local:8443', 5), 'PUBLIC_API_UNCONFIRMED')
+
+    def test_unhealthy_http_status_is_not_reported_as_bearer_failure(self):
+        from harbor.rosy_http import RosyClient
+        with tls_site() as (server, ca, calls, names):
+            server.health_status = 401
+            dial = socket.create_connection
+            candidate = dict(hostname='site-pc.local', address='192.168.50.2', port=server.server_port)
+            with patch.object(discovery, 'browse_fleets', return_value=[candidate]), \
+                 patch('socket.create_connection', side_effect=lambda address, *a, **kw: dial(('127.0.0.1', server.server_port), *a, **kw)):
+                client = RosyClient(f'https://site-pc.local:{server.server_port}', 'private-service-token', ca_file=ca)
+                with self.assertRaisesRegex(discovery.DiscoveryError, 'FLEET_HEALTH_UNCONFIRMED'):
+                    client.session()
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][2], None)
+
     @unittest.skipUnless(ZEROCONF_AVAILABLE, 'Install .[web] for DNS-SD transport tests')
     def test_incomplete_or_overfull_browse_never_returns_a_partial_match(self):
         class Zc:

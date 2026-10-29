@@ -13,7 +13,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from harbor.rosy_http import RosyClient
-from harbor.fleet_discovery import DiscoveryError
+from harbor.fleet_discovery import DiscoveryError, HOSTNAME
 from harbor_web.coordination import queue_lock, serialized
 from harbor_web.models import Audit, Command, FleetConnection
 from harbor_web.services import _role
@@ -71,42 +71,61 @@ def _network_reason(error):
         'FLEET_TIMEOUT' if isinstance(cause, TimeoutError) else 'FLEET_UNREACHABLE')
 
 
+def _discovery_origins(config):
+    installed = [config['origin']] if config['source'] == 'deployment' else allowed_origins()
+    origins = []
+    for origin in installed:
+        try:
+            parsed = urlsplit(origin)
+            if parsed.scheme == 'https' and HOSTNAME.fullmatch(parsed.hostname or '') and parsed.port != 0:
+                origins.append(origin)
+        except ValueError:
+            continue
+    return origins
+
+
+def last_discovery():
+    config = connection_settings()
+    current = fingerprint(dict(config, installed=_discovery_origins(config)))
+    return Audit.objects.filter(action='fleet.discover', detail__fingerprint=current).order_by('-pk').first()
+
+
 def discover_connections(actor, *, expected_version):
-    from harbor.fleet_discovery import browse_fleets, endpoint_opener, select_endpoint
+    from harbor.fleet_discovery import browse_fleets, endpoint_opener, select_endpoint, site_ssl_context, public_api_status
     _role(actor, 'admin')
     config = connection_settings()
     if config['version'] != expected_version:
         raise ValidationError('CONNECTION_CHANGED')
     if not config['ca_file']:
         raise ValidationError('FLEET_SITE_CA_REQUIRED')
-    installed = [config['origin']] if config['source'] == 'deployment' else allowed_origins()
-    original = fingerprint(config), installed
+    installed = _discovery_origins(config)
+    if not installed:
+        raise ValidationError('FLEET_DISCOVERY_CONFIGURATION')
+    original = fingerprint(dict(config, installed=installed))
     try:
+        site_ssl_context(config['ca_file'])
         candidates = browse_fleets()
     except DiscoveryError as error:
         raise ValidationError(str(error)) from error
-    except ImportError as error:
-        raise ValidationError('FLEET_DISCOVERY_UNAVAILABLE') from error
-    found, failures = [], []
+    found, failures, sites = [], [], []
     for origin in installed:
-        if not origin.startswith('https://') or not (urlsplit(origin).hostname or '').endswith('.local'):
-            continue
         try:
             candidate = select_endpoint(candidates, origin)
-            endpoint_opener(candidate, origin, config['ca_file'], 5)
+            opener = endpoint_opener(candidate, origin, config['ca_file'], 5)
             found.append(origin)
+            sites.append(dict(origin=origin, api=public_api_status(opener, origin, 5)))
         except DiscoveryError as error:
             failures.append(dict(origin=origin, reason=str(error)))
         except (URLError, OSError) as error:
             failures.append(dict(origin=origin, reason=_network_reason(error)))
     with queue_lock:
         current = connection_settings()
-        current_installed = [current['origin']] if current['source'] == 'deployment' else allowed_origins()
-        if original != (fingerprint(current), current_installed):
+        if original != fingerprint(dict(current, installed=_discovery_origins(current))):
             raise ValidationError('CONNECTION_CHANGED')
+        result = dict(origins=found, sites=sites, failures=failures)
         Audit.objects.create(actor=actor, action='fleet.discover', object_type='FleetConnection', object_id='1',
-                             detail=dict(origins=found, failures=failures))
-    return dict(origins=found, failures=failures)
+                             detail=dict(result, fingerprint=original))
+    return result
 
 
 @serialized
