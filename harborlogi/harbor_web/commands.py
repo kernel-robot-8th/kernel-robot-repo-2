@@ -19,7 +19,7 @@ from harbor.ownership import WriterLease
 from harbor.process import ArmTransferBinding, SpatialPlacementBinding, anchor_address, bind_plan, load_bindings
 from harbor.outbound import CargoMove, OutboundProposal
 from harbor.rosy_http import RosyClient
-from harbor.execution import validate_arm_execution
+from harbor.execution import read_arm_execution, validate_arm_execution
 from harbor.workflow import BusinessLedger
 from harbor_web.command_models import ACTIVE_COMMAND_STATES
 from harbor_web.models import Plan, Command, CommandFact, Audit, Observation
@@ -267,8 +267,12 @@ def _prepare_ledger(command, registry):
         outbound_id=body['outbound_id'], outbound_stand=body['outbound_stand'],
         move_arms=tuple(tuple(a) for a in body['move_arms']))
     row = registry.ledger.read(_key(command))
-    payload = json.loads(row['payload'])
-    if payload != dict(command.binding, execution_kind='ARM_TRANSFER'):
+    _check_ledger_binding(command, row)
+
+
+def _check_ledger_binding(command, row):
+    expected = dict(command.binding, execution_kind='ARM_TRANSFER')
+    if json.loads(row['payload']) != expected or row['digest'] != _digest(expected):
         raise Conflict('Ledger binding differs from saved command.')
 
 
@@ -314,8 +318,23 @@ def _operation(actor, command_id, expected_version, action, reason='', *, resume
         command = Command.objects.select_related('plan__order', 'plan__observation', 'plan__condition').get(pk=command_id)
         if command.version != expected_version:
             raise Conflict('Command changed; reload.')
+        restore_read = (command.state == 'BLOCKED' and action == 'reconcile'
+                        and command.reason == 'RESTORE_RECONCILIATION_REQUIRED')
+        if command.state not in ACTIVE_COMMAND_STATES and not restore_read:
+            raise Conflict('Closed commands are history; prepare a new command.')
         _validate(command, registry.config)
         key = _key(command)
+        if restore_read:
+            try:
+                row = registry.ledger.read(key)
+                _check_ledger_binding(command, row)
+                binding = ArmTransferBinding(**command.binding['moves'][row['step_index']])
+                execution = read_arm_execution(registry.client, binding, f"{key}:{row['step_index']}",
+                    mission_id=row['mission_id'], principal=command.fleet_principal)
+            except (ValueError, KeyError, IndexError, TypeError, OSError, sqlite3.Error) as error:
+                raise Conflict('Restored execution could not be reconciled.') from error
+            _record_fact(command, execution.job, execution.receipt)
+            return command
         if action == 'submit':
             if command.state != 'PREPARED':
                 raise Conflict('Explicit reconciliation required; submission cannot be retried.')
@@ -407,7 +426,7 @@ def command_detail(command):
         fact = CommandFact.objects.filter(command=command, command_key=command.key, body_digest=command.body_digest,
             fleet_origin=command.fleet_origin, fleet_principal=command.fleet_principal).order_by('-read_at', '-pk').first()
         job, receipt = None, None
-        if fact and row:
+        if fact and row and row['mission_id']:
             binding = ArmTransferBinding(**command.binding['moves'][row['step_index']])
             execution = validate_arm_execution(binding, f"{_key(command)}:{row['step_index']}",
                 fact.job, fact.receipt, mission_id=row['mission_id'], principal=command.fleet_principal)
