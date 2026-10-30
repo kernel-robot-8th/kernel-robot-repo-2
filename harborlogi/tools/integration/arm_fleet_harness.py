@@ -1,14 +1,19 @@
-"""Real Fleet HTTP/UDS contracts with explicitly synthetic devices and raw facts.
+"""Real Fleet HTTP/UDS contracts with explicitly synthetic devices and a simulated scene.
 
 This development harness tests framing, authentication and journal transitions.
-Its boxes, zero velocities and object poses are simulated fixtures; they provide
-no physics, sensor calibration, native driver or field-acceptance evidence.
+The synthetic owners move a scripted scene that is written to a simulation state
+file; the platform's simulation observer (tools/sim/transfer_observer.py, D-927
+decision 3) turns it into facts as a separate process. No physics, sensor
+calibration, native driver or field-acceptance evidence.
 """
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 import os
 from pathlib import Path
 import secrets
+import subprocess
+import sys
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -18,7 +23,11 @@ import httpx
 from tools.integration.fleet_harness import enable, _free_port
 
 WORKCELL, INSTANCE, ROBOT = "w-1", "arm-1", "unused"
-JOINTS = ["joint1", "joint2", "joint3", "joint4"]  # synthetic measured joints so v1.330 physical evidence is readable
+JOINTS = ["joint1", "joint2", "joint3", "joint4", "joint5", "gripper_joint_1"]
+ASSETS = "learning/envs/isaac/assets/open_manipulator_description"
+# shortcut: arm bases face away from the shared zone at the origin; the S4 installation profile will own them.
+BASES = {INSTANCE: {"position_m": [.45, 0, 0], "orientation_xyzw": [0, 0, 0, 1]},
+         "arm-2": {"position_m": [-.45, 0, 0], "orientation_xyzw": [0, 0, 1, 0]}}
 
 
 class SyntheticOwner:
@@ -92,7 +101,7 @@ class ArmFleet:
         self.observed = set()
         self.owners, self.servers, self.threads = [], [], []
         self.transfers = {}
-        self.server = None
+        self.server = self.observer = None
 
     def start(self):
         db = self.workdir / "fleet.sqlite3"
@@ -120,17 +129,45 @@ class ArmFleet:
         with self.client("approver") as client:
             generation = client.get("/api/fleet/dispatch-control").json()["generation"]
             client.post("/api/fleet/dispatch/rearm", json={"expected_generation": generation}).raise_for_status()
-        self._thread(self._approve_and_observe)
+        self._workers()
 
     def attach(self, url, tokens):
         """Approve and observe for a Fleet started elsewhere with install()'s options (one-Fleet full flow)."""
         self.url, self.tokens = url, tokens
-        self._thread(self._approve_and_observe)
+        self._workers()
+
+    def _workers(self):
+        state, bases = self.workdir / "sim-state.json", self.workdir / "sim-bases.json"
+        bases.write_text(json.dumps(BASES), encoding="utf-8")
+        self._write_state(state, 0)
+        self._thread(lambda: self._publish_state(state))
+        self.observer_log = (self.workdir / "observer.log").open("w", encoding="utf-8")
+        self.observer = subprocess.Popen([sys.executable, str(self.root / "tools/sim/transfer_observer.py"),
+            "--origin", self.url, "--assets", str(self.root / ASSETS), "--bases", str(bases), "--state", str(state),
+            "--poll-s", "0.05", "run"], env={**os.environ, "ROSY_TRANSFER_OBSERVER_TOKEN": self.observer_token},
+            stdout=self.observer_log, stderr=subprocess.STDOUT)
+        self._thread(self._approve)
+
+    def _write_state(self, path, sequence):
+        now = time.time_ns()
+        arm = {"sequence": sequence, "observed_at_ns": now, "joint_names": JOINTS, "positions_rad": [0.0] * len(JOINTS),
+               "velocities_rad_s": [0.0] * len(JOINTS), "gripper_state": "OPEN", "held_state": "NONE",
+               "held_object_ref": None}
+        state = {"schema": "rosy.sim-transfer-state/1", "owners": {i: arm for i in BASES}, "object": {
+            "position_m": list(self.scene["position_m"]), "orientation_xyzw": [0, 0, 0, 1], "observed_at_ns": now}}
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(state), encoding="utf-8")
+        os.replace(temporary, path)
+
+    def _publish_state(self, path):
+        sequence = 0
+        while not self.stopped.wait(.05):
+            sequence += 1
+            self._write_state(path, sequence)
 
     def install(self, db):
         """Start the synthetic owners and return the create_app options that install ARM into a Fleet on db."""
         enable(self.root)
-        import sys
         if "rosy_cell" in sys.modules:
             raise RuntimeError("neutral harness must start without the palletizing package")
         sys.modules["rosy_cell"] = None
@@ -195,24 +232,10 @@ class ArmFleet:
     def client(self, who="operator"):
         return httpx.Client(base_url=self.url, headers={"Authorization": "Bearer " + self.tokens[who]}, timeout=5)
 
-    def _sample(self, context, sequence):
-        now = time.time_ns()
-        owners = [{**owner, "links_observed_at_ns": now, "gripper_observed_at_ns": now,
-            "gripper_state": "OPEN", "held_state": "NONE", "held_object_ref": None,
-            "joints": {"sample_id": f"{owner['instance_id']}-joints-{sequence}", "sequence": sequence,
-                "observed_at_ns": now, "joint_names": JOINTS, "positions_rad": [0.0] * len(JOINTS)},
-            "links": {link: {"bounds": {"min_m": [1, 1, 1], "max_m": [1.1, 1.1, 1.1]},
-                "linear_velocity_m_s": [0, 0, 0], "angular_velocity_rad_s": [0, 0, 0]} for link in self.links}}
-            for owner in context["owners"]]
-        fields = ("producer_id", "evaluator_revision", "action_id", "attempt_id", "frame_id", "policy_digest",
-                  "catalog_digest", "bindings_digest", "object_ref", "object_origin_id")
-        return {**{k: context[k] for k in fields}, "evidence_id": "sample-" + str(sequence), "sequence": sequence,
-            "object_observed_at_ns": now, "object_pose": {"position_m": list(self.scene["position_m"]),
-                "orientation_xyzw": [0, 0, 0, 1]}, "owners": owners}
-
-    def _approve_and_observe(self):
+    def _approve(self):
+        """Test-operator approval (D-927 decision 4); observation phases are only read, never answered here."""
         pending = [] if self.request_key_path else list(self.request_keys)
-        loaded, seen, sequence = False, set(), 0
+        loaded = False
         try:
             with self.client() as proposer, self.client("approver") as approver, httpx.Client(
                     base_url=self.url, headers={"X-Physical-Observation-Token": self.observer_token}, timeout=5) as observer:
@@ -229,6 +252,8 @@ class ArmFleet:
                         response = proposer.get("/api/fleet/arm-transfers/jobs", params={"request_key": request_key})
                         if response.status_code == 200:
                             job = response.json()["job"]
+                            # shortcut: each move's object starts at the one installed source; per-move bindings come with S4.
+                            self.scene["position_m"] = [0, 0, .2]
                             generation = approver.get("/api/fleet/dispatch-control").json()["generation"]
                             approver.post("/api/fleet/arm-transfers/jobs/" + job["mission_id"] + "/admit", json={
                                 "expected_proposal_digest": job["proposal_digest"], "expected_generation": generation}).raise_for_status()
@@ -238,23 +263,10 @@ class ArmFleet:
                     response = observer.get("/api/fleet/arm-transfers/observation-context")
                     response.raise_for_status()
                     context = response.json()["context"]
-                    if context is None or (context["mission_id"], context["phase"]) in seen:
-                        continue
-                    if context["phase"] == "PRE_DISPATCH":
-                        # shortcut: each move's object starts at the one installed source; per-move bindings come with S4.
-                        self.scene["position_m"] = [0, 0, .2]
-                    sequence += 1
-                    first = self._sample(context, sequence)
-                    if self.stopped.wait(.15):
-                        return
-                    sequence += 1
-                    second = self._sample(context, sequence)
-                    response = observer.post("/api/fleet/arm-transfers/jobs/" + context["mission_id"] + "/observations",
-                        json={"phase": context["phase"], "expected_request_digest": context["request_digest"],
-                              "observations": [first, second]})
-                    response.raise_for_status()
-                    seen.add((context["mission_id"], context["phase"]))
-                    self.observed.add(context["phase"])
+                    if context is not None:
+                        self.observed.add(context["phase"])
+                    if self.observer.poll() is not None:
+                        raise RuntimeError("simulation observer exited")
         except Exception as error:
             if not self.stopped.is_set():
                 self.errors.append(type(error).__name__)
@@ -265,9 +277,12 @@ class ArmFleet:
             self.server.should_exit = True
         for server in self.servers:
             server.stop()
+        if self.observer is not None:
+            self.observer.terminate()
+            self.observer.wait(timeout=5)
+            self.observer_log.close()
         for thread in self.threads:
             thread.join(timeout=5)
-        import sys
         sys.modules.pop("rosy_cell", None)
         if self.errors or any(thread.is_alive() for thread in self.threads):
             raise RuntimeError("simulation harness worker failed or did not stop")
