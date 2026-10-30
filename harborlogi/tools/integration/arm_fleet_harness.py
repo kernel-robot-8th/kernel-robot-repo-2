@@ -79,9 +79,10 @@ class SyntheticStops:
 
 
 class ArmFleet:
-    def __init__(self, *, root, workdir, request_key_path=None):
+    def __init__(self, *, root, workdir, request_key_path=None, request_keys=("neutral-arm-http:0",), one_attempt=True):
         self.root, self.workdir = Path(root), Path(workdir)
         self.request_key_path = Path(request_key_path) if request_key_path else None
+        self.request_keys, self.one_attempt = tuple(request_keys), one_attempt
         self.tokens = {name: secrets.token_urlsafe(40) for name in ("operator", "viewer", "approver")}
         self.observer_token = secrets.token_urlsafe(40)
         self.url = f"http://127.0.0.1:{_free_port()}"
@@ -93,20 +94,47 @@ class ArmFleet:
         self.server = None
 
     def start(self):
-        enable(self.root)
-        import sys
-        if "rosy_cell" in sys.modules:
-            raise RuntimeError("neutral harness must start without the palletizing package")
-        sys.modules["rosy_cell"] = None
-        sys.path.insert(0, str(self.root / "middleware/devices/omx/adapter"))
+        db = self.workdir / "fleet.sqlite3"
+        options = self.install(db)
         import uvicorn
-        from core_common.protocol.schemas import ArmTransferCapability, DeviceActionReceipt, FleetArmTransferGrant
         from fleet.server.app import create_app
         from fleet.server.console import FleetConsole
         from fleet.server.mission_service import MissionService
         from fleet.server.mission_store import MissionStore
         from fleet.server.proposal_store import ProposalStore
         from fleet.server.task_service import FleetTaskService
+        users = {hashlib.sha256(token.encode()).hexdigest(): {"principal_id": name,
+            "role": "operator" if name == "approver" else "service"} for name, token in self.tokens.items()}
+        self.app = create_app(FleetConsole([], []), task_service=FleetTaskService(self.tasks, robot_ids=()),
+            mission_service=MissionService(MissionStore(db)), proposal_store=ProposalStore(db), site_users=users,
+            deployment_profile="simulation", **options)
+        self.server = uvicorn.Server(uvicorn.Config(self.app, host="127.0.0.1", port=int(self.url.rsplit(":", 1)[1]),
+                                                    log_level="error", lifespan="on"))
+        self._thread(self.server.run)
+        deadline = time.monotonic() + 10
+        while not self.server.started:
+            if time.monotonic() > deadline:
+                raise TimeoutError("Fleet HTTP did not start")
+            time.sleep(.01)
+        with self.client("approver") as client:
+            generation = client.get("/api/fleet/dispatch-control").json()["generation"]
+            client.post("/api/fleet/dispatch/rearm", json={"expected_generation": generation}).raise_for_status()
+        self._thread(self._approve_and_observe)
+
+    def attach(self, url, tokens):
+        """Approve and observe for a Fleet started elsewhere with install()'s options (one-Fleet full flow)."""
+        self.url, self.tokens = url, tokens
+        self._thread(self._approve_and_observe)
+
+    def install(self, db):
+        """Start the synthetic owners and return the create_app options that install ARM into a Fleet on db."""
+        enable(self.root)
+        import sys
+        if "rosy_cell" in sys.modules:
+            raise RuntimeError("neutral harness must start without the palletizing package")
+        sys.modules["rosy_cell"] = None
+        sys.path.insert(0, str(self.root / "middleware/devices/omx/adapter"))
+        from core_common.protocol.schemas import ArmTransferCapability, DeviceActionReceipt, FleetArmTransferGrant
         from fleet.server.task_store import FleetTaskStore
         from fleet.server.physical_transfer_evidence import PhysicalTransferPolicy, TransferParticipant
         from fleet.server.physical_transfer_observer import PhysicalTransferObserver
@@ -137,7 +165,7 @@ class ArmFleet:
             owner_session_id="session-1", catalog_digest=policy.catalog_digest, bindings_digest=policy.bindings_digest,
             resource_policy_digest=policy.digest, capability_revision="cap-1", config_revision="config-1") for p in participants)
         installed = TransferInstallation(policy=policy, source="source", target="target", capabilities=capabilities)
-        db, sockets = self.workdir / "fleet.sqlite3", self.workdir / "sockets"
+        sockets = self.workdir / "sockets"
         self.tasks = FleetTaskStore(db)
         for cap in capabilities:
             owner = SyntheticOwner(cap, DeviceActionReceipt, FleetArmTransferGrant, self.scene, self.tasks)
@@ -154,26 +182,9 @@ class ArmFleet:
                 if time.monotonic() > deadline:
                     raise TimeoutError("synthetic owner socket did not start")
                 time.sleep(.01)
-        users = {hashlib.sha256(token.encode()).hexdigest(): {"principal_id": name,
-            "role": "operator" if name == "approver" else "service"} for name, token in self.tokens.items()}
-        self.app = create_app(FleetConsole([], []), task_service=FleetTaskService(self.tasks, robot_ids=()),
-            mission_service=MissionService(MissionStore(db)), proposal_store=ProposalStore(db), site_users=users,
-            deployment_profile="simulation", omx_socket_root=sockets, omx_stop_transport=SyntheticStops(),
-            arm_transfer_installation=installed, arm_transfer_observer=PhysicalTransferObserver(
-                producer_id=policy.producer_id, token=self.observer_token,
+        return dict(omx_socket_root=sockets, omx_stop_transport=SyntheticStops(), arm_transfer_installation=installed,
+            arm_transfer_observer=PhysicalTransferObserver(producer_id=policy.producer_id, token=self.observer_token,
                 valid_until=datetime.now(timezone.utc) + timedelta(minutes=10)))
-        self.server = uvicorn.Server(uvicorn.Config(self.app, host="127.0.0.1", port=int(self.url.rsplit(":", 1)[1]),
-                                                    log_level="error", lifespan="on"))
-        self._thread(self.server.run)
-        deadline = time.monotonic() + 10
-        while not self.server.started:
-            if time.monotonic() > deadline:
-                raise TimeoutError("Fleet HTTP did not start")
-            time.sleep(.01)
-        with self.client("approver") as client:
-            generation = client.get("/api/fleet/dispatch-control").json()["generation"]
-            client.post("/api/fleet/dispatch/rearm", json={"expected_generation": generation}).raise_for_status()
-        self._thread(self._approve_and_observe)
 
     def _thread(self, function):
         thread = threading.Thread(target=function, daemon=True)
@@ -197,32 +208,34 @@ class ArmFleet:
                 "orientation_xyzw": [0, 0, 0, 1]}, "owners": owners}
 
     def _approve_and_observe(self):
-        approved, observed, sequence = False, self.observed, 0
-        request_key = None if self.request_key_path else "neutral-arm-http:0"
+        pending = [] if self.request_key_path else list(self.request_keys)
+        loaded, seen, sequence = False, set(), 0
         try:
             with self.client() as proposer, self.client("approver") as approver, httpx.Client(
                     base_url=self.url, headers={"X-Physical-Observation-Token": self.observer_token}, timeout=5) as observer:
                 while not self.stopped.wait(.05):
-                    if request_key is None:
+                    if self.request_key_path and not loaded:
                         if not self.request_key_path.exists():
                             continue
                         request_key = self.request_key_path.read_text(encoding="utf-8").strip()
                         if not request_key.startswith("harbor:") or not request_key.endswith(":0"):
                             raise ValueError("invalid web request key")
-                    if not approved:
+                        pending.append(request_key)
+                        loaded = True
+                    for request_key in tuple(pending):
                         response = proposer.get("/api/fleet/arm-transfers/jobs", params={"request_key": request_key})
                         if response.status_code == 200:
                             job = response.json()["job"]
                             generation = approver.get("/api/fleet/dispatch-control").json()["generation"]
                             approver.post("/api/fleet/arm-transfers/jobs/" + job["mission_id"] + "/admit", json={
                                 "expected_proposal_digest": job["proposal_digest"], "expected_generation": generation}).raise_for_status()
-                            approved = True
+                            pending.remove(request_key)
                         elif response.status_code != 404:
                             response.raise_for_status()
                     response = observer.get("/api/fleet/arm-transfers/observation-context")
                     response.raise_for_status()
                     context = response.json()["context"]
-                    if context is None or context["phase"] in observed:
+                    if context is None or (context["mission_id"], context["phase"]) in seen:
                         continue
                     sequence += 1
                     first = self._sample(context, sequence)
@@ -234,7 +247,8 @@ class ArmFleet:
                         json={"phase": context["phase"], "expected_request_digest": context["request_digest"],
                               "observations": [first, second]})
                     response.raise_for_status()
-                    observed.add(context["phase"])
+                    seen.add((context["mission_id"], context["phase"]))
+                    self.observed.add(context["phase"])
         except Exception as error:
             if not self.stopped.is_set():
                 self.errors.append(type(error).__name__)
@@ -254,5 +268,30 @@ class ArmFleet:
         submits = sum(o.operations.count("SubmitAction") for o in self.owners)
         lookups = sum(o.operations.count("GetAction") for o in self.owners)
         print("Synthetic UDS submits:", submits, "lookups:", lookups, "physical proofs:", sorted(self.observed), flush=True)
-        if submits != 1 or lookups < 1 or self.observed != {"PRE_DISPATCH", "POST_ACTION"}:
+        if self.one_attempt and (submits != 1 or lookups < 1 or self.observed != {"PRE_DISPATCH", "POST_ACTION"}):
             raise AssertionError("simulation did not complete exactly one admitted physical attempt")
+
+
+class FullFlowFleet:
+    """D-927 decision 2: one simulation Fleet serves TRIP (synthetic Pinky) and ARM (synthetic owners)."""
+
+    def __init__(self, *, root, workdir, request_keys):
+        self.root, self.workdir = Path(root), Path(workdir) / "fleet"
+        self.arm = ArmFleet(root=root, workdir=Path(workdir) / "arm", request_keys=request_keys, one_attempt=False)
+        self.fleet = None
+
+    def start(self):
+        from tools.integration.fleet_harness import RealFleet
+        self.workdir.mkdir(parents=True)
+        self.fleet = RealFleet(root=self.root, workdir=self.workdir, transport_only=True,
+                               extra_app=self.arm.install(self.workdir / "fleet.sqlite3"))
+        self.fleet.start()
+        self.url, self.tokens = self.fleet.url, self.fleet.tokens
+        self.arm.attach(self.url, self.tokens)
+
+    def stop(self):
+        try:
+            self.arm.stop()
+        finally:
+            if self.fleet is not None:
+                self.fleet.stop()

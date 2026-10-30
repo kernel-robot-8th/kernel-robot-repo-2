@@ -14,6 +14,13 @@ import sys
 import tempfile
 
 
+FULL_FLOW_KEY = 'harbor-full-flow'
+# (cargo, source, destination): rehandle the blocker, outbound to the stand, restore the blocker.
+# shortcut: every move uses the one synthetic installed source->target binding; per-move bindings come with S4.
+FULL_FLOW_MOVES = (('blocker-1', 'yard-top', 'temp-1'), ('outbound-1', 'yard-below', 'stand'),
+                   ('blocker-1', 'temp-1', 'yard-top'))
+
+
 def verify_checkout(root, expected_sha):
     root = Path(root).resolve()
     if not re.fullmatch(r'[0-9a-f]{40}', expected_sha):
@@ -43,6 +50,8 @@ def main(argv=None):
     mode.add_argument('--transport-only', action='store_true', help='Verify neutral TRIP without the Cell compiler')
     mode.add_argument('--arm-only', action='store_true', help='Verify neutral ARM with an independent observer and real UDS')
     mode.add_argument('--web-arm-only', action='store_true', help='Verify authenticated Django over actual Fleet HTTP')
+    mode.add_argument('--full-flow', action='store_true', help='Run the first flow stages on one Fleet serving TRIP and ARM (D-927)')
+    parser.add_argument('--report', type=Path, help='With --full-flow: write per-stage results as JSON here')
     parser.add_argument('--app-python', type=Path, help='Isolated Harbor/web Python interpreter')
     args = parser.parse_args(argv)
     if args.web_arm_only and args.app_python is None:
@@ -52,19 +61,22 @@ def main(argv=None):
     platform_sha = verify_checkout(args.platform_root, args.platform_sha)
     sys.path.insert(0, str(app_root))
     # Loaded by path only here: the harness needs the platform's test dependencies.
-    source = Path(__file__).resolve().parent / ('arm_fleet_harness.py' if (args.arm_only or args.web_arm_only) else 'fleet_harness.py')
+    arm = args.arm_only or args.web_arm_only or args.full_flow
+    source = Path(__file__).resolve().parent / ('arm_fleet_harness.py' if arm else 'fleet_harness.py')
     spec = importlib.util.spec_from_file_location('harbor_fleet_harness', source)
     harness = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(harness)
     # Windows keeps the in-process Fleet SQLite file open after stop; a leftover temp dir must not mask the result.
     with tempfile.TemporaryDirectory(prefix='harbor-http-integration-', ignore_cleanup_errors=True) as temporary:
         request_key_path = Path(temporary) / 'request-key' if args.web_arm_only else None
-        fleet = (harness.ArmFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet', request_key_path=request_key_path) if (args.arm_only or args.web_arm_only) else
+        fleet = (harness.FullFlowFleet(root=args.platform_root, workdir=Path(temporary),
+                     request_keys=[f'{FULL_FLOW_KEY}:{move}' for move in range(len(FULL_FLOW_MOVES))]) if args.full_flow else
+                 harness.ArmFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet', request_key_path=request_key_path) if (args.arm_only or args.web_arm_only) else
                  harness.RealFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet', transport_only=args.transport_only))
         try:
             fleet.start()
             ref, artifact = {}, None
-            if not args.transport_only and not args.arm_only and not args.web_arm_only:
+            if not args.transport_only and not arm:
                 ref = next(iter(fleet.transfers.values()))
                 with fleet.client() as client:
                     response = client.post('/api/fleet/cell-app/compile', json=ref)
@@ -88,6 +100,16 @@ def main(argv=None):
                     'binding': {'cargo_id': 'synthetic-outbound', 'source': 'yard', 'destination': 'stand',
                         'workcell_id': harness.WORKCELL, 'instance_id': harness.INSTANCE, 'object_ref': 'object-1',
                         'source_ref': 'source', 'target_ref': 'target'}}
+            if args.full_flow:
+                from tools.integration.fleet_harness import ROBOT
+                arm_ref = {'workcell_id': harness.WORKCELL, 'instance_id': harness.INSTANCE, 'object_ref': 'object-1',
+                           'source_ref': 'source', 'target_ref': 'target'}
+                config = {'schema': 'harbor.full-flow-http-test/1', 'simulation': True, 'origin': fleet.url,
+                    'operator': fleet.tokens['operator'], 'platform_sha': platform_sha, 'app_sha': app_sha,
+                    'report_path': str(args.report.resolve()) if args.report else None,
+                    'moves': [{**arm_ref, 'cargo_id': c, 'source': s, 'destination': d} for c, s, d in FULL_FLOW_MOVES],
+                    'outbound_id': 'outbound-1', 'outbound_stand': 'stand',
+                    'trip_candidates': [ROBOT], 'trip_destination': 'inbound'}
             if args.web_arm_only:
                 config['schema'] = 'harbor.web-arm-http-test/1'
                 config['request_key_path'] = str(request_key_path)
@@ -98,7 +120,7 @@ def main(argv=None):
             env = dict(os.environ, HARBOR_INTEGRATION='1', HARBOR_INTEGRATION_CONFIG=str(path))
             env.pop('PYTHONPATH', None)
             print(f'Platform {platform_sha}; Harbor (with harness) {app_sha}', flush=True)
-            pattern = 'product_web_http.py' if args.web_arm_only else 'arm_http.py' if (args.arm_only or args.web_arm_only) else 'transport_http.py' if args.transport_only else 'test_real_fleet_http.py'
+            pattern = 'full_flow_http.py' if args.full_flow else 'product_web_http.py' if args.web_arm_only else 'arm_http.py' if arm else 'transport_http.py' if args.transport_only else 'test_real_fleet_http.py'
             return subprocess.run([str(args.app_python) if args.app_python else sys.executable, '-m', 'unittest', 'discover', '-s', 'tests/integration', '-p', pattern, '-v'],
                                   cwd=app_root, env=env, timeout=180).returncode
         finally:
