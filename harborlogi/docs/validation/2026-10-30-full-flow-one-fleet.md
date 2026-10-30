@@ -67,3 +67,13 @@ owner·관측·승인은 하네스 합성이다. 플랫폼 시뮬 owner(MuJoCo),
 
 owner·관측·승인은 여전히 하네스 합성이고, 이동별 대응(S4)과 ④의 업무 호출은 shortcut이다. 플랫폼 MuJoCo owner·`transfer_observer.py`·매일 밤 실행으로의 교체가 다음 단계다.
 
+## 4차 실행: 플랫폼 시뮬 관측자로 교체 (같은 날)
+
+정상 단계 관측을 하네스 스레드에서 플랫폼 `tools/sim/transfer_observer.py`(D-927 결정 3, 브랜치 `feat/sim-transfer-observer` `7adb1caf14`, 로컬 main 착지 대기)로 옮겼다. 하네스는 시험 운영자 승인과 합성 owner가 움직이는 scene만 남기고, scene을 시뮬 상태 파일로 쓴다. 관측자는 별도 프로세스·관측자 자격으로 PRE_DISPATCH·POST_ACTION·RECHECK 문맥에 답하며, 링크 경계는 측정 관절의 URDF FK, 속도는 관절 속도에서 계산한다. 팔 기준 자세는 공유 zone 밖을 향하게 두었다(S4 전 shortcut).
+
+| 실행 (Harbor `743efaa`, 플랫폼 시험용 병합 `9696cd87ac` = D-930 `3de9a2527f` + 관측자 `7adb1caf14`) | 결과 |
+|---|---|
+| `--full-flow` | **0~⑤ 모두 통과**, 업무 `COMPLETED`, 관측 phase PRE_DISPATCH·POST_ACTION·RECHECK |
+| 기본 3·`--transport-only` 1·`--arm-only` 1·`--web-arm-only` 1 | 모두 통과 |
+
+시험용 병합 커밋은 두 브랜치를 합친 것이며 문서 충돌을 풀지 않았다(코드 충돌 없음). 두 브랜치가 로컬 main에 착지하면 main SHA로 다시 고정한다. owner는 아직 합성이고 MuJoCo owner 연결은 다음 단계다.
