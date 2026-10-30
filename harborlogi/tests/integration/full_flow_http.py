@@ -14,7 +14,7 @@ import unittest
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
-from harbor.physical_evidence import fleet_move_evidence
+from harbor.physical_evidence import fleet_move_evidence, fleet_recheck_evidence
 from harbor.process import ArmTransferBinding
 from harbor.rosy_http import RosyClient
 from harbor.transport import TripIntent, TransportLedger
@@ -74,12 +74,20 @@ class FullFlow:
         self.notes.append(f'Fleet GOAL_CONFIRMED {mission} attempt {row["attempt_id"]}')
         self.business.confirm(KEY, self.evidence(row), now=datetime.now(timezone.utc))
 
-    def evidence(self, row, *, final=False):
-        index = 1 if final else row['step_index']  # final evidence re-reads the outbound move's proof
-        mission = row['outbound_mission_id'] if final else row['mission_id']
-        return fleet_move_evidence(self.client, self.moves[index], f'{KEY}:{index}', mission_id=mission,
+    def evidence(self, row):
+        index = row['step_index']
+        return fleet_move_evidence(self.client, self.moves[index], f'{KEY}:{index}', mission_id=row['mission_id'],
                                    revision=1, arms=self.config['arms'], placement_source=SOURCES[0],
                                    retreat_source=SOURCES[1])
+
+    def final_evidence(self, row):
+        # D-930: fresh facts about the outbound attempt measured after the last move.
+        mission = row['outbound_mission_id']
+        evidence = _wait(lambda: fleet_recheck_evidence(self.client, self.moves[1], f'{KEY}:1', KEY + ':final',
+            mission_id=mission, revision=1, arms=self.config['arms'], placement_source=SOURCES[0],
+            retreat_source=SOURCES[1]), lambda value: value is not None, 'recheck of ' + mission)
+        self.notes.append('recheck CONFIRMED for outbound ' + mission)
+        return evidence
 
     def trip(self):
         intent = TripIntent(KEY + ':trip', tuple(self.config['trip_candidates']), self.config['trip_destination'])
@@ -93,7 +101,8 @@ class FullFlow:
 
     def restore_and_retreat(self):
         self.arm_move()
-        self.business.finish(KEY, self.evidence(self.business.read(KEY), final=True), now=datetime.now(timezone.utc))
+        self.business.finish(KEY, self.final_evidence(self.business.read(KEY)), now=datetime.now(timezone.utc))
+        self.notes.append('business ' + self.business.read(KEY)['state'])
 
 
 class FullFlowHttpTests(unittest.TestCase):

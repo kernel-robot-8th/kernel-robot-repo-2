@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from harbor.physical_evidence import fleet_move_evidence
+from harbor.physical_evidence import fleet_move_evidence, fleet_recheck_evidence
 from harbor.rosy_http import RosyClient
 from harbor.workflow import BusinessLedger
 from test_arm_transfer_execution import Fleet, binding
@@ -23,10 +23,10 @@ def owner(instance, sequence, **changes):
         'positions_rad': [0.1, -0.2]}, **changes}
 
 
-def document(**owner_changes):
+def document(phase='POST_ACTION', first=3, attempt='attempt-1', **owner_changes):
     samples = [{'sequence': s, 'object_observed_at_ns': NS + s,
-                'owners': [owner('installed', s, **owner_changes), owner('partner', s)]} for s in (3, 4)]
-    return json.dumps({'context': {'phase': 'POST_ACTION', 'action_id': 'action-1', 'attempt_id': 'attempt-1'},
+                'owners': [owner('installed', s, **owner_changes), owner('partner', s)]} for s in (first, first + 1)]
+    return json.dumps({'context': {'phase': phase, 'action_id': 'action-1', 'attempt_id': attempt},
                        'samples': samples}, sort_keys=True)
 
 
@@ -37,6 +37,14 @@ class ProofFleet(Fleet):
         self.receipt_changes = {'evidence_digest': sha256(self.proof.encode()).hexdigest()}
 
     def __call__(self, method, path, body):
+        if path.endswith('/rechecks'):
+            self.calls.append((method, path, body))
+            proof = getattr(self, 'recheck_proof', None)
+            return {'recheck': dict(mission_id='physical-1', recheck_key=body['recheck_key'], action_id='action-1',
+                attempt_id=getattr(self, 'recheck_attempt', 'attempt-1'), requested_at_ns=NS,
+                status='WAITING_OBSERVATIONS' if proof is None else 'CONFIRMED', evidence_document=proof,
+                evidence_digest=None if proof is None else sha256(proof.encode()).hexdigest(),
+                validated_at_ns=None if proof is None else NS + 9, zone_ids=self.zones)}
         if path.endswith('/physical-evidence'):
             receipt = super().__call__('GET', path.replace('physical-evidence', 'physical-receipt'), None)['receipt']
             return {'receipt': receipt, 'evidence_document': self.proof, 'released_zone_ids': self.zones}
@@ -87,6 +95,35 @@ class PhysicalEvidenceTests(unittest.TestCase):
                 self.evidence(client, arms={'installed': 'A'})
             with self.assertRaises(ValueError):
                 self.evidence(client, arms={'installed': 'A', 'partner': 'A'})
+
+    def recheck(self, client):
+        return fleet_recheck_evidence(client, binding(), 'outbound:0', 'final-1', mission_id='physical-1', revision=3,
+            arms=ARMS, placement_source='installed-camera', retreat_source='fleet-retreat')
+
+    def test_fresh_recheck_closes_final_completion_that_the_step_proof_cannot(self):
+        fleet = ProofFleet()
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger, client = self.confirmed(tmp, fleet)
+            ledger.confirm('outbound', self.evidence(client), now=NOW + timedelta(seconds=1))
+            with self.assertRaises(ValueError):  # the step's own proof was already consumed
+                ledger.finish('outbound', self.evidence(client), now=NOW + timedelta(seconds=1))
+            self.assertIsNone(self.recheck(client))
+            fleet.recheck_proof = document('RECHECK', first=7)
+            final = self.recheck(client)
+            self.assertEqual(final.retreat.arms[0].pose_revision, 8)
+            ledger.finish('outbound', final, now=NOW + timedelta(seconds=1))
+            self.assertEqual(ledger.read('outbound')['state'], 'COMPLETED')
+            self.assertEqual(sum(path.endswith('/rechecks') for _, path, _ in fleet.calls), 2)
+
+    def test_recheck_of_another_attempt_or_phase_is_refused(self):
+        for changes in ({'recheck_proof': document('POST_ACTION', first=7)}, {'recheck_attempt': 'attempt-0'},
+                        {'recheck_proof': document('RECHECK', first=7, attempt='attempt-0')}):
+            with self.subTest(changes), tempfile.TemporaryDirectory() as tmp:
+                fleet = ProofFleet()
+                _, client = self.confirmed(tmp, fleet)
+                vars(fleet).update(changes)
+                with self.assertRaises(ValueError):
+                    self.recheck(client)
 
     def test_unconfirmed_job_reads_no_proof(self):
         fleet = ProofFleet()
