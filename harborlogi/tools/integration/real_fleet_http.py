@@ -109,7 +109,8 @@ def main(argv=None):
                     'report_path': str(args.report.resolve()) if args.report else None,
                     'moves': [{**arm_ref, 'cargo_id': c, 'source': s, 'destination': d} for c, s, d in FULL_FLOW_MOVES],
                     'outbound_id': 'outbound-1', 'outbound_stand': 'stand',
-                    'trip_candidates': [ROBOT], 'trip_destination': 'inbound'}
+                    'trip_candidates': [ROBOT], 'trip_destination': 'inbound',
+                    'arms': {harness.INSTANCE: 'A', 'arm-2': 'B'}}
             if args.web_arm_only:
                 config['schema'] = 'harbor.web-arm-http-test/1'
                 config['request_key_path'] = str(request_key_path)

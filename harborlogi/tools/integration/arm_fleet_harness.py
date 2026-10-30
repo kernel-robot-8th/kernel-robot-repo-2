@@ -18,6 +18,7 @@ import httpx
 from tools.integration.fleet_harness import enable, _free_port
 
 WORKCELL, INSTANCE, ROBOT = "w-1", "arm-1", "unused"
+JOINTS = ["joint1", "joint2", "joint3", "joint4"]  # synthetic measured joints so v1.330 physical evidence is readable
 
 
 class SyntheticOwner:
@@ -198,6 +199,8 @@ class ArmFleet:
         now = time.time_ns()
         owners = [{**owner, "links_observed_at_ns": now, "gripper_observed_at_ns": now,
             "gripper_state": "OPEN", "held_state": "NONE", "held_object_ref": None,
+            "joints": {"sample_id": f"{owner['instance_id']}-joints-{sequence}", "sequence": sequence,
+                "observed_at_ns": now, "joint_names": JOINTS, "positions_rad": [0.0] * len(JOINTS)},
             "links": {link: {"bounds": {"min_m": [1, 1, 1], "max_m": [1.1, 1.1, 1.1]},
                 "linear_velocity_m_s": [0, 0, 0], "angular_velocity_rad_s": [0, 0, 0]} for link in self.links}}
             for owner in context["owners"]]

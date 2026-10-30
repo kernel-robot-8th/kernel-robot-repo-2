@@ -14,12 +14,14 @@ import unittest
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
+from harbor.physical_evidence import fleet_move_evidence
 from harbor.process import ArmTransferBinding
 from harbor.rosy_http import RosyClient
 from harbor.transport import TripIntent, TransportLedger
 from harbor.workflow import BusinessLedger
 
 KEY = 'harbor-full-flow'  # the harness approves f'{KEY}:{move index}'
+SOURCES = ('fleet-physical-object', 'fleet-physical-retreat')
 
 
 def _wait(read, done, what, timeout=30):
@@ -36,7 +38,7 @@ class FullFlow:
         self.config, self.notes = config, []
         self.client = RosyClient(config['origin'], config['operator'])
         self.business = BusinessLedger(Path(folder) / 'business.sqlite3',
-            placement_sources=('simulation-camera',), retreat_sources=('simulation-platform',))
+            placement_sources=SOURCES[:1], retreat_sources=SOURCES[1:])
         self.transport = TransportLedger(Path(folder) / 'transport.sqlite3')
         self.moves = tuple(ArmTransferBinding(**move) for move in config['moves'])
 
@@ -72,9 +74,12 @@ class FullFlow:
         self.notes.append(f'Fleet GOAL_CONFIRMED {mission} attempt {row["attempt_id"]}')
         self.business.confirm(KEY, self.evidence(row), now=datetime.now(timezone.utc))
 
-    def evidence(self, row):
-        raise NotImplementedError('no business evidence adapter from Fleet physical evidence (v1.330) to '
-                                  'Placement/RetreatEvidence yet (stream A P2)')
+    def evidence(self, row, *, final=False):
+        index = 1 if final else row['step_index']  # final evidence re-reads the outbound move's proof
+        mission = row['outbound_mission_id'] if final else row['mission_id']
+        return fleet_move_evidence(self.client, self.moves[index], f'{KEY}:{index}', mission_id=mission,
+                                   revision=1, arms=self.config['arms'], placement_source=SOURCES[0],
+                                   retreat_source=SOURCES[1])
 
     def trip(self):
         intent = TripIntent(KEY + ':trip', tuple(self.config['trip_candidates']), self.config['trip_destination'])
@@ -88,7 +93,7 @@ class FullFlow:
 
     def restore_and_retreat(self):
         self.arm_move()
-        self.business.finish(KEY, self.evidence(self.business.read(KEY)), now=datetime.now(timezone.utc))
+        self.business.finish(KEY, self.evidence(self.business.read(KEY), final=True), now=datetime.now(timezone.utc))
 
 
 class FullFlowHttpTests(unittest.TestCase):
