@@ -240,6 +240,9 @@ class ArmFleet:
                     context = response.json()["context"]
                     if context is None or (context["mission_id"], context["phase"]) in seen:
                         continue
+                    if context["phase"] == "PRE_DISPATCH":
+                        # shortcut: each move's object starts at the one installed source; per-move bindings come with S4.
+                        self.scene["position_m"] = [0, 0, .2]
                     sequence += 1
                     first = self._sample(context, sequence)
                     if self.stopped.wait(.15):
