@@ -137,12 +137,15 @@ class ArmFleet:
         self._workers()
 
     def _workers(self):
+        script = self.root / "tools/sim/transfer_observer.py"
+        if not script.is_file():
+            raise FileNotFoundError("platform lacks tools/sim/transfer_observer.py (D-927 decision 3)")
         state, bases = self.workdir / "sim-state.json", self.workdir / "sim-bases.json"
         bases.write_text(json.dumps(BASES), encoding="utf-8")
         self._write_state(state, 0)
         self._thread(lambda: self._publish_state(state))
         self.observer_log = (self.workdir / "observer.log").open("w", encoding="utf-8")
-        self.observer = subprocess.Popen([sys.executable, str(self.root / "tools/sim/transfer_observer.py"),
+        self.observer = subprocess.Popen([sys.executable, str(script),
             "--origin", self.url, "--assets", str(self.root / ASSETS), "--bases", str(bases), "--state", str(state),
             "--poll-s", "0.05", "run"], env={**os.environ, "ROSY_TRANSFER_OBSERVER_TOKEN": self.observer_token},
             stdout=self.observer_log, stderr=subprocess.STDOUT)
