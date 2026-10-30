@@ -54,3 +54,16 @@ owner·관측·승인은 하네스 합성이다. 플랫폼 시뮬 owner(MuJoCo),
 - (나) Harbor 최종 완료가 마지막 이동의 퇴피 근거와 반출 이동의 배치 근거를 함께 받도록 장부 규칙을 바꾼다(Harbor ADR 0005 결정 6 갱신).
 
 재회귀(Harbor `cf0bd4e`, 같은 플랫폼 핀, 같은 시험 PC): `--full-flow`은 위와 같이 ⑤에서 멈추고, 기본 3·`--transport-only` 1·`--arm-only` 1·`--web-arm-only` 1실행 모두 통과, 기본 unittest 183실행 통과(skip 1). 관측 표본에 측정 관절을 넣은 하네스 변경이 기존 모드를 깨지 않았다.
+
+## 3차 실행: 재관측 계약으로 ⑤ 해결 (같은 날)
+
+위 (가)를 택했다. 플랫폼 D-930(API v1.334, 브랜치 `feat/arm-transfer-recheck` `800aec0d82`, 로컬 main 착지 대기)이 확인된 시도의 재관측을 추가했고, Harbor `fleet_recheck_evidence`가 반출 시도의 재관측을 요청·조회해 새 ID의 배치·퇴피 근거로 최종 완료를 닫는다. 같은 근거를 다시 쓰지 않는다.
+
+| 실행 (Harbor `67ed6e9`, 플랫폼 `800aec0d82`) | 결과 |
+|---|---|
+| `--full-flow` | **0·①·②·③·④·⑤ 모두 통과**, 업무 장부 `COMPLETED` |
+| 기본 3·`--transport-only` 1·`--arm-only` 1·`--web-arm-only` 1 | 모두 통과 |
+| 기본 unittest | 185실행 통과(시험 PC skip 1, 노트북 skip 2) |
+
+owner·관측·승인은 여전히 하네스 합성이고, 이동별 대응(S4)과 ④의 업무 호출은 shortcut이다. 플랫폼 MuJoCo owner·`transfer_observer.py`·매일 밤 실행으로의 교체가 다음 단계다.
+
