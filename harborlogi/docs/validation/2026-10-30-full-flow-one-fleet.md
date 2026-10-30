@@ -38,3 +38,17 @@
 ## 이 기록이 세지 않는 것
 
 owner·관측·승인은 하네스 합성이다. 플랫폼 시뮬 owner(MuJoCo), `tools/sim/transfer_observer.py`, 매일 밤 실행은 아직 연결하지 않았다. 물리 시뮬·실물·현장 수용의 근거가 아니다.
+
+## 2차 실행: 업무 근거 연결 뒤 (같은 날)
+
+설계 31 P2의 Fleet 쪽 연결로 `harbor/physical_evidence.py`를 추가했다. 확인된 ARM 시도의 v1.330 근거를 받아, 바이트가 검증된 영수증 digest·시도와 맞을 때만 최신 물체 표본을 `PlacementEvidence`로, 측정 관절·해제 zone·플랫폼 clearance 판정을 `RetreatEvidence`로 바꾼다. 합성 관측은 측정 관절을 함께 보내고, 합성 장면은 이동마다 물체를 설치된 source에 둔다(S4 전의 shortcut).
+
+| 실행 | 결과 |
+|---|---|
+| `--full-flow` (Harbor `24ec71b`, 플랫폼 같은 핀) | 0·①·②·③·④ 통과, **⑤ 실패**: 복귀 이동은 Fleet `GOAL_CONFIRMED`, 최종 완료에서 `Observation identity was already consumed` |
+| 기본 unittest (노트북) | 183실행 통과, skip 2 |
+
+⑤의 원인은 계약 공백이다. `BusinessLedger.finish`는 반출 이동 attempt에 묶인 새 관측(반출 화물이 반출대에 있고 관련 팔 모두 퇴피)을 요구한다. Fleet 근거는 attempt마다 한 번 저장되는 불변 기록이라 ④에서 쓴 근거밖에 없고, 같은 근거 ID는 장부가 거절한다. 하네스에서 우회하지 않았다. 결정이 필요하다:
+
+- (가) Fleet에 마지막 이동 뒤 재관측(반출 화물 위치·전체 팔 퇴피)을 받는 계약을 추가한다(플랫폼 D-927 결정 8 절차).
+- (나) Harbor 최종 완료가 마지막 이동의 퇴피 근거와 반출 이동의 배치 근거를 함께 받도록 장부 규칙을 바꾼다(Harbor ADR 0005 결정 6 갱신).
