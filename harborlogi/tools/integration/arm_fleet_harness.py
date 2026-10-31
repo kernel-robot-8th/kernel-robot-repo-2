@@ -235,6 +235,9 @@ class ArmFleet:
                             (PhysicalTransferExecution, "validate_send"),
                             (PhysicalTransferExecution, "record_receipt")):
             setattr(owner, name, self._traced(getattr(owner, name), name))  # diagnostic: Fleet keeps only the reason
+        # shortcut: Fleet issues ARM grants for 15 s (D-778) and the owner re-checks the grant before every phase, but one
+        # MuJoCo transfer takes ~30 s; the sim uses the allowed maximum until the platform decides the ARM grant window.
+        PhysicalTransferExecution.__init__.__kwdefaults__["grant_ttl_s"] = 60.0
         written = json.loads((self.sim_out / "installation.json").read_text(encoding="utf-8"))
         installed = tool.fleet_installation(written, self.sockets)
         self.identity = installed.policy.primary
