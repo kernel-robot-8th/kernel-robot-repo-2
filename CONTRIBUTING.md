@@ -45,7 +45,7 @@ git remote add upstream https://github.com/kernel-robot-8th/kernel-robot-repo-2.
    ```
 
 4. 브랜치를 `origin`(팀 fork)에 push하고 원본 저장소 `main`으로 PR을 연다(`gh pr create -R kernel-robot-8th/kernel-robot-repo-2 --head robotics-team-1213:<브랜치>`). PR에는 무엇을·왜 바꿨는지와 돌린 시험 결과를 적는다. 같은 브랜치를 다른 팀원도 이어서 고칠 수 있다.
-5. CI(Python 3.10·3.12 unittest)가 통과하고 팀원 한 명 이상이 확인한 뒤 병합한다. 바꾼 사람이 아닌 사람이 확인하는 것을 기본으로 한다.
+5. CI(Python 3.10·3.12 unittest)가 통과하면 병합한다. 지금은 한 팀만 작업하므로 팀원 확인을 요구하지 않는다(2026-10-31 결정). 작업하는 사람이 늘면 "바꾼 사람이 아닌 팀원 한 명 이상이 확인한 뒤 병합"으로 되돌린다.
 6. 병합한 뒤 팀 fork의 `main`을 원본과 맞추고(`gh repo sync robotics-team-1213/harborlogi`) 작업 브랜치를 지운다. 팀 fork의 `main`에는 직접 커밋하지 않는다.
 
 Jira 이슈가 있으면 키를 브랜치(`feat/kan-63-retrieval-rank`), 커밋 끝(`(KAN-63)`), PR 제목 맨 앞(`[KAN-63]`)에 넣는다. 팀 fork는 GitHub for Jira 앱에 연결해서, fork에 push한 브랜치·커밋이 Jira 이슈 화면에 보이게 한다. 원본 저장소는 앱에 연결돼 있지 않아 원본에 연 PR은 Jira에 보이지 않으므로, PR 링크를 Jira 이슈에 직접 남긴다. 커밋 메시지로 Jira 상태를 바꾸는 스마트 커밋은 쓰지 않는다(공개 저장소라 커밋 이메일을 Jira 계정에 맞추지 않는다).
