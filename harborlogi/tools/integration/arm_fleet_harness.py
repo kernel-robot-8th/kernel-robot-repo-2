@@ -323,6 +323,10 @@ class ArmFleet:
                 for key in self.request_keys:
                     print("== Fleet job", key, client.get("/api/fleet/arm-transfers/jobs",
                           params={"request_key": key}).text[:3000], flush=True)
+            import sqlite3
+            with sqlite3.connect(self.workdir / "fleet.sqlite3") as db:
+                for row in db.execute("SELECT * FROM fleet_cell_events ORDER BY rowid DESC LIMIT 6"):
+                    print("== Fleet event", str(row)[:1500], flush=True)
         if self.server is not None:
             self.server.should_exit = True
         for server in self.servers:
