@@ -4,7 +4,7 @@ HarborLogi는 두 저장소가 함께 돈다. 이 문서는 팀원이 무엇을 
 
 | 저장소 | 무엇 | 바꾸는 방법 |
 |---|---|---|
-| 이 저장소 `harborlogi/` | Harbor 앱 — 회수 순위, 방해 화물 처리 순서, 업무 장부, 완료 판정 | 이 문서의 절차 (fork → PR) |
+| 이 저장소 `harborlogi/` | Harbor 앱 — 회수 순위, 방해 화물 처리 순서, 업무 장부, 완료 판정 | 팀 저장소 PR → 팀 main 병합 → 과정 저장소 자동 반영 |
 | [rosy-platform](https://github.com/robotics-team-1213/rosy-platform) | ROSY — 작업 접수·자원 배정, 관측, 로봇 실행·정지, 장치 드라이버 | 그 저장소의 `AGENTS.md`·ADR 절차 |
 
 Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API만 쓴다. 그래서 두 저장소의 변경은 서로의 코드를 직접 고치지 않고, **공개 API 계약**으로만 만난다.
@@ -25,7 +25,7 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API만 쓴다. 그래서
 
 - Python 3.10 이상. Harbor만 다룰 때는 이것으로 충분하다.
 - ROSY까지 띄울 때는 Ubuntu 24.04 + ROS 2 Jazzy와 rosy-platform의 [개발 가이드](https://github.com/robotics-team-1213/rosy-platform/blob/main/docs/reference/developer-guide.md)를 따른다.
-- 작업은 팀 조직의 fork [robotics-team-1213/harborlogi](https://github.com/robotics-team-1213/harborlogi)에서 한다. 팀원 모두 이 fork에 쓰기 권한이 있으므로 개인 fork를 만들지 않는다. 이 fork를 `origin`, 원본 저장소 kernel-robot-8th/kernel-robot-repo-2를 `upstream`으로 둔다.
+- Harbor의 정본은 팀 저장소 [robotics-team-1213/harborlogi](https://github.com/robotics-team-1213/harborlogi)의 `main`이다. 팀원 모두 쓰기 권한이 있으므로 개인 fork를 만들지 않는다. 팀 저장소를 `origin`, 과정 제출 저장소 kernel-robot-8th/kernel-robot-repo-2를 `upstream`으로 둔다. GitHub 화면에는 팀 저장소가 과정 저장소의 fork로 나오지만, 이는 처음 만든 순서일 뿐 정본을 정하지 않는다.
 
 ```bash
 git clone https://github.com/robotics-team-1213/harborlogi.git
@@ -35,7 +35,7 @@ git remote add upstream https://github.com/kernel-robot-8th/kernel-robot-repo-2.
 
 ## 3. Harbor를 고치는 흐름
 
-1. 최신 `upstream/main`에서 브랜치를 만든다(`git fetch upstream` 후 `git switch -c <브랜치> upstream/main`). 이름은 `<type>/<주제>`이고 type은 `feat`·`fix`·`refactor`·`docs` 중 하나다. Jira 이슈가 있으면 `feat/kan-12-retrieval-hold`처럼 번호를 넣는다.
+1. 최신 `origin/main`에서 브랜치를 만든다(`git fetch origin` 후 `git switch -c <브랜치> origin/main`). 이름은 `<type>/<주제>`이고 type은 `feat`·`fix`·`refactor`·`docs` 중 하나다. Jira 이슈가 있으면 `feat/kan-12-retrieval-hold`처럼 번호를 넣는다.
 2. `harborlogi/` 안에서 고치고, 바꾼 동작에는 시험을 함께 넣는다.
 3. `harborlogi/`에서 시험을 돌린다. 실패가 있으면 PR을 열지 않는다.
 
@@ -44,11 +44,13 @@ git remote add upstream https://github.com/kernel-robot-8th/kernel-robot-repo-2.
    python -m unittest discover -s tests -v
    ```
 
-4. 브랜치를 `origin`(팀 fork)에 push하고 원본 저장소 `main`으로 PR을 연다(`gh pr create -R kernel-robot-8th/kernel-robot-repo-2 --head robotics-team-1213:<브랜치>`). PR에는 무엇을·왜 바꿨는지와 돌린 시험 결과를 적는다. 같은 브랜치를 다른 팀원도 이어서 고칠 수 있다.
+4. 브랜치를 `origin`에 push하고 팀 저장소 `main`으로 PR을 연다(`gh pr create -R robotics-team-1213/harborlogi --base main --head <브랜치>`). PR에는 무엇을·왜 바꿨는지와 돌린 시험 결과를 적는다. 같은 브랜치를 다른 팀원도 이어서 고칠 수 있다.
 5. CI(Python 3.10·3.12 unittest)가 통과하면 병합한다. 지금은 한 팀만 작업하므로 팀원 확인을 요구하지 않는다(2026-10-31 결정). 작업하는 사람이 늘면 "바꾼 사람이 아닌 팀원 한 명 이상이 확인한 뒤 병합"으로 되돌린다.
-6. 병합한 뒤 팀 fork의 `main`을 원본과 맞추고(`gh repo sync robotics-team-1213/harborlogi`) 작업 브랜치를 지운다. 팀 fork의 `main`에는 직접 커밋하지 않는다.
+6. 팀 `main`에 병합되면 `mirror-to-course` workflow가 과정 저장소 `main`을 같은 커밋으로 맞춘다(force 없음). 과정 저장소에는 PR을 열거나 직접 커밋하지 않는다. 그쪽에만 커밋이 생기면 반영이 실패하니, 그 커밋을 팀 저장소 PR로 가져온 뒤 workflow를 다시 돌린다. 병합한 작업 브랜치는 지운다. 팀 `main`에는 직접 커밋하지 않는다.
 
-Jira 이슈가 있으면 키를 브랜치(`feat/kan-63-retrieval-rank`), 커밋 끝(`(KAN-63)`), PR 제목 맨 앞(`[KAN-63]`)에 넣는다. 팀 fork는 GitHub for Jira 앱에 연결해서, fork에 push한 브랜치·커밋이 Jira 이슈 화면에 보이게 한다. 원본 저장소는 앱에 연결돼 있지 않아 원본에 연 PR은 Jira에 보이지 않으므로, PR 링크를 Jira 이슈에 직접 남긴다. 커밋 메시지로 Jira 상태를 바꾸는 스마트 커밋은 쓰지 않는다(공개 저장소라 커밋 이메일을 Jira 계정에 맞추지 않는다).
+   반영에는 팀 저장소 secret `COURSE_REPO_TOKEN`이 필요하다. 과정 저장소에 push 권한이 있는 팀원의 classic PAT(`repo`·`workflow` 범위)를 넣는다. workflow 파일도 함께 반영되므로 `workflow` 범위가 빠지면 push가 거절된다.
+
+Jira 이슈가 있으면 키를 브랜치(`feat/kan-63-retrieval-rank`), 커밋 끝(`(KAN-63)`), PR 제목 맨 앞(`[KAN-63]`)에 넣는다. 팀 저장소는 GitHub for Jira 앱에 연결해서, 브랜치·커밋·PR이 Jira 이슈 화면에 보이게 한다. 커밋 메시지로 Jira 상태를 바꾸는 스마트 커밋은 쓰지 않는다(공개 저장소라 커밋 이메일을 Jira 계정에 맞추지 않는다).
 
 GitHub Actions의 action은 커밋 SHA로 고정해서 쓴다. 이 과정 조직의 Actions 정책을 팀원은 볼 수 없어서, 버전 태그 대신 SHA를 쓰는 쪽이 안전하다.
 
