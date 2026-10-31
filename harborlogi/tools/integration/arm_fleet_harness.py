@@ -318,6 +318,11 @@ class ArmFleet:
 
     def stop(self):
         self.stopped.set()
+        if self.sim and self.server is not None and self.observed != {"PRE_DISPATCH", "POST_ACTION"}:
+            with self.client() as client:  # Fleet's own account of the attempt, before it shuts down
+                for key in self.request_keys:
+                    print("== Fleet job", key, client.get("/api/fleet/arm-transfers/jobs",
+                          params={"request_key": key}).text[:3000], flush=True)
         if self.server is not None:
             self.server.should_exit = True
         for server in self.servers:
