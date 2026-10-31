@@ -239,7 +239,9 @@ class ArmFleet:
         installed = tool.fleet_installation(written, self.sockets)
         self.identity = installed.policy.primary
         self.tasks = FleetTaskStore(db)
+        # The real owner plans inside SubmitAction; 250 ms (the default) lost replies on a busy test PC (G2 uses 2 s).
         return dict(omx_socket_root=self.sockets, arm_transfer_installation=installed,
+            omx_action_transport=UnixLocalActionTransport(self.sockets, timeout_s=2),
             arm_transfer_observer=PhysicalTransferObserver(producer_id=installed.policy.producer_id,
                 token=self.observer_token, valid_until=datetime.now(timezone.utc) + timedelta(minutes=30)))
 
