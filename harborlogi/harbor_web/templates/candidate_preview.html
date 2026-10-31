@@ -1,0 +1,19 @@
+{% extends 'base.html' %}{% block title %}후보 {{ rank }} · 계획 #{{ plan.pk }}{% endblock %}{% block content %}
+<nav class="breadcrumbs" aria-label="현재 위치"><a href="/outbound/">반출 관제</a><span>/</span><a href="/plans/{{ plan.pk }}/">계획 #{{ plan.pk }}</a><span>/</span><span>후보 {{ rank }}</span></nav>
+<div class="page-head"><div><h1>저장된 후보 {{ rank }} 배치 비교</h1><p>{{ plan.order.cargo.code }} · 계획 #{{ plan.pk }} · 기준 지시 v{{ plan.order_version }}</p></div><a href="/plans/{{ plan.pk }}/">원래 계획으로 돌아가기</a></div>
+<div class="notice info"><strong>비교 전용{% if is_recommended %} · 저장된 추천안{% endif %}</strong><p>계획 생성 당시 저장한 후보의 예상 배치입니다. 후보 전환·재생·가상 편집은 원래 계획과 실행 지시를 변경하지 않습니다.</p></div>
+{% if plan_changes %}<div class="notice"><strong>원본의 현재성 확인이 필요합니다</strong><ul>{% for change in plan_changes %}<li>{{ change.message }}</li>{% endfor %}</ul></div>{% endif %}
+<nav class="tabs" aria-label="비교할 후보">{% for number in candidate_ranks %}<a href="/plans/{{ plan.pk }}/candidates/{{ number }}/"{% if number == rank %} aria-current="page"{% endif %}>후보 {{ number }}{% if number == 1 %} · 추천{% endif %}{% if number == rank %} · 보는 중{% endif %}</a>{% endfor %}</nav>
+<p class="helptext">저장된 비교 상태: {{ optimization_quality }}.{% if not search_complete %} 탐색 한도에 도달한 결과이며 최적성은 확정하지 않았습니다.{% endif %}</p>
+<details><summary>후보 평가 점수와 계획 원본 보기</summary>
+<dl class="facts"><div><dt>고정 관측</dt><dd>#{{ plan.observation_id }} · {{ plan.observation.source_id }} / {{ plan.observation.source_revision }}</dd></div><div><dt>원본 관측 시각</dt><dd>{{ plan.observation.observed_at|date:'Y-m-d H:i:s' }}</dd></div><div><dt>설치 기준</dt><dd>{{ plan.condition.name }} · #{{ plan.condition_id }}</dd></div></dl>
+<div class="table-wrap"><table><caption>저장된 추천안과 후보 {{ rank }}의 비교 점수</caption><thead><tr><th scope="col">평가 항목</th><th scope="col">저장된 추천안</th><th scope="col">이 후보</th></tr></thead><tbody>{% for row in score_rows %}<tr><th scope="row">{{ row.label }}</th><td>{{ row.recommended }} {{ row.unit }}</td><td>{{ row.value }} {{ row.unit }}</td></tr>{% endfor %}</tbody></table></div>
+<p class="helptext">구역 변경 → 행·열 변경 → 같은 구역 주소 차이 → 복귀 층 합계 순으로 비교하고, 동점이면 고정된 주소 순서로 추천합니다. 실제 이동 시간·거리·안정성 점수가 아닙니다.</p>
+</details>
+<section class="inventory-yard" data-yard-preview aria-label="선택한 후보의 예상 배치"><h2>후보 {{ rank }}의 배치와 이동</h2>
+<p class="helptext">{% if plan.observation.provenance == 'SYNTHETIC' %}합성 시험 자료{% else %}수동 등록 자료 · 출처 인증 미확인{% endif %} · 원래 관측에서 출발하는 논리 배치입니다.</p>
+<div class="preview-controls" aria-label="후보 예상 단계 선택">{% for stage in yard_stages %}<button type="button" class="quiet" data-yard-stage="{{ stage.index }}" aria-controls="{{ stage.panel_id }}" aria-pressed="{% if forloop.first %}true{% else %}false{% endif %}" hidden>{% if forloop.first %}관측{% else %}{{ stage.index }} · {{ stage.phase }}{% endif %}</button>{% endfor %}</div>
+<p class="preview-status helptext" data-yard-status role="status">단계를 선택하면 이 후보의 예상 위치를 표시합니다.</p>
+{% include 'yard_3d.html' %}<div data-yard-flat>{% for stage in yard_stages %}{% include 'yard_stage.html' %}{% endfor %}</div></section>
+<h2>저장된 이동 순서</h2><ol>{% for move in display_moves %}<li>{{ move.cargo_id }} · {{ move.phase_label }} · {{ move.source_placement.area_id }} {{ move.source_placement.row }}행 {{ move.source_placement.column }}열 {{ move.source_placement.level }}층 → {{ move.destination_placement.area_id }} {{ move.destination_placement.row }}행 {{ move.destination_placement.column }}열 {{ move.destination_placement.level }}층</li>{% endfor %}</ol>
+{% endblock %}

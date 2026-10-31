@@ -1,0 +1,10 @@
+<section class="pipeline" aria-labelledby="pipeline-heading">
+<div class="section-head"><h2 id="pipeline-heading">업무에서 실행까지</h2><a href="/workflow/">역할과 진행 방법</a></div>
+<ol aria-label="Harbor와 ROSY의 업무 진행 단계">
+{% for stage in pipeline.stages %}<li class="pipeline-step {{ stage.status }}"{% if stage.status == 'current' %} aria-current="step"{% endif %}>
+<span class="eyebrow">{{ stage.owner }}</span><strong>{{ stage.label }}</strong>
+<span class="badge">{% if stage.status == 'done' %}근거 있음{% elif stage.status == 'current' %}현재 확인{% else %}대기{% endif %}</span>
+<p>{{ stage.note }}</p>{% if stage.href and stage.action != 'fleet' %}<a href="{{ stage.href }}">관련 원본 보기</a>{% endif %}
+</li>{% endfor %}</ol>
+{% if pipeline.read_at %}<p class="muted">마지막 실행 원본 대조: <time>{{ pipeline.read_at|date:'Y-m-d H:i:s' }}</time> · 페이지를 여는 동안 자동 조회하지 않습니다.</p>{% endif %}
+</section>

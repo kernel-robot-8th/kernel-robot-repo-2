@@ -11,3 +11,13 @@ license = { text = "Apache-2.0" }
 
 [tool.setuptools.packages.find]
 include = ["harbor*"]
+
+[tool.setuptools.package-data]
+harbor_web = ["templates/**/*.html", "static/**/*"]
+harbor = ["web_assets/*.html", "web_assets/*.css", "web_assets/*.js"]
+
+[tool.setuptools.data-files]
+"share/harborlogi/brand" = ["assets/brand/harbor-app-icon-20261023.png", "assets/brand/harborlogi-github-banner-20261023.png"]
+
+[project.optional-dependencies]
+web = ["Django>=5.2.18,<5.3", "waitress>=3.0.2,<4", "django-axes>=8.3.1,<9", "whitenoise>=6.12,<7"]

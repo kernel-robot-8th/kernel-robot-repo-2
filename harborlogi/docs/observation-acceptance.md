@@ -1,5 +1,7 @@
 # 물리 관측 연동의 수용 조건
 
+2026-10-25 재대조: 중립 ARM 시뮬레이션 API에는 독립 observer의 실행 전후 관측과 `physical-receipt`가 이미 구현돼 있다. 아래 구버전 비교표는 조사 이력이며, 현행 호출과 Fleet 승인 UI는 [파이프라인 설계](design/18-harbor-rosy-pipeline.md)를 따른다. 미완료 범위는 운영 관측·Harbor 업무용 배치/복귀/관련 팔 퇴피 어댑터·다칸 설치 대응·실물 수용이다. 물리 receipt의 존재만으로 이 범위를 충족하지 않는다.
+
 Harbor는 실제 Fleet HTTP를 소비하지만, 물리 관측을 `MoveEvidence`(내려놓기 `PlacementEvidence` + 퇴피 `RetreatEvidence`, ADR 0005 결정 6)로 변환하는 운영 어댑터는 아직 없다. 이 문서는 그 어댑터의 입력·소유·수용 조건이며, 관측 wire schema나 장치 활성화 계약을 새로 정의하지 않는다.
 
 ## 현재 생산자와 소비자의 차이
@@ -8,10 +10,10 @@ Harbor는 실제 Fleet HTTP를 소비하지만, 물리 관측을 `MoveEvidence`(
 
 | 기존 근거 | 확인할 수 있는 것 | Harbor에서 대신 주장할 수 없는 것 |
 |---|---|---|
-| `core_common.observation.ObservationSnapshot`, World `api/observation.py` | 출처·원본 시각·좌표계·보정 revision·근거 참조 | 특정 화물의 도착, 팔 퇴피, 하역 완료. VALID는 물리 사실의 참 판정이 아니다. |
+| `core_common.observation.ObservationSnapshot`, World `api/observation.py` | 출처·원본 시각·좌표계·보정 revision·근거 참조 | 특정 화물의 도착, 팔 퇴피, 내려놓기 완료. VALID는 물리 사실의 참 판정이 아니다. |
 | World `state/projections/arm_state.py:ArmState` | 관측된 관절·그리퍼 값과 rig/calibration revision | 물체 상태. 현재 `object_state`는 `unobserved`만 허용하며 그리퍼 열림만으로 퇴피를 만들 수 없다. 관절값은 `ArmRetreat`의 측정 자세 입력이다. |
-| `core_common.protocol.cell_goal_evidence.CellGoalEvidence` | `sim_model_pose` 평가와 작업·시도·공정 digest·물체 pose | 운영 카메라 관측·실물 하역. simulation 사실을 실물 증거로 변환하지 않는다. |
-| `rosy.execution.site.goal_evidence.GoalEvidence`와 Fleet evidence service | 제한된 object/destination predicate, producer·observation·action/attempt 결속과 그리퍼 OPEN | Harbor의 팔 전체 퇴피와 최종 하역. Fleet `GOAL_CONFIRMED`만으로 업무 완료를 만들지 않는다. |
+| `core_common.protocol.cell_goal_evidence.CellGoalEvidence` | `sim_model_pose` 평가와 작업·시도·공정 digest·물체 pose | 운영 카메라 관측·실물 내려놓기. simulation 사실을 실물 증거로 변환하지 않는다. |
+| `rosy.execution.site.goal_evidence.GoalEvidence`와 Fleet evidence service | 제한된 object/destination predicate, producer·observation·action/attempt 결속과 그리퍼 OPEN | Harbor의 팔 전체 퇴피와 최종 내려놓기. Fleet `GOAL_CONFIRMED`만으로 업무 완료를 만들지 않는다. |
 | Harbor `harbor/workflow.py:BusinessLedger.refresh/_validate/confirm/finish` | 최신 Fleet mission/attempt·업무 revision·허용 출처·설정된 freshness(기본 5초)·한 번만 소비한 관측의 대조 | 관측 내용의 센서 진실성 또는 producer 인증. source_id 허용 목록만으로 인증이 성립하지 않는다. |
 
 검토한 계약에는 Harbor 필수 물리 사실 전체를 제공하는 운영 producer와 인증된 전달 경로가 없다. 일부 필드의 이름을 바꿔 붙이는 어댑터로 이 결손을 해결할 수 없다.

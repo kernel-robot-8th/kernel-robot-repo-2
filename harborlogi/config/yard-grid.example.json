@@ -1,0 +1,8 @@
+{
+  "outbound_stand": "stand",
+  "temporary_bays": ["temp"],
+  "allowed_moves": [["Y11", "temp"], ["temp", "Y11"], ["Y11", "stand"]],
+  "max_observation_age_seconds": 1800,
+  "conveyor": "conveyor",
+  "arm_reach": [["A", "Y11"], ["A", "temp"], ["B", "Y11"], ["B", "stand"]]
+}

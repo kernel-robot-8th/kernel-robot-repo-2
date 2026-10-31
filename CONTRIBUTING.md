@@ -45,7 +45,7 @@ git remote add upstream https://github.com/kernel-robot-8th/kernel-robot-repo-2.
    ```
 
 4. 브랜치를 `origin`에 push하고 팀 저장소 `main`으로 개발 PR을 연다(`gh pr create -R robotics-team-1213/harborlogi --base main --head <브랜치>`). PR에는 무엇을·왜 바꿨는지와 돌린 시험 결과를 적는다. 같은 브랜치를 다른 팀원도 이어서 고칠 수 있다.
-5. CI(Python 3.10·3.12 unittest)가 통과하고 팀원 한 명 이상이 확인한 뒤 병합한다. 바꾼 사람이 아닌 사람이 확인하는 것을 기본으로 한다.
+5. CI(Python 3.10·3.12 unittest)가 통과하면 병합한다. 지금은 한 팀만 작업하므로 팀원 확인을 요구하지 않는다(2026-10-31 결정). 작업하는 사람이 늘면 "바꾼 사람이 아닌 팀원 한 명 이상이 확인한 뒤 병합"으로 되돌린다.
 6. 팀 `main`에 병합한 확정 변경을 과정 저장소에 제출한다(`gh pr create -R kernel-robot-8th/kernel-robot-repo-2 --base main --head robotics-team-1213:main`). 제출 PR에는 포함한 팀 개발 PR과 기준 커밋을 적고 CI·리뷰 후 병합한다. 제출 PR 병합 전에는 이 head인 팀 `main`의 추가 변경도 포함되므로 제출 범위를 다시 확인한다.
 7. 과정 저장소 병합 후 양쪽 차이를 확인한다. 과정 저장소에만 생긴 변경·병합 커밋은 필요할 때 팀 저장소로 가져오는 별도 PR에서 검토한다. `gh repo sync`로 팀 `main`을 덮어 맞추지 않는다. 팀 `main`에는 직접 커밋하지 않는다.
 
@@ -75,11 +75,11 @@ Harbor에서 쓰고 싶은 API·필드·동작이 ROSY에 없으면:
 
 2단계를 돌리면 플랫폼·Harbor의 전체 커밋 번호와 결과를 `harborlogi/docs/validation/<날짜>-<주제>.md`에 남긴다. 1단계의 `skipped=1`은 2단계를 하지 않았다는 뜻이지 통과가 아니다.
 
-실제 연결에서 Harbor는 작업을 **제안만** 한다. 승인은 운영자가 Fleet 화면에서 한다. Harbor가 로봇을 움직였다고 보지 않고, 관측 근거가 맞아야 다음 단계로 간다.
+Harbor는 사용자의 업무 확정을 저장하고 지원된 중립 작업을 Fleet에 제안·대조한다. 목표까지의 업무 의존 관계와 완료 판단은 Harbor가 소유한다. 현행 ARM의 별도 운영자 승인은 Fleet에서 수행한다. 향후 승인된 정책 범위에서의 자동 진행은 플랫폼 정책으로 수용해야 하며, 사람 토큰 공유로 대신하지 않는다. [독립 인증·협력 계약](harborlogi/docs/design/27-independent-integration-and-service-trust.md)을 따른다.
 
 ## 6. 연결 설정과 비밀값
 
-- Fleet 주소는 HTTPS 또는 같은 PC의 loopback HTTP만 쓴다. 토큰은 Fleet 사용자 설정에서 받은 Bearer 토큰을 실행할 때 외부 설정으로 넣는다.
+- Fleet 주소는 HTTPS 또는 같은 PC의 loopback HTTP만 쓴다. Harbor 전용 named principal·service 역할의 기계 토큰을 Fleet 담당자가 발급하고 서버 외부 설정으로 설치한다. 사람 비밀번호·쿠키·operator 토큰을 공유하지 않는다.
 - 토큰·실제 IP·계정·장치 주소·운영 장부(SQLite)·원본 데이터는 이 저장소에 커밋하지 않는다. 이 저장소는 공개다.
 - 장부는 저장소 밖 절대 경로에 둔다([장부 보관](harborlogi/docs/execution.md#장부-보관)).
 

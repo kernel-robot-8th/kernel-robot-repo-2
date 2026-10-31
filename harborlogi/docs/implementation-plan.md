@@ -1,6 +1,6 @@
 # 항만 앱 실행 연결 계획
 
-**Goal:** 회수 계획을 공정 문서 proposal로 연결하고, 업무 장부가 현재 시도와 신선한 관측 근거를 대조하도록 한다.
+**Goal:** 반출 계획을 공정 문서 proposal로 연결하고, 업무 장부가 현재 시도와 신선한 관측 근거를 대조하도록 한다.
 **Spec:** [앱 ADR](adr/0001-process-binding-and-business-evidence.md), 플랫폼 D-836.
 **Execution:** 기존 승인 범위에서 `superpowers:executing-plans`로 순차 구현한다.
 

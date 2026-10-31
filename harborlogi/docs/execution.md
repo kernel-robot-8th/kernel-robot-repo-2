@@ -41,7 +41,39 @@ ledger = BusinessLedger(ledger_path, placement_sources=("synthetic-camera",),
 
 가동 중인 장부는 DB 파일만 복사하지 말고 SQLite online backup API 등 일관된 snapshot 방식으로 보관한다. 읽기 전용 사본의 무결성을 확인하고, 앱을 재시작하기 전 정본 경로와 미확정 요청/HOLD를 대조한다. 장부 복원이나 파일 이동을 로봇 점유 해제·자동 재전송 근거로 삼지 않는다.
 
+## 업무 실행기와 근거 출처 설정
+
+웹 앱의 상시 업무 실행기(설계24·27 P1)와 근거 어댑터(P2)는 환경 변수로 켠다. 모두 명시적 옵트인이며, 설정하지 않으면 실행기가 돌지 않고 근거 출처가 placeholder로 남아 아무 제출도 승인하지 못한다.
+
+| 변수 | 역할 | 기본 |
+|---|---|---|
+| `HARBOR_EXECUTOR_ENABLED=1` | 서비스 프로세스에서 상시 실행기 시작(사람 확정→즉시 제출 뒤 남은 단계를 진행) | 끔 |
+| `HARBOR_EXECUTOR_INTERVAL` | 실행기 조회 간격(초). 조회 간격·한 번에 처리할 업무 수·backoff를 이 값으로 제한한다 | 5 |
+| `HARBOR_EXECUTOR_BATCH` | 한 tick이 다루는 최대 활성 업무 수 | 4 |
+| `HARBOR_PLACEMENT_SOURCES` / `HARBOR_RETREAT_SOURCES` | 설치자가 등록한 배치·퇴피 근거 출처 ID(쉼표 구분, 서로 겹치지 않음). 장부의 `placement_sources`·`retreat_sources`가 이 값을 쓴다 | 미설정(placeholder) |
+| `HARBOR_EXECUTOR_EVIDENCE=intake` | 실행기가 제출된 근거(intake)를 소비해 confirm·finish를 이어간다 | 끔(근거 없이 단계가 열리지 않음) |
+
+근거 제출은 `harbor_web.evidence.submit`(현장 확인 역할)로 들어오며, mission·attempt·계획 revision에 결속되고 신선(기본 5초)하며 아직 소모되지 않은 것만 채택된다. 운영 producer의 전송·자격 계약은 [물리 관측 수용 조건](observation-acceptance.md) 산출물이 열기 전까지 설치 통합 담당 영역이다.
+
 ## 실제 Fleet 계약 시험
+
+### 중립 이송 의도와 수행 조회 (D-856 첫 흐름)
+
+API v1.298 지원 서버에서는 `harbor.transport.TripIntent(request_key, candidates, destination, via=())`로 단일 이송 의도를 만들고 `TransportLedger(path)`에 먼저 보존한다. 이 표는 기존 업무 SQLite와 함께 둘 수 있는 앱 제출 의도와 Fleet 참조이며 실행 원장이나 업무 완료의 정본이 아니다. 한 장부는 같은 Fleet origin/principal 설정에만 사용한다.
+
+`prepare(intent)` 뒤 `submit(key, client, operator_confirmed=True)`는 기존 named-operator TRIP 접수를 정확히 한 번 요청하고 GET으로 request key·digest·robot·step을 대조한다. TRIP POST 자체는 기존 계약상 운영자의 승인·시작이다. 이 함수는 Cell 제안의 admit를 수행하거나 업무 계획을 자동 승인하지 않는다. 호출자는 화물 보유·공급암 S 출발 gate 등 해당 업무 조건을 먼저 확인해야 한다. 이번 simulation 예제는 화물 없는 운송이며 S gate를 대체하지 않는다.
+
+응답 유실이나 제출 중 재시작은 `UNCERTAIN`이고 새 POST는 거절한다. `reconcile(key, client)`는 원본 key의 GET만 수행한다. GET 404·연결 오류는 자동 재접수·새 key·장치 재배정의 근거가 아니다. `ACKNOWLEDGED`는 일치하는 Fleet 참조를 조회했다는 뜻이며 HOLD 작업도 포함할 수 있다. 로봇의 `GOAL_CONFIRMED`는 화물 내려놓기·팔 퇴피·반출 완료를 뜻하지 않는다. 현재 반출 업무 장부와 관측 판정은 그대로 유지한다.
+
+`RosyClient.trip_job(id)`와 `trip_request(key)`는 공정 문서 없는 수행 snapshot을 읽는다. 이송 후보·장소만 wire로 보내며 `cargo_id`·recipe·pallet/layer는 새 요청에 넣지 않는다. typed 동작의 추가·도달 사전 검증·중립 팔 동작은 후속 계약이다.
+
+공정 compiler 없는 실제 Fleet simulation HTTP 검증은 아래와 같이 명시 실행한다. 일반 단독 시험의 integration skip과 별개다.
+
+```text
+python -m tools.integration.real_fleet_http --platform-root <플랫폼-root> --platform-sha <전체-40자리-SHA> --transport-only
+```
+
+### 기존 Cell 공정 계약 시험
 
 `python -m unittest discover -s tests -v`의 통합 skip은 실제 서버 미검증을 뜻한다. 시험 PC에 깨끗한 고정 플랫폼 소스를 준비하고, 해당 플랫폼의 기존 시험 의존성을 설치한 별도 환경에서 다음 개발 도구를 실행한다.
 

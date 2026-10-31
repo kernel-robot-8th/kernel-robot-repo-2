@@ -1,0 +1,81 @@
+# Harbor 토큰·컴포넌트·상태 계약
+
+상태: 로컬 페이지에 적용한 토큰·공통 패턴 기준. [tokens.json](../../design/tokens.json)을 정본으로 승격했고 `tools/design_tokens.py`가 `harbor/web_assets/tokens.css`를 생성한다. 페이지는 의미별 변수를 사용한다. [DESIGN.md](../../DESIGN.md)와 `.impeccable/design.json`은 구현 기록이며 운영·현장 사용자 수용과 구분한다.
+
+## 1. 토큰의 세 층과 정본
+
+```text
+primitive.color.teal           원색 #116974
+  → semantic.action.primary    주요 행동이라는 의미
+    → component.button.background   버튼에 적용
+
+primitive.color.teal-soft
+  → semantic.surface.selected
+    → component.navigation.selected-background
+```
+
+원색을 바꿀 때와 의미를 바꿀 때의 범위를 구별한다. 버튼에서 직접 `orange`를 골라 위험/선택/완료를 제각각 표현하지 않는다. 원색에 raw 값을, 의미에 원색 참조를, 컴포넌트에 의미·치수 참조를 둔다. 동일 값을 여러 JSON·CSS에 수동 복사하지 않는다.
+
+파일의 schema는 프로젝트 내부 `harbor.design-tokens/1`이며 외부 표준 도구 호환성을 검증했다는 주장은 아니다. leaf는 `$type`, `$value`를 갖고 alias는 `{semantic.action.primary}`처럼 **한 토큰 전체**를 참조한다. alias의 타입은 대상과 같아야 하고 순환·없는 참조·층 역참조를 허용하지 않는다.
+
+`tokens.json`을 편집하고 `python tools/design_tokens.py` 출력을 `harbor/web_assets/tokens.css`로 저장한다. `python tools/design_tokens.py --check`와 unittest가 생성물 일치를 검사한다. generated CSS는 직접 편집하지 않는다. `app.css`는 의미별 변수와 컴포넌트를 정의하며 값 일괄 치환만으로 탐색·상태 계약을 구현했다고 보지 않는다.
+
+## 2. 색상은 의미로 사용한다
+
+| 의미 | foreground / background 기준 | 적용 |
+|---|---|---|
+| 기본 읽기 | ink / paper 또는 white | 핵심 정보·업무 내용 |
+| 보조 읽기 | muted / paper 또는 white | 출처·보조 설명. 핵심 실패 원인은 작게 숨기지 않음 |
+| 선택 | teal / teal-soft | 현재 메뉴·업무·탭. 텍스트/선/선택 의미를 함께 사용 |
+| 주요 행동 | white / teal, hover navy | 현재 업무의 우선 조작 |
+| 안내·진행 | teal / teal-soft | 제안 대기·진행 설명. ‘모두 정상’이라는 뜻 아님 |
+| 주의 | warning-ink / orange-soft | 보류·대조 필요·검토가 필요한 상태 |
+| 위험·실패 | danger-ink / danger-soft | 확인된 실패·위험의 표현. 실제 Fleet 상태/근거 없이 안전 알람을 만들지 않음 |
+| 확인된 결과 | success-ink / success-soft | 해당 계층에서 검증된 결과. 물리 결과와 업무 완료의 label을 구별 |
+| 미확인 | muted / unknown-soft | 정보 없음·불명. 대기나 정상으로 바꾸지 않음 |
+| 포커스 | light 면에는 focus, navy 면에는 paper | 3px outline + 3px offset. 선택 색과 별도 |
+
+성공·위험·미확인 면의 추가 색상은 로컬 UI 토큰으로 채택했다. 데이터가 없는 위험 알람을 만들라는 뜻은 아니다. 기존 brand orange는 유지하지만 상태마다 동일한 오렌지를 남용하지 않는다. 상태 색을 장비 타입이나 팔 A/B 구분 색과 겸용하지 않는다. 데모는 환경 표식이며 실제 장애 심각도를 뜻하지 않는다.
+
+텍스트 대비 4.5:1 이상, 큰 글씨 3:1 이상, 핵심 조작 경계·포커스는 인접 면에서 3:1 이상을 검토 기준으로 삼는다. 색상 쌍의 수치 검사와 실제 렌더 검토는 별개다. 선택·상태를 색 하나로만 표시하지 않는다.
+
+## 3. 서체·간격·밀도
+
+- UI 서체는 운영체제의 한글 가능 sans stack을 유지한다. 폰트를 원격에서 내려받는 의존성을 추가하지 않는다.
+- 적용 scale: metadata12, label14, body16, section18, page28px 상당의 rem. 초기 body15/metadata11~13에서 변경했고 한글·긴 ID의 새 렌더를 검증한다.
+- 본문 line-height1.6, 제목1.3. 핵심 상태/판단은 본문 이상, 원본 ID는 복사와 전체 확인이 가능하도록 줄바꿈/펼침을 제공한다. 수치 열은 tabular numerals를 쓴다.
+- 간격은 4/8/12/16/24/32/48/64px 상당의 scale이다. 관련 label·값은 가깝게, 다른 판단 영역은 더 넓게 둔다.
+- 기본 조작 높이44px, 태블릿48px, 업무 행56px/태블릿64px은 **최소 높이**다. 긴 이유를 잘라 이 높이에 강제로 맞추지 않는다.
+- 전역 메뉴200px·목록280px·topbar64px, 1280/768px 구간을 적용했다. JS가 생성 CSS의 breakpoint 토큰을 읽어 배치를 선택한다. 이전 320px 목록/700·1100px 분기는 현재 구조가 아니다.
+- radius는 상태4·조작6·섹션8px. 모든 정보를 같은 둥근 카드로 감싸지 않고 면·제목·간격·구분선을 먼저 사용한다.
+- 평면 작업면을 유지한다. z-index는 base0/sticky10/popover20/dialog30/notification40 순서이며 dialog 아래 내용을 toast가 가리는 경우를 별도 검토한다.
+- feedback120ms, 탐색180ms 제안. reduced motion에서는 0ms로 줄이고 정보 전달을 애니메이션에 의존하지 않는다. 실제 작업 진행률이나 로봇 동작을 시각 효과로 추정하지 않는다.
+
+## 4. 공통 컴포넌트 계약
+
+| 패턴 | 필요한 상태와 동작 | 금지/수용 기준 |
+|---|---|---|
+| 전역 메뉴 | 기본/hover/현재/focus. 현재 영역 label과 `aria-current=page` | 메뉴 이름 없이 아이콘만 두지 않는다. 데이터/route 없는 메뉴를 완성 기능처럼 개방하지 않는다 |
+| 업무 행 | 기본/선택/보류/불명. 업무·화물·상태·이유/시각 | 선택 표시와 업무 상태를 같은 색 의미로 합치지 않는다. 다음 화면에서 동일 업무를 유지 |
+| 탭 | 선택/focus/가용. 현재 업무의 관점 전환 | 전역 메뉴를 탭으로 복제하지 않음. 키보드 방향키와 직접 URL·뒤로 가기 확인 |
+| 주요 버튼 | 기본/hover/focus/비활성/pending/성공/거절 | pending 동안 중복 의도를 막되 자동 재전송 없음. 권한 부족은 이유·해결 경로를 표시 |
+| 검색·필터 | 입력/적용/결과 없음/조회 실패/초기화 | 실패를 0건으로 처리하지 않음. 상세 복귀 후 검색과 보기를 복구 |
+| 상태 badge | 한국어 label + 필요한 계층 이름 | backend enum만 노출하거나 badge를 가짜 버튼처럼 만들지 않음 |
+| 다음 판단 영역 | 막힌 이유·필요한 사실·책임·가능한 다음 행동 | source 없는 담당·장애 이유·마감·가용성을 생성하지 않음 |
+| 근거 섹션 | 원래 mission/attempt/revision·출처·원본 시각·조회 시각 | receipt·Action·업무 완료를 하나의 성공 아이콘으로 합치지 않음 |
+| 오류·빈 상태 | 실패 대상·현재 알 수 있는 범위·재시도/복귀 | 데이터 없음, 권한 없음, 연결 실패, 불일치, stale을 구별 |
+| 알림 | 정보 변화와 조작 결과. 중요한 판단은 본문에도 남김 | 자동 사라지는 toast만으로 보류/권한/실패 이유를 알리지 않음 |
+
+‘pending/제안/제출’은 향후 쓰기 컴포넌트의 요구다. 현재 앱이 그 조작이나 인증을 갖췄다고 해석하지 않는다. 메뉴 숨김·버튼 비활성은 서버의 권한 검사와 별개다.
+
+## 5. 구현 이행과 검증
+
+1. 제안 토큰의 참조·타입·순환·색상 대비를 정적 검사한다. 이는 시각·접근성 수용의 대체가 아니다.
+2. 기존 primitive 값을 유지하며 semantic 변수와 공통 컴포넌트를 도입한다. `.impeccable/design.json`은 최종 렌더에서 다시 추출한다. panel용 합성 tonal ramp를 runtime 원색으로 복사하지 않는다.
+3. 운영 현황/업무 shell에 전역 메뉴·업무 행·탭·버튼·상태·오류를 적용한다. [탐색 수용 흐름](08-navigation.md)의 업무와 URL을 유지한다.
+4. 동일한 데이터로 1440×1000, 1280×800, 768×1024, 390×844를 확인하고 zoom200%, 키보드, 긴 한글/ID, 빈/불명/실패/권한을 검토한다. 아직 실행한 시험이 아니다.
+5. 실제 운영자의 조치 찾기·원래 업무 복귀·Fleet 인계·태블릿 확인 흐름을 관측해 확정한다. 쓰기와 실물 수용은 API/인증 게이트를 그대로 따른다.
+
+JSON은 디자인 데이터이며 장치 설정이 아니다. 새 페이지는 CSS 생성과 화면 route를 추가하지만 업무 장부를 변경하거나 ROSY 쓰기 API를 추가하지 않는다.
+
+이번 정적 확인: 124개 토큰의 alias 존재·타입 일치·층 방향·순환 검사를 통과했다. status 텍스트/면 대비는 info5.40, warning7.86, danger6.07, success6.20, unknown5.00이다. control border/white3.11, light 포커스/paper5.96, inverse 포커스/navy12.63을 확인했다. 아직 새 토큰을 적용한 브라우저나 실제 사용자를 검사한 결과는 아니다.
