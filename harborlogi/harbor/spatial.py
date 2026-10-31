@@ -422,3 +422,246 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
         return replace(hold(reason), optimization=report)
     return SpatialProposal('READY', 'PROPOSAL_REQUIRES_ADMISSION_AND_EVIDENCE', snapshot.revision,
                            alternatives[0][2].moves, optimization=report)
+
+
+REARRANGE_BEAM_WIDTH = 8
+REARRANGE_COMPLETION = ('rearranged_at_targets', 'arms_retreated')
+
+
+class SearchLimitReached(Exception):
+    pass
+
+
+def order_relation(below, above):
+    """Design 32 order table for cargo resting on `below`: 'blocked', 'unknown' or None (free)."""
+    if below is None:
+        return 'unknown'
+    return 'blocked' if leaves_earlier(below, above) else None
+
+
+@dataclass(frozen=True)
+class RearrangementScore:
+    outbound_unfit: int
+    inbound_without_place: int
+    blocked_pairs: int
+    unknown_pairs: int
+    cross_supported: int
+    free_positions: int
+    moves: int
+    rotations: int
+    changed_cargo: int
+    level_sum: int
+    blocked_pairs_before: int
+    unknown_pairs_before: int
+    gain: int
+
+    def key(self):
+        return (self.outbound_unfit, self.inbound_without_place, self.blocked_pairs, self.unknown_pairs,
+                self.cross_supported, -self.free_positions, self.moves, self.rotations,
+                self.changed_cargo, self.level_sum)
+
+
+def plan_rearrangement(snapshot: SpatialSnapshot, policy: SpatialPolicy,
+                       schedule: dict[str, tuple[int, int | None]], *, now: datetime, expected_revision: int,
+                       k: int = 2, max_moves: int = 6, outbound_pending: bool = False, requested: bool = False,
+                       pending_inbound: tuple[int, ...] = (), rotation_moves: frozenset = frozenset(),
+                       reserved: frozenset = frozenset()) -> SpatialProposal:
+    """Design 32 R2: reorder stored cargo without an outbound order when the gain pays for the moves.
+
+    A beam search over legal single moves (temporary areas only as waypoints)
+    compares complete plans, which leave the temporary areas empty, by
+    RearrangementScore.key. READY needs G >= 1, moves <= max_moves and
+    moves <= k*G; a user request may instead only add free positions (F).
+    Rotation is a candidate only for (source, destination) area pairs in
+    `rotation_moves`, the installed rotation bindings (design 29).
+    """
+    aware_time(now)
+    validate_schedule(schedule)
+    _integer(k, 1, 10)
+    _integer(max_moves, 1, 12)
+    if any(n not in (1, 2, 3) for n in pending_inbound):
+        raise ValueError('Expected pending inbound lengths of 1 to 3 cells')
+    areas = {a.area_id: a for a in snapshot.areas}
+    if not {policy.outbound_area, *policy.temporary_areas, *policy.storage_areas} <= areas.keys():
+        raise ValueError('Policy references an unknown area')
+
+    def hold(reason, optimization=None):
+        return SpatialProposal('HOLD', reason, snapshot.revision, required_completion=REARRANGE_COMPLETION,
+                               optimization=optimization)
+
+    if expected_revision != snapshot.revision:
+        return hold('REVISION_CONFLICT')
+    if not timedelta(0) <= now-snapshot.observed_at <= policy.max_observation_age:
+        return hold('OBSERVATION_NOT_CURRENT')
+    if snapshot.holdings:
+        return hold('PHYSICAL_HOLDING_REQUIRES_RECONCILIATION')
+    if outbound_pending:
+        return hold('OUTBOUND_PENDING')
+    if not policy.arm_reach:
+        return hold('ARM_REACH_UNVERIFIED')
+    storage, temporary = set(policy.storage_areas), set(policy.temporary_areas)
+    if any(p.area_id in temporary for p in snapshot.placements):
+        return hold('TEMPORARY_AREA_OCCUPIED')
+
+    outbound = areas[policy.outbound_area]
+    lengths = {s.cargo_id: s.length_cells for s in snapshot.shapes}
+    originals = {p.cargo_id: p for p in snapshot.placements}
+
+    def footprint(p, n):
+        return tuple((p.area_id, p.row + (i if p.orientation == 90 else 0),
+                      p.column + (i if p.orientation == 0 else 0), p.level) for i in range(n))
+
+    def fits(cells, occupied):
+        area = areas[cells[0][0]]
+        return all(r <= area.rows and c <= area.columns and l <= area.levels
+                   and (a, r, c, l) not in occupied and (a, r, c, l) not in reserved
+                   and (l == 1 or (a, r, c, l-1) in occupied) for a, r, c, l in cells)
+
+    def occupancy(placements):
+        return {cell: p.cargo_id for p in placements for cell in footprint(p, lengths[p.cargo_id])}
+
+    def fits_outbound(p):
+        n = lengths[p.cargo_id]
+        if (p.area_id, policy.outbound_area) in rotation_moves:
+            return n <= max(outbound.rows, outbound.columns)
+        return n <= (outbound.rows if p.orientation == 90 else outbound.columns)
+
+    def free_positions(occupied, n):
+        total = 0
+        for area_id in policy.storage_areas:
+            area = areas[area_id]
+            for orientation in ((0,) if n == 1 else (0, 90)):
+                for level in range(1, area.levels+1):
+                    for row in range(1, area.rows+1):
+                        for column in range(1, area.columns+1):
+                            probe = Placement('probe', area_id, row, column, level, orientation)
+                            total += fits(footprint(probe, n), occupied)
+        return total
+
+    def metrics(placements):
+        occupied = occupancy(placements)
+        by_id = {p.cargo_id: p for p in placements}
+        blocked = unknown = cross = 0
+        stored = [p for p in placements if p.area_id in storage]
+        for p in stored:
+            direct = {occupied.get((a, r, c, l-1)) for a, r, c, l in footprint(p, lengths[p.cargo_id])} - {None}
+            cross += len(direct) > 1
+            lower, pending = set(), [p.cargo_id]
+            while pending:
+                cargo = pending.pop()
+                for a, r, c, l in footprint(by_id[cargo], lengths[cargo]):
+                    below = occupied.get((a, r, c, l-1))
+                    if below is not None and below not in lower:
+                        lower.add(below)
+                        pending.append(below)
+            for other in lower:
+                relation = order_relation(schedule.get(other), schedule.get(p.cargo_id))
+                blocked += relation == 'blocked'
+                unknown += relation == 'unknown'
+        free = {n: free_positions(occupied, n) for n in (1, 2, 3)}
+        return (sum(not fits_outbound(p) for p in stored), sum(free[n] == 0 for n in pending_inbound),
+                blocked, unknown, cross, min(free.values()))
+
+    start = metrics(snapshot.placements)
+
+    def score(placements, moves):
+        unfit, inbound, blocked, unknown, cross, free = metrics(placements)
+        gain = 3*(start[0]-unfit) + 3*(start[1]-inbound) + (start[2]-blocked) + (start[4]-cross)
+        final = {p.cargo_id: p for p in placements}
+        return RearrangementScore(
+            unfit, inbound, blocked, unknown, cross, free, len(moves),
+            sum(m.source_placement.orientation != m.destination_placement.orientation for m in moves),
+            sum(final[c] != p for c, p in originals.items()), sum(p.level for p in placements),
+            start[2], start[3], gain)
+
+    def acceptable(s):
+        if s.moves > max_moves:
+            return False
+        if s.gain >= 1:
+            return s.moves <= k*s.gain
+        return requested and s.gain == 0 and s.free_positions > start[5]
+
+    def reach(p):
+        if p.area_id != 'yard':
+            return {p.area_id}
+        return {snapshot.layout.at(r, c).bay_id for _, r, c, _ in footprint(p, lengths[p.cargo_id])}
+
+    rotation_skipped = False
+
+    def children(placements):
+        nonlocal rotation_skipped
+        occupied = occupancy(placements)
+        for origin in placements:
+            n = lengths[origin.cargo_id]
+            if (origin.area_id not in storage | temporary
+                    or any((a, r, c, l+1) in occupied for a, r, c, l in footprint(origin, n))):
+                continue
+            rest = {cell: cargo for cell, cargo in occupied.items() if cargo != origin.cargo_id}
+            for area_id in (*policy.storage_areas, *policy.temporary_areas):
+                if (origin.area_id, area_id) not in policy.allowed_moves:
+                    continue
+                area = areas[area_id]
+                for orientation in ((0,) if n == 1 else (origin.orientation, 90-origin.orientation)):
+                    if orientation != origin.orientation and (origin.area_id, area_id) not in rotation_moves:
+                        rotation_skipped = True
+                        continue
+                    for level in range(1, area.levels+1):
+                        for row in range(1, area.rows+1):
+                            for column in range(1, area.columns+1):
+                                destination = Placement(origin.cargo_id, area_id, row, column, level, orientation)
+                                if destination == origin or not fits(footprint(destination, n), rest):
+                                    continue
+                                arms = tuple(a for a in YARD_ARMS if all(
+                                    (a, loc) in policy.arm_reach for loc in reach(origin) | reach(destination)))
+                                if arms:
+                                    yield origin, destination, arms
+
+    def signature(placements):
+        return tuple(sorted((p.cargo_id, p.area_id, p.row, p.column, p.level, p.orientation) for p in placements))
+
+    count = examined = 0
+    budget_reason = None
+    complete = []
+    seen = {signature(snapshot.placements)}
+    beam = [(snapshot.placements, ())]
+    try:
+        for _ in range(max_moves):
+            expanded = []
+            for placements, moves in beam:
+                for origin, destination, arms in children(placements):
+                    count += 1
+                    if count > SPATIAL_SEARCH_LIMIT:
+                        raise SearchLimitReached('STATE_LIMIT')
+                    following = tuple(destination if p.cargo_id == origin.cargo_id else p for p in placements)
+                    key = signature(following)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    plan = moves + (SpatialMove(
+                        origin.cargo_id, snapshot.position_id(origin), snapshot.position_id(destination),
+                        arms[0], arms[1:], origin, destination, '재배치',
+                        snapshot.shape(origin.cargo_id).footprint_revision),)
+                    result = score(following, plan)
+                    waypoints = sum(p.area_id in temporary for p in following)
+                    if not waypoints:
+                        examined += 1
+                        if acceptable(result):
+                            complete.append((result, plan))
+                    expanded.append(((waypoints,) + result.key(), key, following, plan))
+            expanded.sort(key=lambda item: item[:2])
+            beam = [(following, plan) for *_, following, plan in expanded[:REARRANGE_BEAM_WIDTH]]
+            if not beam:
+                break
+    except SearchLimitReached as exc:
+        budget_reason = str(exc)
+    complete.sort(key=lambda item: (item[0].key(), [m.destination for m in item[1]]))
+    report = SpatialOptimization(
+        'rearrangement_lex_v1', complete[0][0] if complete else None, None,
+        tuple(SpatialAlternative(s, m) for s, m in complete[:5]), count, count, examined,
+        budget_reason is None, budget_reason, SPATIAL_SEARCH_LIMIT, SPATIAL_CANDIDATE_LIMIT)
+    if not complete:
+        if start[0] and rotation_skipped:
+            return hold('ROTATION_NOT_INSTALLED', report)
+        return hold('SPATIAL_SEARCH_LIMIT_REACHED' if budget_reason else 'REARRANGE_NOT_WORTH', report)
+    return SpatialProposal('READY', 'PROPOSAL_REQUIRES_ADMISSION_AND_EVIDENCE', snapshot.revision,
+                           complete[0][1], required_completion=REARRANGE_COMPLETION, optimization=report)
