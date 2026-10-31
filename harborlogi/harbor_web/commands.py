@@ -467,6 +467,10 @@ def advance_command(command, registry, *, evidence=None):
             if row['state'] == 'PLANNED':
                 if command.state not in PROPOSE_STATES:
                     return command.state  # An uncertain prior stage must reconcile first.
+                if row['step_index'] and command.order.kind == 'REARRANGE':
+                    from harbor_web.rearrangement import outbound_pending
+                    if outbound_pending():
+                        return command.state  # Outbound first (design 32): no further R2 move starts.
                 return _submit_stage(command, registry, command.actor).state
             if row['state'] in ('WAITING', 'HOLD'):
                 command = reconcile_command(command.actor, command_id=command.pk,
