@@ -89,8 +89,10 @@ class SyntheticStops:
 
 
 class ArmFleet:
-    def __init__(self, *, root, workdir, request_key_path=None, request_keys=("neutral-arm-http:0",), one_attempt=True):
-        self.root, self.workdir = Path(root), Path(workdir)
+    def __init__(self, *, root, workdir, request_key_path=None, request_keys=("neutral-arm-http:0",), one_attempt=True,
+                 sim=False):
+        self.root, self.workdir, self.sim = Path(root), Path(workdir), sim
+        self.identity, self.sim_process = (WORKCELL, INSTANCE), None
         self.request_key_path = Path(request_key_path) if request_key_path else None
         self.request_keys, self.one_attempt = tuple(request_keys), one_attempt
         self.tokens = {name: secrets.token_urlsafe(40) for name in ("operator", "viewer", "approver")}
@@ -140,10 +142,13 @@ class ArmFleet:
         script = self.root / "tools/sim/transfer_observer.py"
         if not script.is_file():
             raise FileNotFoundError("platform lacks tools/sim/transfer_observer.py (D-927 decision 3)")
-        state, bases = self.workdir / "sim-state.json", self.workdir / "sim-bases.json"
-        bases.write_text(json.dumps(BASES), encoding="utf-8")
-        self._write_state(state, 0)
-        self._thread(lambda: self._publish_state(state))
+        if self.sim:  # the platform state writer reads the simulator itself
+            state, bases = self.sim_out / "sim-state.json", self.sim_out / "installation.bases.json"
+        else:
+            state, bases = self.workdir / "sim-state.json", self.workdir / "sim-bases.json"
+            bases.write_text(json.dumps(BASES), encoding="utf-8")
+            self._write_state(state, 0)
+            self._thread(lambda: self._publish_state(state))
         self.observer_log = (self.workdir / "observer.log").open("w", encoding="utf-8")
         self.observer = subprocess.Popen([sys.executable, str(script),
             "--origin", self.url, "--assets", str(self.root / ASSETS), "--bases", str(bases), "--state", str(state),
@@ -168,9 +173,42 @@ class ArmFleet:
             sequence += 1
             self._write_state(path, sequence)
 
+    def _install_sim(self, db):
+        """Platform MuJoCo + the real cell owner with the C3 installation (tools/sim/run_arm_transfer_sim.sh)."""
+        import importlib.util
+        import signal
+        from fleet.server.task_store import FleetTaskStore
+        from fleet.server.physical_transfer_observer import PhysicalTransferObserver
+        self.sim_out = self.workdir / "sim"
+        self.sim_out.mkdir(parents=True)
+        log = self.workdir / "sim.log"
+        self.sim_log = log.open("w", encoding="utf-8")
+        self.sim_process = subprocess.Popen(["bash", str(self.root / "tools/sim/run_arm_transfer_sim.sh")],
+            env={**os.environ, "OUT": str(self.sim_out), "ROSY_FLEET_FENCE_URL": self.url + "/api/fleet/dispatch-control",
+                 "ROSY_FLEET_FENCE_TOKEN": self.tokens["viewer"]},
+            stdout=self.sim_log, stderr=subprocess.STDOUT, start_new_session=True)
+        self.sim_stop = lambda: os.killpg(self.sim_process.pid, signal.SIGTERM)
+        deadline = time.monotonic() + 900
+        while "ARM_TRANSFER_SIM_READY" not in log.read_text(encoding="utf-8", errors="replace"):
+            if self.sim_process.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError("platform simulation did not start; see " + str(log))
+            time.sleep(1)
+        spec = importlib.util.spec_from_file_location("transfer_installation", self.root / "tools/sim/transfer_installation.py")
+        tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tool)
+        written = json.loads((self.sim_out / "installation.json").read_text(encoding="utf-8"))
+        installed = tool.fleet_installation(written, self.sim_out / "sockets")
+        self.identity = installed.policy.primary
+        self.tasks = FleetTaskStore(db)
+        return dict(omx_socket_root=self.sim_out / "sockets", arm_transfer_installation=installed,
+            arm_transfer_observer=PhysicalTransferObserver(producer_id=installed.policy.producer_id,
+                token=self.observer_token, valid_until=datetime.now(timezone.utc) + timedelta(minutes=30)))
+
     def install(self, db):
         """Start the synthetic owners and return the create_app options that install ARM into a Fleet on db."""
         enable(self.root)
+        if self.sim:
+            return self._install_sim(db)
         if "rosy_cell" in sys.modules:
             raise RuntimeError("neutral harness must start without the palletizing package")
         sys.modules["rosy_cell"] = None
@@ -286,9 +324,18 @@ class ArmFleet:
             self.observer_log.close()
         for thread in self.threads:
             thread.join(timeout=5)
+        if self.sim_process is not None:
+            self.sim_stop()
+            self.sim_process.wait(timeout=30)
+            self.sim_log.close()
         sys.modules.pop("rosy_cell", None)
         if self.errors or any(thread.is_alive() for thread in self.threads):
             raise RuntimeError("simulation harness worker failed or did not stop")
+        if self.sim:
+            print("Simulation owner (MuJoCo) physical proofs:", sorted(self.observed), flush=True)
+            if self.one_attempt and self.observed != {"PRE_DISPATCH", "POST_ACTION"}:
+                raise AssertionError("simulation did not prove both phases of the admitted attempt")
+            return
         submits = sum(o.operations.count("SubmitAction") for o in self.owners)
         lookups = sum(o.operations.count("GetAction") for o in self.owners)
         print("Synthetic UDS submits:", submits, "lookups:", lookups, "physical proofs:", sorted(self.observed), flush=True)

@@ -37,7 +37,7 @@ class ArmHttpTests(unittest.TestCase):
             ledger.prepare("neutral-arm-http", 1, (binding,), outbound_id=binding.cargo_id,
                            outbound_stand=binding.destination, move_arms=(("A", "B"),))
             mission = ledger.propose("neutral-arm-http", client)
-            deadline = time.monotonic() + 30
+            deadline = time.monotonic() + config.get("goal_timeout_s", 30)  # a MuJoCo transfer runs in sim time
             while True:
                 ledger.refresh("neutral-arm-http", client, now=datetime.now(timezone.utc))
                 row = ledger.read("neutral-arm-http")
