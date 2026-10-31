@@ -12,8 +12,10 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -181,10 +183,11 @@ class ArmFleet:
         from fleet.server.physical_transfer_observer import PhysicalTransferObserver
         self.sim_out = self.workdir / "sim"
         self.sim_out.mkdir(parents=True)
+        self.sockets = Path(tempfile.mkdtemp(prefix="rosy-uds-", dir="/tmp"))  # AF_UNIX paths stop at 108 bytes
         log = self.workdir / "sim.log"
         self.sim_log = log.open("w", encoding="utf-8")
         self.sim_process = subprocess.Popen(["bash", str(self.root / "tools/sim/run_arm_transfer_sim.sh")],
-            env={**os.environ, "OUT": str(self.sim_out), "ROSY_FLEET_FENCE_URL": self.url + "/api/fleet/dispatch-control",
+            env={**os.environ, "OUT": str(self.sim_out), "SOCKETS": str(self.sockets), "ROSY_FLEET_FENCE_URL": self.url + "/api/fleet/dispatch-control",
                  "ROSY_FLEET_FENCE_TOKEN": self.tokens["viewer"]},
             stdout=self.sim_log, stderr=subprocess.STDOUT, start_new_session=True)
         self.sim_stop = lambda: os.killpg(self.sim_process.pid, signal.SIGTERM)
@@ -198,10 +201,10 @@ class ArmFleet:
         tool = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(tool)
         written = json.loads((self.sim_out / "installation.json").read_text(encoding="utf-8"))
-        installed = tool.fleet_installation(written, self.sim_out / "sockets")
+        installed = tool.fleet_installation(written, self.sockets)
         self.identity = installed.policy.primary
         self.tasks = FleetTaskStore(db)
-        return dict(omx_socket_root=self.sim_out / "sockets", arm_transfer_installation=installed,
+        return dict(omx_socket_root=self.sockets, arm_transfer_installation=installed,
             arm_transfer_observer=PhysicalTransferObserver(producer_id=installed.policy.producer_id,
                 token=self.observer_token, valid_until=datetime.now(timezone.utc) + timedelta(minutes=30)))
 
@@ -329,6 +332,7 @@ class ArmFleet:
             self.sim_stop()
             self.sim_process.wait(timeout=30)
             self.sim_log.close()
+            shutil.rmtree(self.sockets, ignore_errors=True)
         sys.modules.pop("rosy_cell", None)
         if self.errors or any(thread.is_alive() for thread in self.threads):
             raise RuntimeError("simulation harness worker failed or did not stop")
