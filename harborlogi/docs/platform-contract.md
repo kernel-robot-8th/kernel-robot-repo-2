@@ -17,6 +17,8 @@ Harbor 사용자의 계획 확정은 준비·제출을 한 번에 이어서 수�
 
 중립 ARM 경로는 API reference **v1.312**의 ARM 작업 제안·조회와 별도 물리 receipt를 소비한다. [ADR 0006](adr/0006-neutral-arm-transfer-binding.md)의 `ArmTransferBinding`이 Harbor 업무 위치를 설치된 물리 참조로 변환한다. 독립 관측자 인증·측정 제출과 운영자 승인은 Fleet 측에 남는다. [고정 양 끝 SHA 검증](validation/2026-10-24-neutral-arm-http.md)에서 독립 ARM HTTP·UDS와 기존 Cell/TRIP 회귀를 확인했다. 로컬 기본 discovery의 통합 미설정 skip과 명시 실행한 HTTP 결과를 구분한다.
 
+업무 근거는 API reference **v1.330**(D-915)의 `GET …/arm-transfers/jobs/{mission_id}/physical-evidence`와 **v1.334**(D-930)의 `POST …/rechecks`를 소비한다. 단계 근거는 확인된 시도의 원본 물리 근거 바이트에서, 첫 흐름의 최종 완료는 반출 이동 시도의 재관측에서 만든다([physical_evidence.py](../harbor/physical_evidence.py)). 한 Fleet 전체 흐름 검증은 [2026-10-30 기록](validation/2026-10-30-full-flow-one-fleet.md)을 따른다. v1.334는 플랫폼 공개 main에 게시된 뒤 기준 커밋으로 삼는다.
+
 D-856 첫 중립 이송 흐름은 API reference **v1.298**의 `GET /api/fleet/trip-jobs/{mission_id}`와 원본 `request_key` 조회를 요구한다. 기존 TRIP 접수·simulation gate를 유지하며 recipe/cell 없이 수행 사실을 읽는다. 앱 제출 의도·응답 유실 대조는 [실행 연결](execution.md#중립-이송-의도와-수행-조회-d-856-첫-흐름)에 있다. 아래의 기존 Cell 검증 SHA를 새 경로 검증으로 간주하지 않는다. 새 통합은 [고정 양 끝 SHA 검증](validation/2026-10-24-neutral-transport-http.md)으로 확인했다.
 
 기준 플랫폼: `584251615d5609a09ebcb52e18af0cbc0c9beaec`, API reference 문서 **v1.292**(후보 이송 요청 포함). 이는 실제 서버 연결 또는 버전 협상을 확인했다는 뜻이 아니다. 정본은 플랫폼 `docs/reference/application-contract-support.md`와 해당 route/schema다.
