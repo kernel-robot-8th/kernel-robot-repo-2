@@ -404,6 +404,13 @@ class ArmFleet:
             for entry in self.send_trace[:2] + self.send_trace[-6:]:
                 print("== Fleet send", *entry, flush=True)
             if self.one_attempt and self.observed != {"PRE_DISPATCH", "POST_ACTION"}:
+                import sqlite3
+                with sqlite3.connect(self.sim_out / "journal" / "owner.sqlite3") as db:
+                    for row in db.execute("SELECT phase_id, state, result_json FROM omx_action_phases ORDER BY ordinal"):
+                        print("== owner phase", row[0], row[1], (row[2] or "")[:700], flush=True)
+                    for row in db.execute("SELECT event_type, state, detail_json FROM omx_action_events "
+                                          "ORDER BY event_id DESC LIMIT 6"):
+                        print("== owner event", row[0], row[1], (row[2] or "")[:400], flush=True)
                 for name in ("owner.log", "writer.log"):  # the temporary run folder goes with the harness
                     lines = (self.sim_out / name).read_text(encoding="utf-8", errors="replace").splitlines()
                     print(f"== {name}", *lines[-40:], sep="\n", flush=True)
