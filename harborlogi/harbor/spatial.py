@@ -182,6 +182,7 @@ class SpatialMove:
 @dataclass(frozen=True)
 class SpatialScore:
     earlier_outbound_buried: int
+    unknown_outbound_order: int
     different_area_count: int
     different_position_count: int
     same_area_manhattan_distance: int
@@ -246,7 +247,7 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
     """Compare complete legal plans by future obstruction, restoration cost, then move signature.
 
     The objective first counts restored cargo resting on cargo scheduled to leave
-    earlier, then changed areas, changed row/column anchors, same-area Manhattan
+    earlier, then on cargo of unknown order (design 32 order table), then changed areas, changed row/column anchors, same-area Manhattan
     displacement, and final levels, in that lexicographic order. Without a
     schedule the first term is zero. A bounded search returns its best complete
     incumbent, never a partial plan.
@@ -342,7 +343,7 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
     def score(current):
         restored = [(originals[cargo], current.placement(cargo)) for cargo in sorted(blockers)]
         occupied = current.occupied()
-        buried = 0
+        buried = unknown = 0
         for cargo in sorted(blockers):
             # Follow the full support chain, as inbound placement does for crossing cargo.
             lower, pending = set(), [cargo]
@@ -352,8 +353,10 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
                     if below is not None and below not in lower:
                         lower.add(below)
                         pending.append(below)
-            buried += sum(leaves_earlier(schedule.get(other), schedule.get(cargo)) for other in lower)
-        values = (buried,
+            relations = [order_relation(schedule.get(other), schedule.get(cargo)) for other in lower]
+            buried += relations.count('blocked')
+            unknown += relations.count('unknown')
+        values = (buried, unknown,
                   sum(a.area_id != b.area_id for a, b in restored),
                   sum((a.row, a.column) != (b.row, b.column) for a, b in restored),
                   sum(abs(a.row-b.row) + abs(a.column-b.column) for a, b in restored
@@ -414,7 +417,7 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
         search(snapshot, frozenset(blockers), frozenset(blockers), False, (), ())
     except SearchLimit as exc:
         budget_reason = str(exc)
-    report = SpatialOptimization('restoration_lex_v2', alternatives[0][2].score if alternatives else None,
+    report = SpatialOptimization('restoration_lex_v3', alternatives[0][2].score if alternatives else None,
         first_score, tuple(item[2] for item in alternatives), count, candidates, complete,
         budget_reason is None, budget_reason, SPATIAL_SEARCH_LIMIT, SPATIAL_CANDIDATE_LIMIT)
     if not alternatives:
