@@ -133,6 +133,12 @@ class ArmFleet:
         with self.client("approver") as client:
             generation = client.get("/api/fleet/dispatch-control").json()["generation"]
             client.post("/api/fleet/dispatch/rearm", json={"expected_generation": generation}).raise_for_status()
+        if self.sim:  # the owner's fence readback reads this, with this token, before every phase
+            with self.client("viewer") as client:
+                started = time.monotonic()
+                response = client.get("/api/fleet/dispatch-control")
+                print("Fence readback:", response.status_code, round(time.monotonic() - started, 3), "s",
+                      response.text[:300], flush=True)
         self._workers()
 
     def attach(self, url, tokens):
