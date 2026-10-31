@@ -41,7 +41,7 @@ class ArmHttpTests(unittest.TestCase):
             while True:
                 ledger.refresh("neutral-arm-http", client, now=datetime.now(timezone.utc))
                 row = ledger.read("neutral-arm-http")
-                self.assertNotEqual(row["state"], "HOLD")
+                self.assertNotEqual(row["state"], "HOLD", row)
                 if row["goal_confirmed"]:
                     break
                 if time.monotonic() >= deadline:

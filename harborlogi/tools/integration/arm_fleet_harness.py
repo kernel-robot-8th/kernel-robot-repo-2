@@ -339,6 +339,9 @@ class ArmFleet:
         if self.sim:
             print("Simulation owner (MuJoCo) physical proofs:", sorted(self.observed), flush=True)
             if self.one_attempt and self.observed != {"PRE_DISPATCH", "POST_ACTION"}:
+                for name in ("owner.log", "writer.log"):  # the temporary run folder goes with the harness
+                    lines = (self.sim_out / name).read_text(encoding="utf-8", errors="replace").splitlines()
+                    print(f"== {name}", *lines[-40:], sep="\n", flush=True)
                 raise AssertionError("simulation did not prove both phases of the admitted attempt")
             return
         submits = sum(o.operations.count("SubmitAction") for o in self.owners)
