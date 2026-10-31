@@ -10,7 +10,21 @@ R0·R1은 여전히 현재 구현([ADR0010](../adr/0010-automatic-placement-and-
   - 탐색: 폭 8의 beam 탐색이다. 상태 한도는 R1과 같다.
   - 회전: 설치 대응은 `(출발 구역, 도착 구역)` 쌍 집합으로 받는다. 설계29에 회전 항목이 생기면 그 값을 넘긴다.
   - 대기 입고는 길이 목록으로 받는다. 한 길이에 자리가 하나라도 있으면 막힘이 아니다. 입고끼리 같은 자리를 다투는 경우는 세지 않는다.
-- 아직 없는 것: 허용 범위 저장, 업무 실행기 자동 실행, `REARRANGE` 지시 종류, 화면, 결정 모델 협의(Q10).
+- 실행 계층(`harbor_web/rearrangement.py`, 화면 `/rearrangement/`)이 있다.
+  - 허용 범위는 `RearrangeAuthorization`에 쌓는다. 값을 바꾸면 새 행이 되고 이전 행은 꺼진다. 켜고 끄는 권한은 실행 확정과 같은 operator 역할이다.
+  - `REARRANGE` 지시는 화물 없이 저장한다. 반출 대기열 digest에는 넣지 않는다. 사용자 직접 요청(`requested=True`)은 계획만 만들고 기존 사용자 확정을 따른다.
+  - 업무 실행기가 유휴일 때 한 번 검사한다. 조건을 어기면 Command 없이 HOLD 이유를 감사 기록에 한 번 남긴다. 반출 순서 변경·새 관측은 별도 hook 없이 다음 유휴 검사가 받는다.
+  - Plan에 허용 ID, 실행 전후 B·N, 개선량, 이동 수를 남긴다.
+  - 반출 지시가 생기면 단계 사이(`PLANNED`, 두 번째 이동부터)에서 다음 이동을 시작하지 않는다.
+- 아직 없는 것:
+  - 결정 모델 협의(Q10).
+  - 다칸 이동 Command의 칸 단위 설치 대응(설계29).
+    - **임시 처리(2026-10-31):** 설치 파일에 `simulation_cell_template`(workcell, 팔별 instance)이 하나 있으면 각 이동을 앵커 주소 사이 ARM 이송으로 바꾼다(`harbor/process.py::SimulationCellTemplate`).
+    - 기존 simulation 관문 안에서만 열린다. 조건은 test·development 모드, `HARBOR_WEB_ALLOW_SIMULATION=1`, loopback Fleet, SYNTHETIC 관측이다.
+    - ledger는 한 화물의 최종 위치로 완료를 판정한다. 그래서 정확히 한 번 움직이는 화물의 도착지를 완료 위치로 쓴다. 그런 화물이 없는 계획은 계속 `SPATIAL_EXECUTION_BINDINGS_REQUIRED`다.
+    - 실물 실행 전에는 설계29의 이동별 칸 대응으로 바꿔야 한다. 그 전까지 실물 관측(DECLARED·AUTHENTICATED)에서는 Command가 만들어지지 않는다.
+  - 반출 때문에 멈춘 R2 Command를 닫는 자동 절차. 사람이 취소·종료해야 한다.
+  - 회전 대응(`rotation_moves`)과 입고 예약 칸(`reserved`)은 계산에 넘기지 않는다. 대기 입고 길이는 최신 Plan이 `NO_LEGAL_PLACEMENT`인 입고 지시에서 읽는다.
 - 실물 수용은 하지 않았다.
 
 ## 왜 기준이 필요한가
