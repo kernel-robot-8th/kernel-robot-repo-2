@@ -228,6 +228,12 @@ class ArmFleet:
         spec = importlib.util.spec_from_file_location("transfer_installation", self.root / "tools/sim/transfer_installation.py")
         tool = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(tool)
+        self.send_trace = []
+        from fleet.server.local_action_transport import UnixLocalActionTransport
+        from fleet.server.physical_transfer_execution import PhysicalTransferExecution
+        for owner, name in ((UnixLocalActionTransport, "submit"), (PhysicalTransferExecution, "validate_send"),
+                            (PhysicalTransferExecution, "record_receipt")):
+            setattr(owner, name, self._traced(getattr(owner, name), name))  # diagnostic: Fleet keeps only the reason
         written = json.loads((self.sim_out / "installation.json").read_text(encoding="utf-8"))
         installed = tool.fleet_installation(written, self.sockets)
         self.identity = installed.policy.primary
@@ -235,6 +241,18 @@ class ArmFleet:
         return dict(omx_socket_root=self.sockets, arm_transfer_installation=installed,
             arm_transfer_observer=PhysicalTransferObserver(producer_id=installed.policy.producer_id,
                 token=self.observer_token, valid_until=datetime.now(timezone.utc) + timedelta(minutes=30)))
+
+    def _traced(self, function, name):
+        def traced(*args, **kwargs):
+            try:
+                result = function(*args, **kwargs)
+            except Exception as error:
+                self.send_trace.append((name, "raised", repr(error)[:800]))
+                raise
+            shown = result.model_dump(mode="json") if hasattr(result, "model_dump") else result
+            self.send_trace.append((name, "returned", str(shown)[:800]))
+            return result
+        return traced
 
     def install(self, db):
         """Start the synthetic owners and return the create_app options that install ARM into a Fleet on db."""
@@ -377,6 +395,8 @@ class ArmFleet:
             print("Simulation owner (MuJoCo) physical proofs:", sorted(self.observed), flush=True)
             print("Fence watch: seen", sorted(self.fence_seen, key=str), "slowest", round(self.fence_slowest, 3),
                   "s, failures", self.fence_failures[:10], flush=True)
+            for entry in self.send_trace[:12]:
+                print("== Fleet send", *entry, flush=True)
             if self.one_attempt and self.observed != {"PRE_DISPATCH", "POST_ACTION"}:
                 for name in ("owner.log", "writer.log"):  # the temporary run folder goes with the harness
                     lines = (self.sim_out / name).read_text(encoding="utf-8", errors="replace").splitlines()
