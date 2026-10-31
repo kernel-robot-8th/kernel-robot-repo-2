@@ -191,7 +191,8 @@ class ArmFleet:
         deadline = time.monotonic() + 900
         while "ARM_TRANSFER_SIM_READY" not in log.read_text(encoding="utf-8", errors="replace"):
             if self.sim_process.poll() is not None or time.monotonic() > deadline:
-                raise RuntimeError("platform simulation did not start; see " + str(log))
+                tail = log.read_text(encoding="utf-8", errors="replace").splitlines()[-30:]
+                raise RuntimeError("platform simulation did not start:\n" + "\n".join(tail))
             time.sleep(1)
         spec = importlib.util.spec_from_file_location("transfer_installation", self.root / "tools/sim/transfer_installation.py")
         tool = importlib.util.module_from_spec(spec)
