@@ -58,10 +58,10 @@ class RankedRecommendationTests(TestCase):
             plan = self.calculate(order, observed)
         self.assertEqual(planner.call_args.kwargs['schedule'][order.cargo.code][0], order.priority_group)
         report = deepcopy(plan.result['optimization'])
-        self.assertEqual(len(explain_optimization(report)['score_rows']), 6)
+        self.assertEqual(len(explain_optimization(report)['score_rows']), 7)
         report['objective_version'] = 'restoration_lex_v1'
         for score in (report['score'], report['first_feasible_score'], *(a['score'] for a in report['alternatives'])):
-            del score['earlier_outbound_buried'], score['unknown_outbound_order']
+            del score['earlier_outbound_buried'], score['unknown_outbound_order'], score['rotation_count']
         self.assertEqual([row['label'] for row in explain_optimization(report)['score_rows']][0], '복귀 구역 변경')
 
     def test_limited_complete_candidate_is_distinguished_from_unfinished_hold(self):

@@ -13,7 +13,8 @@ OBJECTIVE_LABELS = {
     'restoration_lex_v1': RESTORATION_LABELS,
     'restoration_lex_v2': (('earlier_outbound_buried', '먼저 나갈 화물 덮음', '건'),) + RESTORATION_LABELS,
     'restoration_lex_v3': (('earlier_outbound_buried', '먼저 나갈 화물 덮음', '건'),
-                           ('unknown_outbound_order', '순서 모르는 화물 위에 놓음', '건')) + RESTORATION_LABELS,
+                           ('unknown_outbound_order', '순서 모르는 화물 위에 놓음', '건'),
+                           RESTORATION_LABELS[0], ('rotation_count', '복귀 회전', '개체')) + RESTORATION_LABELS[1:],
 }
 
 

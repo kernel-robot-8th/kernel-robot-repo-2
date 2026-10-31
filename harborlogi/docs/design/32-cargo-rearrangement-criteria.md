@@ -3,7 +3,7 @@
 2026-10-31 초안이다. 사용자가 확정한 항목과 남은 항목은 [결정 기록](#결정-기록)에 있다.
 결정은 [ADR0017](../adr/0017-rule-governed-rearrangement-decision.md)에 기록했다. 규칙·계산·결정 모델의 판단 구조와 협의 절차는 ADR0017이 정본이다. 이 문서는 지표·인자·시험의 상세를 정한다.
 R0·R1은 여전히 현재 구현([ADR0010](../adr/0010-automatic-placement-and-replanning.md),
-[설계22](22-automatic-placement.md), [설계26](26-linked-yard-and-ranked-recommendation.md))이 정본이다. 순서 판정은 R0·R1·R2가 `order_relation` 하나를 쓴다. R1 점수는 `restoration_lex_v3`로 미확인 항을 막힘 바로 다음에 둔다. 이미 저장된 v1·v2 계획은 자기 표시 항목으로 계속 읽힌다.
+[설계22](22-automatic-placement.md), [설계26](26-linked-yard-and-ranked-recommendation.md))이 정본이다. 순서 판정은 R0·R1·R2가 `order_relation` 하나를 쓴다. R1 점수는 `restoration_lex_v3`로 미확인 항을 막힘 바로 다음에 둔다. 이미 저장된 v1·v2 계획은 자기 표시 항목으로 계속 읽힌다. R1도 `rotation_moves`(설치된 회전 쌍)에 있는 구역 쌍에서 2·3칸 화물의 0↔90° 회전 후보를 연다. 반출 이동(야드→반출대)도 포함한다. 복귀 회전 수는 구역 변경 바로 다음 항이다. 지금은 설치된 회전 쌍이 없어 업무 경로는 빈 집합을 넘기므로 동작이 같다(Q8 실물 확인 뒤 설계29에 넣는다).
 
 **구현 상태(2026-10-31):**
 - R2 계산 `plan_rearrangement`와 판정 함수 `order_relation`은 `harbor/spatial.py`에 있다. 시험은 `tests/test_rearrangement.py`다.
