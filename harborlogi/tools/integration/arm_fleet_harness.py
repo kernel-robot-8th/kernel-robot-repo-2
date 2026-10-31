@@ -231,7 +231,8 @@ class ArmFleet:
         self.send_trace = []
         from fleet.server.local_action_transport import UnixLocalActionTransport
         from fleet.server.physical_transfer_execution import PhysicalTransferExecution
-        for owner, name in ((UnixLocalActionTransport, "submit"), (PhysicalTransferExecution, "validate_send"),
+        for owner, name in ((UnixLocalActionTransport, "submit"), (UnixLocalActionTransport, "get"),
+                            (PhysicalTransferExecution, "validate_send"),
                             (PhysicalTransferExecution, "record_receipt")):
             setattr(owner, name, self._traced(getattr(owner, name), name))  # diagnostic: Fleet keeps only the reason
         written = json.loads((self.sim_out / "installation.json").read_text(encoding="utf-8"))
@@ -395,7 +396,7 @@ class ArmFleet:
             print("Simulation owner (MuJoCo) physical proofs:", sorted(self.observed), flush=True)
             print("Fence watch: seen", sorted(self.fence_seen, key=str), "slowest", round(self.fence_slowest, 3),
                   "s, failures", self.fence_failures[:10], flush=True)
-            for entry in self.send_trace[:12]:
+            for entry in self.send_trace[:2] + self.send_trace[-6:]:
                 print("== Fleet send", *entry, flush=True)
             if self.one_attempt and self.observed != {"PRE_DISPATCH", "POST_ACTION"}:
                 for name in ("owner.log", "writer.log"):  # the temporary run folder goes with the harness
