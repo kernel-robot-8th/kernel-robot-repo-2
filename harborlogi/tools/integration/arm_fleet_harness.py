@@ -139,7 +139,29 @@ class ArmFleet:
                 response = client.get("/api/fleet/dispatch-control")
                 print("Fence readback:", response.status_code, round(time.monotonic() - started, 3), "s",
                       response.text[:300], flush=True)
+            self.fence_seen, self.fence_slowest, self.fence_failures = set(), 0.0, []
+            self._thread(self._watch_fence)
         self._workers()
+
+    def _watch_fence(self):
+        """What the owner's 250 ms readback would have seen, polled through the attempt (diagnostic only)."""
+        import http.client
+        port = int(self.url.rsplit(":", 1)[1])
+        while not self.stopped.wait(.05):
+            started = time.monotonic()
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=.25)
+            try:
+                connection.request("GET", "/api/fleet/dispatch-control",
+                                   headers={"Authorization": "Bearer " + self.tokens["viewer"]})
+                response = connection.getresponse()
+                control = json.loads(response.read())
+                self.fence_seen.add((response.status, control.get("authority_epoch"), control.get("generation"),
+                                     control.get("dispatch_enabled")))
+            except Exception as error:
+                self.fence_failures.append(type(error).__name__)
+            finally:
+                connection.close()
+                self.fence_slowest = max(self.fence_slowest, time.monotonic() - started)
 
     def attach(self, url, tokens):
         """Approve and observe for a Fleet started elsewhere with install()'s options (one-Fleet full flow)."""
@@ -353,6 +375,8 @@ class ArmFleet:
             raise RuntimeError("simulation harness worker failed or did not stop")
         if self.sim:
             print("Simulation owner (MuJoCo) physical proofs:", sorted(self.observed), flush=True)
+            print("Fence watch: seen", sorted(self.fence_seen, key=str), "slowest", round(self.fence_slowest, 3),
+                  "s, failures", self.fence_failures[:10], flush=True)
             if self.one_attempt and self.observed != {"PRE_DISPATCH", "POST_ACTION"}:
                 for name in ("owner.log", "writer.log"):  # the temporary run folder goes with the harness
                     lines = (self.sim_out / name).read_text(encoding="utf-8", errors="replace").splitlines()
