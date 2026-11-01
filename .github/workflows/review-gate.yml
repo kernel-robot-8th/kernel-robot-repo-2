@@ -1,6 +1,6 @@
 name: review-gate
 
-# Required check. Passes for solo work; needs a teammate's approval once two or more people are active.
+# Required check. Needs a teammate's approval only when the PR touches files others changed recently.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
       - run: bash .github/review-gate.sh
         env:
           GH_TOKEN: ${{ github.token }}

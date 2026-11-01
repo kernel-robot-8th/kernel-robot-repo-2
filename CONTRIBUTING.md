@@ -60,7 +60,7 @@ gh repo set-default robotics-team-1213/harborlogi
    ```
 
 4. 브랜치를 `origin`에 push하고 팀 저장소 `main`으로 개발 PR을 연다(`gh pr create -R robotics-team-1213/harborlogi --base main --head <브랜치>`). PR에는 무엇을·왜 바꿨는지와 돌린 시험 결과를 적는다. 같은 브랜치를 다른 팀원도 이어서 고칠 수 있다.
-5. 필수 검사(`unittest`·`product-web` 3.10·3.12, `review-gate`)가 통과하면 병합한다. 팀 `main`은 ruleset이 PR 없는 push·force push·삭제를 막는다. `review-gate`는 인원을 세서 팀원 확인을 스스로 켠다(2026-11-02). 최근 14일 `main` 커밋 작성자·열린 PR 작성자·이 PR 작성자 중 사람(에이전트 계정 `codex` 제외)이 한 명이면 통과하고, 두 명 이상이면 바꾼 사람이 아닌 팀원 한 명의 승인(그 사람의 마지막 리뷰 기준)이 있어야 통과한다. 리뷰가 제출되거나 철회되면 자동으로 다시 돈다. 계산은 [`.github/review-gate.sh`](.github/review-gate.sh)가 한다.
+5. 필수 검사(`unittest`·`product-web` 3.10·3.12, `review-gate`)가 통과하면 병합한다. 팀 `main`은 ruleset이 PR 없는 push·force push·삭제를 막는다. `review-gate`는 작업이 만나는 곳에서만 팀원 확인을 요구한다(2026-11-02). 다른 사람(PR 작성자와 에이전트 계정 `codex` 제외)이 최근 14일 `main`에서 바꿨거나 열린 PR에서 바꾸는 파일을 이 PR도 바꾸면, 바꾼 사람이 아닌 팀원 한 명의 승인(그 사람의 마지막 리뷰 기준)이 있어야 통과한다. 겹치는 파일이 없으면 혼자 작업이든 서로 다른 영역의 병렬 작업이든 승인 없이 통과한다. 두 PR이 같은 파일을 바꾸면 나중에 검사를 받는 쪽이 승인을 받는다. PR에 push하거나 리뷰가 제출·철회되면 다시 돈다. 계산은 [`.github/review-gate.sh`](.github/review-gate.sh)가 한다.
 6. 팀 `main`에 병합되면 `mirror-to-course` workflow가 과정 저장소 `main`을 같은 커밋으로 맞춘다(force 없음). 과정 저장소에는 PR을 열거나 직접 커밋하지 않는다. 그쪽에만 커밋이 생기면 반영이 실패하니, 그 커밋을 팀 저장소 PR로 가져온 뒤 workflow를 다시 돌린다. 병합한 작업 브랜치는 지운다. `gh repo sync`로 팀 `main`을 덮어 맞추지 않는다. 팀 `main`에는 직접 커밋하지 않는다.
 
    반영에는 팀 저장소 secret `COURSE_REPO_TOKEN`이 필요하다. 과정 저장소에 push 권한이 있는 팀원의 토큰(`repo`·`workflow` 범위)을 넣는다. workflow 파일도 함께 반영되므로 `workflow` 범위가 빠지면 push가 거절된다. 지금 값은 장원종(livsbittt) 계정으로 이 용도만을 위해 따로 발급한 GitHub CLI 토큰이다(2026-11-01, `delete_repo` 범위 없음). 그 계정의 GitHub 설정 → Applications에서 승인을 취소하면 반영이 멈추니, 바꿀 때는 새 토큰을 먼저 넣는다. 반영 실패는 Actions의 `mirror-to-course` 실행에서 확인한다.
