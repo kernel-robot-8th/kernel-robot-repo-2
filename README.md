@@ -8,7 +8,7 @@
 
 커널아카데미 로보틱스 심화 캠프 주말 야간반 1기 2팀 프로젝트다.
 
-개발 정본은 [robotics-team-1213/harborlogi](https://github.com/robotics-team-1213/harborlogi)의 `main`이다. 팀 저장소에서 개발 PR을 리뷰·병합하고, 확정 변경을 [kernel-robot-8th/kernel-robot-repo-2](https://github.com/kernel-robot-8th/kernel-robot-repo-2)에 제출 PR로 반영한다. 자세한 절차는 [함께 작업하기](CONTRIBUTING.md)를 따른다.
+개발 정본은 [robotics-team-1213/harborlogi](https://github.com/robotics-team-1213/harborlogi)의 `main`이다. 팀 저장소에서 개발 PR을 병합하면 [kernel-robot-8th/kernel-robot-repo-2](https://github.com/kernel-robot-8th/kernel-robot-repo-2)로 자동 반영된다. 자세한 절차는 [함께 작업하기](CONTRIBUTING.md)를 따른다.
 
 ## 해결하려는 문제
 
