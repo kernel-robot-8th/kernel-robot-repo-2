@@ -18,8 +18,12 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0
-      - run: bash .github/review-gate.sh
+      # Run the base branch's gate so a PR cannot loosen its own check; gate edits take effect once merged.
+      - run: |
+          git show "origin/$BASE:.github/review-gate.sh" > "$RUNNER_TEMP/review-gate.sh"
+          bash "$RUNNER_TEMP/review-gate.sh"
         env:
+          BASE: ${{ github.event.pull_request.base.ref }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
