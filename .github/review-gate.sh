@@ -31,11 +31,17 @@ if [ -z "$overlap" ]; then
   exit 0
 fi
 echo "files shared with others' recent work:"; echo "$overlap"
+{ echo "### review-gate: files shared with others' recent work"; sed 's/^/- /' <<<"$overlap"; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 approvers=$(AUTHOR="$AUTHOR" gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" --jq '
   map(select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED"))
   | group_by(.user.login) | map(last) | .[]
   | select(.state == "APPROVED" and .user.login != env.AUTHOR) | .user.login')
 if [ -z "$approvers" ]; then
+  # Ask the people whose work it meets; a failed request (no write access, read-only token) only loses the hint.
+  for login in $(sed -E 's/.*\((.*)\)$/\1/' <<<"$overlap" | sort -u); do
+    gh api -X POST "repos/$REPO/pulls/$PR/requested_reviewers" -f "reviewers[]=$login" >/dev/null 2>&1 &&
+      echo "requested review from $login" || echo "could not request review from $login"
+  done
   echo "::error::this PR changes files others worked on recently, so someone other than $AUTHOR must approve"
   exit 1
 fi
