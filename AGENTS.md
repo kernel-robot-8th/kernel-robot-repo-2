@@ -15,4 +15,5 @@
 
 - 팀 `main`은 PR과 필수 검사로만 바뀐다([CONTRIBUTING §3](CONTRIBUTING.md#3-harbor를-고치는-흐름) 5번). 로컬에서 병합한 `main`을 push하지 않는다.
 - 작업 공간은 `.worktrees/<주제>`에 한 주제당 하나 만든다. `main`을 체크아웃한 워크트리를 두지 않는다. 병합된 워크트리는 바로 지운다.
-- `harbor_web/services.py`·`harbor_web/commands.py`는 여러 기능이 모이는 조립 파일이다. 동시에 한 세션만 고치고, 다른 세션은 그 PR이 병합된 뒤 새 `origin/main`에서 시작한다.
+- 업무 서비스는 책임별 파일에 있다. 입력·관측은 `services.py`, 현장 입력·공간은 `site_config.py`, 대기열은 `order_queue.py`, 계획 계산은 `plan_service.py`, 현장 확인·출발은 `field_episodes.py`, 공통 권한·저장은 `service_common.py`다. 고칠 때는 그 책임 파일을 고치고, 새 코드는 그 파일에서 import한다. `services.py` 위쪽의 다시 내보내기는 기존 호출부 호환용이다.
+- 명령 실행은 `commands.py`, 계획→설치 바인딩 해석과 Fleet 연결 설정은 `command_binding.py`다. `commands.py`는 여전히 명령 상태 전이가 모이는 파일이라 동시에 한 세션만 고치고, 다른 세션은 그 PR이 병합된 뒤 새 `origin/main`에서 시작한다.
