@@ -73,6 +73,17 @@ API v1.298 지원 서버에서는 `harbor.transport.TripIntent(request_key, cand
 python -m tools.integration.real_fleet_http --platform-root <플랫폼-root> --platform-sha <전체-40자리-SHA> --transport-only
 ```
 
+### 한 Fleet 첫 흐름 전체 (D-927)
+
+`--full-flow`는 시뮬 Fleet 하나에서 TRIP과 ARM을 함께 돌려 ①~⑤를 잇고, 처음 실패한 단계에서 멈춰 `--report` JSON에 양 끝 SHA와 단계별 결과를 남긴다. 정상 단계 관측은 플랫폼 `tools/sim/transfer_observer.py`가 별도 프로세스로 맡고, 하네스는 시험 운영자 승인과 합성 owner의 scene만 둔다.
+
+```text
+python -m tools.integration.real_fleet_http --platform-root <플랫폼-root> --platform-sha <전체-40자리-SHA> --full-flow --report <파일>
+tools/integration/nightly_full_flow.sh <작업-폴더> [harbor-ref] [platform-ref]
+```
+
+`nightly_full_flow.sh`는 두 저장소의 지정 ref(기본 main)를 얕게 받아 한 번 실행하고 `<작업-폴더>/reports/`에 보고서와 로그를 2주 보관한다. 종료 코드가 0이 아니면 보고서의 `first_failure`가 멈춘 단계다.
+
 ### 기존 Cell 공정 계약 시험
 
 `python -m unittest discover -s tests -v`의 통합 skip은 실제 서버 미검증을 뜻한다. 시험 PC에 깨끗한 고정 플랫폼 소스를 준비하고, 해당 플랫폼의 기존 시험 의존성을 설치한 별도 환경에서 다음 개발 도구를 실행한다.
