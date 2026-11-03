@@ -39,7 +39,7 @@ def order_timeline(order):
         state = audit.action.removeprefix('command.').upper()
         plan_id = plans_by_command[audit.object_id]
         events.append(dict(at=audit.created_at, kind='지시 상태', source=f'Harbor 저장 시각 · 감사 기록 #{audit.pk}',
-                           href=f'/plans/{plan_id}/', text=f'Plan #{plan_id} 지시 → {LABELS.get(state, state)}'
+                           text=f'Plan #{plan_id} 지시 → {LABELS.get(state, state)}'
                            + (f" · 사유 코드 {audit.detail['reason']}" if audit.detail.get('reason') else '')))
     for fact in CommandFact.objects.filter(command__in=commands):
         events.append(dict(at=fact.read_at, kind='ROSY 조회', source=f'ROSY 조회 사실 #{fact.pk}',

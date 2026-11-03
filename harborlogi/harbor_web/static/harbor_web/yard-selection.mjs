@@ -140,7 +140,8 @@ export function mountLinkedGrid(preview, scene, onSelect, inspectDestination = (
             const planned = box && mode !== 'local-draft' && rehandle.has(box.id);
             const chip = document.createElement('span'); chip.className = 'linked-occupancy'; chip.dataset.linkedOccupancy = '';
             chip.dataset.step = step; chip.dataset.height = height;
-            chip.textContent = `쌓인 높이 ${height}층${planned ? ' · 재취급 예정' : ''}`;
+            const spoken = document.createElement('span'); spoken.className = 'sr-only'; spoken.textContent = '쌓인 높이 ';
+            chip.append(spoken, `${height}층${planned ? ' · 재취급 예정' : ''}`);  // the legend names it on screen
             td.dataset.step = step; td.dataset.height = height;
             if (planned) { button.dataset.rehandle = box.id; td.dataset.rehandle = box.id; }
             button.append(chip);

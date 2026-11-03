@@ -5,15 +5,26 @@ from dataclasses import asdict
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from harbor.model import OutboundRequest, aware_time
 from harbor.outbound import plan_outbound, OutboundProposal
 from harbor_web.coordination import serialized
-from harbor_web.models import CargoFootprint, Observation, Order, Plan, Audit
+from harbor_web.models import CargoFootprint, Command, Observation, Order, Plan, Audit
 from harbor_web.service_common import Conflict, _domain, _role, _save
 from harbor_web.site_config import constraints, snapshot, spatial_policy, spatial_snapshot
 from harbor_web.order_queue import queue_digest, queue_snapshot, request_snapshot
+
+
+def _open_outbound_ahead(order):
+    """Outbound orders ahead in priority that are still open; a ledger-completed order no longer blocks
+    (orders have no close state, as in rearrangement.outbound_pending)."""
+    ahead = Q(priority_group__lt=order.priority_group)
+    if order.tie_policy == 'FIXED':
+        ahead |= Q(priority_group=order.priority_group, sequence__lt=order.sequence)
+    done = Command.objects.filter(state='COMPLETED').values('order_id')
+    return Order.objects.filter(ahead, kind='OUTBOUND').exclude(pk__in=done)
 
 
 @serialized
@@ -96,8 +107,7 @@ def _calculate_plan(actor, order, observation, *, now=None, trigger='manual', in
             'HOLD', 'SPATIAL_OBSERVATION_REQUIRED', yard.revision)
     elif order.kind == 'INBOUND':
         proposal = OutboundProposal('HOLD', 'INBOUND_PLANNER_NOT_AVAILABLE', yard.revision)
-    elif Order.objects.filter(kind='OUTBOUND', priority_group__lt=order.priority_group).exists() or (
-            order.tie_policy == 'FIXED' and Order.objects.filter(kind='OUTBOUND', priority_group=order.priority_group, sequence__lt=order.sequence).exists()):
+    elif _open_outbound_ahead(order).exists():
         proposal = OutboundProposal('HOLD', 'PRIORITY_ORDER_BLOCKED', yard.revision)
     elif spatial:
         from harbor.spatial import plan_spatial

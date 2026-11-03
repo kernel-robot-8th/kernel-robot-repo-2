@@ -96,7 +96,9 @@ def overview(request):
             row.update(status='HOLD', status_label='계획 재검토', reason=changes[0]['message'], action='최신 기준으로 검토', href=f'/requests/{order.pk}/')
         command = executions.get(order.pk)
         if command:
-            row.update(status=command.state, status_label={'UNKNOWN': '결과 불명', 'DISPATCHING': '제출 대조 필요', 'CANCEL_PENDING': '취소 대조 필요', 'BLOCKED': '인계 보류', 'PREPARED': '제안 검토 대기', 'RECONCILED': '원본 대조됨'}.get(command.state, command.state), action='원래 작업 대조', href=f'/work/{command.pk}/')
+            row.update(status=command.state, status_label={'UNKNOWN': '결과 불명', 'DISPATCHING': '제출 대조 필요', 'CANCEL_PENDING': '취소 대조 필요', 'BLOCKED': '인계 보류', 'PREPARED': '제안 검토 대기', 'RECONCILED': '원본 대조됨', 'COMPLETED': '업무 완료', 'CANCELLED': '취소됨'}.get(command.state, command.state), action='원래 작업 대조', href=f'/work/{command.pk}/')
+            if command.state == 'COMPLETED':
+                row.update(action='완료 기록 보기', href=f'/requests/{order.pk}/timeline/')
             row['reason'] = {
                 'UNKNOWN': '제출 결과가 불명입니다. 새 계획으로 재제출하지 말고 원래 요청을 대조하세요.',
                 'DISPATCHING': '제출 중이거나 응답을 확인하지 못했습니다. 원래 요청을 대조하세요.',
@@ -104,8 +106,11 @@ def overview(request):
                 'BLOCKED': '실행 인계가 보류되었습니다. 원래 작업의 설치·관측·복구 조건을 확인하세요.',
                 'PREPARED': '실행 인계 요청이 준비되었습니다. 원래 계획으로 현재 단계 제안을 검토하세요.',
                 'RECONCILED': '실행 원본을 대조했습니다. 실제 수행과 전체 업무 완료 근거를 확인하세요.',
+                'COMPLETED': '업무 장부가 내려놓기·퇴피 근거를 대조해 완료했습니다. 남은 조치는 없습니다.',
+                'CANCELLED': '실행 인계가 취소되었습니다. 필요하면 최신 기준으로 다시 검토하세요.',
             }.get(command.state, '원래 작업의 상태와 근거를 확인하세요.')
         rows.append(row)
+    rows.sort(key=lambda row: row['status'] == 'COMPLETED')  # finished work never outranks open work
     if observation:
         for row in rows:
             if row['href'].startswith(('/requests/', '/plans/')):
