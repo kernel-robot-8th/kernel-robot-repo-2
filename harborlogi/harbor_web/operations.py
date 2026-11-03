@@ -97,19 +97,22 @@ def operations_context(observation, *, now=None):
                 rehandled.add(move['cargo_id'])
     # Existing fields only (ADR 0020): no new state interpretation, no resend action.
     attention = []
+    if observation is None:
+        attention.append(dict(label='관측 없음', count=1, action='관측 연결 상태 확인', href='/inventory/'))
     if freshness['stale']:
         attention.append(dict(label='관측 유효 시간 밖', count=1, action='관측 선택', href='#observation-select'))
     if freshness['superseded']:
         attention.append(dict(label='같은 출처에 새 관측 있음', count=1, action='관측 선택', href='#observation-select'))
     if hold:
         attention.append(dict(label='HOLD 계획', count=hold, action='현재 검토 보기', href='#proposal-title'))
-    if excluded:
+    if excluded and not (freshness['stale'] or freshness['superseded']):  # stale pin already explains them
         attention.append(dict(label='재검토로 이동 집계 제외', count=excluded, action='현재 검토 보기', href='#proposal-title'))
     for c in commands:
         if c.state in ATTENTION_STATES:
-            attention.append(dict(label=f"{COMMAND_LABELS[c.state]} · {c.order.cargo.code}", count=1,
+            attention.append(dict(label=f"전체 인계 · {COMMAND_LABELS[c.state]} · {c.order.cargo.code}", count=1,
                                   action='원래 작업 대조', href=f'/work/{c.pk}/'))
     return dict(observation=observation, inventory=inventory, freshness=freshness, attention=attention,
+        attention_total=sum(item['count'] for item in attention),
         orders=dict(inbound=counts.get('INBOUND', 0), outbound=counts.get('OUTBOUND', 0), scope='전체 등록 지시'),
         workload=dict(plans=rows, ready_count=ready, hold_count=hold, excluded_count=excluded,
             rehandled_cargo_count=len(rehandled) if observation else None,

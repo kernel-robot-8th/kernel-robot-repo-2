@@ -117,9 +117,23 @@ class OperationsTests(TestCase):
     def test_stale_observation_is_flagged_and_has_no_ratio(self):
         plan = self.buried_plan()
         context = operations_context(plan.observation, now=self.now + timedelta(seconds=61))
-        self.assertEqual([a['label'] for a in context['attention']], ['관측 유효 시간 밖', '재검토로 이동 집계 제외'])
+        self.assertEqual([a['label'] for a in context['attention']], ['관측 유효 시간 밖'])
         self.assertIsNone(context['workload']['rehandle_per_outbound'])
-        self.assertIn('대상 반출 계획 없음', render_to_string('operations_summary.html', dict(operations=context)))
+        html = render_to_string('operations_summary.html', dict(operations=context))
+        self.assertIn('유효한 반출 계획 없음', html)
+        self.assertIn('관측 재확인 필요', html)
+        services.record_observation(self.admin, source_id=plan.observation.source_id,
+            source_revision='new', observed_at=self.now, provenance='DECLARED',
+            condition=plan.condition, payload=plan.observation.payload)
+        superseded = operations_context(plan.observation, now=self.now)
+        self.assertEqual([a['label'] for a in superseded['attention']], ['같은 출처에 새 관측 있음'])
+
+    def test_missing_observation_is_flagged_not_reported_valid(self):
+        context = operations_context(None)
+        self.assertEqual([a['label'] for a in context['attention']], ['관측 없음'])
+        html = render_to_string('operations_summary.html', dict(operations=context))
+        self.assertIn('확인이 필요한 것 1건', html)
+        self.assertNotIn('관측 유효', html)
 
     def test_unknown_handoff_asks_for_original_reconciliation_only(self):
         plan = self.buried_plan()
@@ -127,8 +141,13 @@ class OperationsTests(TestCase):
             plan_version=1, ledger_identity='test', fleet_origin='http://127.0.0.1:9999',
             fleet_principal='test', body_digest='a' * 64, binding={}, state='UNKNOWN')
         context = operations_context(plan.observation, now=self.now)
-        self.assertEqual(context['attention'], [dict(label=f'결과 불명 · {plan.order.cargo.code}', count=1,
+        self.assertEqual(context['attention'], [dict(label=f'전체 인계 · 결과 불명 · {plan.order.cargo.code}', count=1,
                                                      action='원래 작업 대조', href=f'/work/{command.pk}/')])
+        for state, flagged in [('DISPATCHING', True), ('CANCEL_PENDING', True), ('BLOCKED', True),
+                               ('PREPARED', False), ('RECONCILED', False)]:
+            Command.objects.filter(pk=command.pk).update(state=state)
+            self.assertEqual(bool(operations_context(plan.observation, now=self.now)['attention']), flagged, state)
+        Command.objects.filter(pk=command.pk).update(state='UNKNOWN')
         html = render_to_string('operations_summary.html', dict(operations=context))
         self.assertIn('확인이 필요한 것 1건', html)
         self.assertNotIn('재전송', html)
