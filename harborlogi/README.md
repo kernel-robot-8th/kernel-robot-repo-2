@@ -50,7 +50,7 @@ python -m harbor
 | 중복 요청 방지와 업무 장부(SQLite) | 장치 실행·정지와 실행 근거 |
 | 업무 완료 판정 (관측 근거와 대조) | 관측(World)과 작업 진행 기록 |
 
-Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만 한다. 자동 승인(admit)·재무장(rearm)·직접 장치 명령은 없다. 오래된 관측, 계획 버전 불일치, 보유 불명, 자리 부족이면 일부만 실행하는 안을 만들지 않고 보류(`HOLD`)한다. 현재 보유 중인 화물이 하나라도 있으면 재관측과 대조가 먼저다. 이송 차량의 출발은 공급암 S의 퇴피 확인(1차 사람이 확인, 이후 카메라)을 근거로만 허가하고, 실제 주행·정지는 Fleet과 CORE가 맡는다.
+Harbor는 ROSY 코드를 import하지 않고 ROSY 계층 꼭대기 관제(현장에서는 통합관제 R) 하나의 Fleet HTTP API로 제안·조회만 한다. 팔 작업의 승인은 셀 관제가 한다([ADR-0018](docs/adr/0018-harbor-enters-rosy-through-integrated-control.md)). 자동 승인(admit)·재무장(rearm)·직접 장치 명령은 없다. 오래된 관측, 계획 버전 불일치, 보유 불명, 자리 부족이면 일부만 실행하는 안을 만들지 않고 보류(`HOLD`)한다. 현재 보유 중인 화물이 하나라도 있으면 재관측과 대조가 먼저다. 이송 차량의 출발은 공급암 S의 퇴피 확인(1차 사람이 확인, 이후 카메라)을 근거로만 허가하고, 실제 주행·정지는 Fleet과 CORE가 맡는다.
 
 ## 구조
 
@@ -87,7 +87,7 @@ Harbor는 ROSY 코드를 import하지 않고 Fleet HTTP API로 제안·조회만
 | [docs/execution.md](docs/execution.md) | 공정 제안과 업무 장부 사용법 |
 | [docs/observation-acceptance.md](docs/observation-acceptance.md) | 물리 관측 연동의 수용 조건 |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | 실행 연결 계획 |
-| [docs/adr/](docs/adr/) | 설계 결정 기록 (0001 공정 binding과 완료 근거, 0002 고정 소스 Fleet 계약 시험, 0003 Harbor가 가진 Fleet 계약 시험 하네스, 0004 도메인 중립 ROSY 위의 항만 앱 경계(제안), 0005 Harbor·ROSY 책임 지도) |
+| [docs/adr/](docs/adr/) | 설계 결정 기록 (0001 공정 binding과 완료 근거, 0002 고정 소스 Fleet 계약 시험, 0003 Harbor가 가진 Fleet 계약 시험 하네스, 0004 도메인 중립 ROSY 위의 항만 앱 경계(제안), 0005 Harbor·ROSY 책임 지도, 0018 꼭대기 관제 하나로 연결) |
 | [docs/plans/](docs/plans/) | 작업 계획 (2026-10-21 항만 앱 분할) |
 | [docs/validation/](docs/validation/) | 날짜별 검증 기록 |
 

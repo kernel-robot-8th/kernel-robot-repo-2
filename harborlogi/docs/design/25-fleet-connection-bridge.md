@@ -14,7 +14,7 @@
 |---|---|
 | `HARBOR_FLEET_ALLOWED_ORIGINS` | 서버가 정한 UI 선택 가능 주소, 쉼표 구분. HTTPS 또는 기존 client가 허용한 loopback HTTP. 화면에서 임의 주소를 추가하지 않음 |
 | `HARBOR_FLEET_ORIGIN`·`HARBOR_FLEET_PRINCIPAL` | 기존 배포 관리 방식. origin을 설정하면 이 방식이 UI 프로필보다 우선하고 화면에서 연결 신원을 바꾸지 않음 |
-| FleetConnection | 서버 origin이 없는 경우 Harbor DB에 주소·서비스 신원·ARM 화면 설치 선언·version 저장. 서비스 토큰 없음 |
+| FleetConnection | origin은 ROSY 계층 꼭대기 관제 하나다(ADR0018). 서버 origin이 없는 경우 Harbor DB에 주소·서비스 신원·ARM 화면 설치 선언·version 저장. 서비스 토큰 없음 |
 | `HARBOR_FLEET_TOKEN` | 서버에 설치한 서비스 자격. UI 입력·응답·공개 문서에 실제 값을 넣지 않음 |
 | `HARBOR_LEDGER_PATH`·`HARBOR_BINDINGS_PATH` | 기존 업무 장부와 검토된 물리 참조 대응. 경로는 서버에서 관리하고 화면에는 설정 유무만 표시 |
 | ARM 화면 설치 선언 | 해당 Fleet 콘솔의 설치 확인. API 지원·승인 성공의 근거로 사용하지 않음 |
