@@ -3,6 +3,7 @@ from datetime import timedelta
 from django.test import TestCase
 
 from harbor_web.command_models import EvidenceSubmission
+from harbor_web.commands import _save
 from harbor_web.models import Audit, Command, CommandFact, Plan
 from harbor_web.tests import test_services as fixtures
 from harbor_web.tests import test_workspace as workspace_fixtures
@@ -16,9 +17,12 @@ class OrderTimelineTests(TestCase):
     order = fixtures.ServicesTests.order
     buried_plan = workspace_fixtures.WorkspaceTests.buried_plan
 
-    def command(self, plan, state='RECONCILED'):
-        return Command.objects.create(order=plan.order, plan=plan, actor=self.operator, plan_version=1, state=state,
+    def command(self, plan, *states):
+        command = Command.objects.create(order=plan.order, plan=plan, actor=self.operator, plan_version=1,
             ledger_identity='l', fleet_origin='o', fleet_principal='p', body_digest='a' * 64, binding={})
+        for state in states or ('RECONCILED',):
+            _save(command, self.operator, state)  # the real write path: state plus its audit row
+        return command
 
     def get(self, order):
         self.client.force_login(self.operator)
@@ -36,21 +40,26 @@ class OrderTimelineTests(TestCase):
 
     def test_actual_line_names_sources_marks_evidence_unreconciled_and_never_infers_completion(self):
         plan = self.buried_plan()
-        command = self.command(plan)
+        command = self.command(plan, 'DISPATCHING', 'RECONCILED')
         CommandFact.objects.create(created_by=self.operator, command=command, command_key=command.key,
             body_digest=command.body_digest, fleet_origin='o', fleet_principal='p', job=dict(status='GOAL_CONFIRMED'),
             receipt=dict(receipt_id='r'), read_at=self.now + timedelta(seconds=5))
         EvidenceSubmission.objects.create(created_by=self.operator, command=command, placement={}, retreat={})
         response = self.get(plan.order)
         events = response.context['actual_line']
-        self.assertEqual({'실행 지시', '지시 상태(마지막 저장 시각)', 'ROSY 조회', '업무 근거'}, {e['kind'] for e in events})
+        self.assertEqual({'실행 지시', '지시 상태', 'ROSY 조회', '업무 근거'}, {e['kind'] for e in events})
+        transitions = [e['text'] for e in events if e['kind'] == '지시 상태']
+        self.assertEqual(transitions, [f'Plan #{plan.pk} 지시 → 제출 대조 필요', f'Plan #{plan.pk} 지시 → 원본 대조됨'])
+        self.assertTrue(all(e['source'].startswith('감사 기록 #') for e in events if e['kind'] == '지시 상태'))
         self.assertTrue(all(e['source'] for e in events))
         self.assertContains(response, '(대조 전)')
         self.assertContains(response, '물리 receipt 있음')
         self.assertContains(response, '원본 대조됨')
         self.assertNotContains(response, '업무 완료(업무 장부 대조)')
         self.assertEqual([e['at'] for e in events], sorted(e['at'] for e in events))
-        Command.objects.filter(pk=command.pk).update(state='COMPLETED')
+        Command.objects.filter(pk=command.pk).update(state='COMPLETED')  # a state with no audited transition
+        self.assertNotContains(self.get(plan.order), '업무 완료(업무 장부 대조)')
+        _save(command, self.operator, 'COMPLETED')
         self.assertContains(self.get(plan.order), '업무 완료(업무 장부 대조)')
 
     def test_get_writes_nothing_and_post_is_refused(self):

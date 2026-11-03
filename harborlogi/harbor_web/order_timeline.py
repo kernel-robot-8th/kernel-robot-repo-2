@@ -5,7 +5,7 @@ Actual line: only records that carry their own time. Nothing is synthesized, int
 and completion is only a Command in COMPLETED (the business ledger's reconciliation result).
 """
 from harbor_web.command_models import EvidenceSubmission
-from harbor_web.models import Command, CommandFact, DepartureIntent, FieldConfirmation, Plan
+from harbor_web.models import Audit, Command, CommandFact, DepartureIntent, FieldConfirmation, Plan
 from harbor_web.operations import move_phases
 from harbor_web.workspace import COMMAND_LABELS
 
@@ -32,10 +32,15 @@ def order_timeline(order):
     for command in commands:
         events.append(dict(at=command.created_at, kind='실행 지시', source=f'Plan #{command.plan_id} 지시',
                            href=f'/plans/{command.plan_id}/', text='실행 지시 생성'))
-        events.append(dict(at=command.updated_at, kind='지시 상태(마지막 저장 시각)', source=f'Plan #{command.plan_id} 지시',
-                           href=f'/plans/{command.plan_id}/',
-                           text=f'마지막 기록 상태 {LABELS.get(command.state, command.state)}'
-                                + (f' · ROSY {command.mission_id}' if command.mission_id else '')))
+    # Every state change is saved with an immutable audit row in the same transaction (commands._save).
+    plans_by_command = {str(c.pk): c.plan_id for c in commands}
+    for audit in Audit.objects.filter(object_type='Command', object_id__in=plans_by_command,
+                                      action__startswith='command.').exclude(action='command.prepare'):
+        state = audit.action.removeprefix('command.').upper()
+        plan_id = plans_by_command[audit.object_id]
+        events.append(dict(at=audit.created_at, kind='지시 상태', source=f'감사 기록 #{audit.pk}',
+                           href=f'/plans/{plan_id}/', text=f'Plan #{plan_id} 지시 → {LABELS.get(state, state)}'
+                           + (f" · {audit.detail['reason']}" if audit.detail.get('reason') else '')))
     for fact in CommandFact.objects.filter(command__in=commands):
         events.append(dict(at=fact.read_at, kind='ROSY 조회', source=f'ROSY 조회 사실 #{fact.pk}',
                            text=f"작업 {(fact.job or {}).get('status', '상태 미상')}" + (' · 물리 receipt 있음' if fact.receipt else '')))
@@ -49,5 +54,5 @@ def order_timeline(order):
     for departure in DepartureIntent.objects.filter(episode__order=order):
         events.append(dict(at=departure.created_at, kind='출발', source=f'출발 의도 #{departure.pk}',
                            href=f'/field/{departure.episode_id}/', text=f'{departure.vehicle_id} 출발 의도 기록'))
-    events.sort(key=lambda event: event['at'])
+    events.sort(key=lambda event: event['at'])  # stable: same-time records keep their source order
     return dict(plan_line=plan_line, actual_line=events)

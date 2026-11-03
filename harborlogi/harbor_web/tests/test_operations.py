@@ -184,7 +184,8 @@ class OperationsTests(TestCase):
         actual = operations_context(plan.observation, now=self.now)['actual']
         # Buried outbound: one cargo moved off before the outbound move, then returned.
         self.assertEqual(actual, dict(completed=1, inbound=0, outbound=1, rearrange=0,
-                                      outbound_rehandle_moves=1, unmatched=[], throughput=None))
+                                      outbound_rehandle_moves=1, unmatched=[],
+                                      throughput=dict(window_hours=24, count=0, span_minutes=0, per_hour=None)))
         html = render_to_string('operations_summary.html',
                                 dict(operations=operations_context(plan.observation, now=self.now)))
         for text in ('실제 완료량·처리율', '1<small> 건 완료', '실행된 재취급 이동 1회', '처리율 미집계'):
@@ -195,6 +196,27 @@ class OperationsTests(TestCase):
         self.handoff(newer, 'COMPLETED', dict(outbound_id=outbound, moves=[dict(cargo_id=outbound)]))
         actual = operations_context(plan.observation, now=self.now)['actual']
         self.assertEqual((actual['completed'], actual['outbound'], actual['outbound_rehandle_moves']), (1, 1, 0))
+
+    def completed_at(self, *ages):
+        """One completed order per age, each saved through the real path so its audit row has that time."""
+        from harbor_web.commands import _save
+        plan = self.buried_plan()
+        for index, age in enumerate(ages):
+            order = plan.order if index == 0 else self.order(self.cargo(f'T{index}'), sequence=10 + index)
+            source = plan if index == 0 else services.make_plan(
+                self.operator, order_id=order.pk, expected_version=1, observation_id=plan.observation_id)
+            command = self.handoff(source, 'RECONCILED', dict(outbound_id=order.cargo.code, moves=[]))
+            with patch('django.utils.timezone.now', return_value=self.now - age):
+                _save(command, self.operator, 'COMPLETED')
+        return operations_context(plan.observation, now=self.now)['actual']['throughput']
+
+    def test_throughput_spans_first_to_last_completion_inside_the_window(self):
+        throughput = self.completed_at(timedelta(hours=30), timedelta(minutes=40), timedelta(minutes=1))
+        self.assertEqual(throughput, dict(window_hours=24, count=2, span_minutes=39, per_hour=round(2 / (39 / 60), 1)))
+
+    def test_short_span_is_not_turned_into_an_hourly_rate(self):
+        throughput = self.completed_at(timedelta(minutes=5), timedelta(minutes=1))
+        self.assertEqual((throughput['count'], throughput['span_minutes'], throughput['per_hour']), (2, 4, None))
 
 
 class RearrangementOperationsTests(TestCase):

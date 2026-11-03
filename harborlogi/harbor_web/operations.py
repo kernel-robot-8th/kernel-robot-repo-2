@@ -3,7 +3,7 @@ from django.db.models import Count, Max
 from django.utils import timezone
 
 from harbor_web import services
-from harbor_web.models import Command, Observation, Order, Plan
+from harbor_web.models import Audit, Command, Observation, Order, Plan
 from harbor_web.workspace import COMMAND_LABELS
 
 ATTENTION_STATES = ('UNKNOWN', 'DISPATCHING', 'CANCEL_PENDING', 'BLOCKED')
@@ -57,7 +57,24 @@ def move_phases(plan, order):
             '재취급' if i < target else '반출' if i == target else '복귀') for i, m in enumerate(moves)]
 
 
-def _actual(commands):
+THROUGHPUT_WINDOW = timezone.timedelta(hours=24)
+THROUGHPUT_MIN_SPAN = timezone.timedelta(minutes=10)  # shorter spans turn two completions into absurd hourly rates
+
+
+def _throughput(done, now):
+    """Gross-crane-productivity style: completions Harbor recorded in the window / (last - first).
+    The time is the audit row written with the COMPLETED save (commands._save), not the robot's finish time."""
+    stamps = dict(Audit.objects.filter(object_type='Command', action='command.completed',
+                                       object_id__in=[str(c.pk) for c in done])
+                  .values_list('object_id').annotate(at=Max('created_at')))
+    times = sorted(at for at in stamps.values() if now - THROUGHPUT_WINDOW <= at <= now)
+    span = times[-1] - times[0] if times else timezone.timedelta(0)
+    return dict(window_hours=int(THROUGHPUT_WINDOW.total_seconds() // 3600), count=len(times),
+                span_minutes=int(span.total_seconds() // 60),
+                per_hour=round(len(times) / (span.total_seconds() / 3600), 1) if span >= THROUGHPUT_MIN_SPAN else None)
+
+
+def _actual(commands, now):
     """COMPLETED is set only after the ARM_TRANSFER ledger finish() (commands.advance_command); legacy
     cell stages never create a Command. The binding is the digest-checked ledger payload."""
     latest = {}
@@ -78,7 +95,7 @@ def _actual(commands):
             rehandles += index
     return dict(completed=len(done), inbound=kinds.count('INBOUND'), outbound=kinds.count('OUTBOUND'),
                 rearrange=kinds.count('REARRANGE'), outbound_rehandle_moves=None if unmatched else rehandles,
-                unmatched=unmatched, throughput=None)
+                unmatched=unmatched, throughput=_throughput(done, now))
 
 
 def operations_context(observation, *, now=None):
@@ -147,7 +164,7 @@ def operations_context(observation, *, now=None):
         if c.state in ATTENTION_STATES:
             attention.append(dict(label=f"전체 인계 · {COMMAND_LABELS[c.state]} · {_cargo_label(c.order)}", count=1,
                                   action='원래 작업 대조', href=f'/work/{c.pk}/'))
-    actual = _actual(commands)
+    actual = _actual(commands, now)
     for c in actual['unmatched']:
         attention.append(dict(label=f"완료 인계 · 반출 이동 대조 불가 · {_cargo_label(c.order)}", count=1,
                               action='원래 작업 대조', href=f'/work/{c.pk}/'))
