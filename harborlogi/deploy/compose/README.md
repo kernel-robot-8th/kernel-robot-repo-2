@@ -63,6 +63,8 @@ Waitress는 그대로 `127.0.0.1:8060`에서 듣는다. 호스트의 8060 포트
 
 ## 백업
 
+백업 폴더(`HARBOR_BACKUP_DIR`)는 컨테이너 사용자 uid 10001이 쓸 수 있어야 한다. root 소유로 두면 `backup_product`가 `Permission denied`로 실패한다(2026-11-04 robttt). 처음 한 번 `sudo chown 10001 "$HARBOR_BACKUP_DIR" && sudo chmod 750 "$HARBOR_BACKUP_DIR"`로 맞춘다. 갱신 스크립트에서 백업이 실패하면 다음 단계로 넘어가지 않게 한다(파이프로 출력을 자르면 실패가 가려진다).
+
 writer가 멈춘 상태에서 짝 백업한다. 복원 규칙은 [제품 웹 안내](../../docs/product-web.md#배포백업검증)를 따른다.
 
 ```bash
