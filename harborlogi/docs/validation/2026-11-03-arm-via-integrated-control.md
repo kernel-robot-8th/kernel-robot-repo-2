@@ -18,7 +18,7 @@
 
 | 실행 | 결과 |
 |---|---|
-| `--arm-via-r` 8회 | 7회 통과(owner submit 1, 관측 PRE_DISPATCH·POST_ACTION, 업무 장부 WAITING 유지, receipt `AT_TARGET_AND_CLEAR`, 다른 principal 403). 1회 HOLD |
+| `--arm-via-r` 18회 | 17회 통과(owner submit 1, 관측 PRE_DISPATCH·POST_ACTION, 업무 장부 WAITING 유지, receipt `AT_TARGET_AND_CLEAR`, 다른 principal 403). 1회 HOLD |
 | `--arm-only` 3회(기준) | 3회 통과 |
 
 통과한 실행에서 Harbor 업무 장부는 R이 보여 준 `proposal_principal_id`(Harbor 자신)로 결속했고, 셀 운영자는 셀에서만 승인했다.
@@ -31,6 +31,6 @@
 
 ## 미해결
 
-- 1회 HOLD: owner submit 0, 관측 PRE_DISPATCH만 있는 상태에서 셀 작업이 HOLD가 됐다. 같은 조건의 수동 재현 2회와 시험 7회에서는 다시 나오지 않았다. 원인은 확인하지 못했다. 다음 확인은 실패 시 셀 작업의 `reason`을 기록하도록 하네스 출력에 더하는 것이다.
+- 1회 HOLD: owner submit 0, 관측 PRE_DISPATCH만 있는 상태에서 셀 작업이 HOLD가 됐다. 같은 조건의 수동 재현 2회와 이후 시험 17회(실패 시 셀 작업 상태·이유·최근 이벤트를 출력하는 하네스 `3a37b3a` 10회 포함)에서는 다시 나오지 않았다. 원인은 확인하지 못했다. 다음 실패 때 하네스 출력의 `== cell job` 줄이 원인 근거다.
 - 플랫폼 v1.356이 공개 `origin/main`에 게시된 뒤 같은 시험을 공개 SHA로 다시 돌린다.
 - 현장 R↔CELL-A TLS 연결은 플랫폼 D-960 수용 조건이며 이 기록 범위 밖이다.
