@@ -2,7 +2,10 @@ import json
 import os
 from pathlib import Path
 import socket
+import signal
+import subprocess
 import sys
+import time
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -85,6 +88,46 @@ class CheckAllTests(unittest.TestCase):
         )
         self.assertEqual(code, 3)
         self.assertIn('diagnostic', log)
+
+    def test_exited_parent_does_not_wait_for_descendant_output_pipe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = Path(directory) / 'child.pid'
+            child = 'import time; time.sleep(3)'
+            parent = (
+                'import subprocess,sys; from pathlib import Path; '
+                f'child=subprocess.Popen([sys.executable,"-c",{child!r}]); '
+                f'Path({str(pid_file)!r}).write_text(str(child.pid)); '
+                'print("parent complete",flush=True)'
+            )
+            try:
+                started = time.monotonic()
+                code, log = check_all.run_command([sys.executable, '-c', parent], check_all.test_environment(), timeout=.5)
+                self.assertEqual(code, 0)
+                self.assertIn('parent complete', log)
+                self.assertLess(time.monotonic() - started, 1.5)
+            finally:
+                if pid_file.exists():
+                    pid = int(pid_file.read_text())
+                    if os.name == 'nt':
+                        subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    else:
+                        try:
+                            os.kill(pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows taskkill fallback')
+    def test_failed_tree_cleanup_reaps_parent_and_reports_timeout(self):
+        with patch.object(check_all.subprocess, 'run', return_value=subprocess.CompletedProcess([], 128)):
+            code, log = check_all.run_command(
+                [sys.executable, '-c', 'import time; print("partial",flush=True); time.sleep(3)'],
+                check_all.test_environment(), timeout=.5,
+            )
+        self.assertEqual(code, 124)
+        self.assertIn('partial', log)
+        self.assertIn('Process-tree cleanup failed: taskkill exit 128', log)
+        self.assertIn('TimeoutExpired', log)
 
     def test_catalog_includes_every_javascript_suite_and_browser_acceptance(self):
         with tempfile.TemporaryDirectory() as directory:

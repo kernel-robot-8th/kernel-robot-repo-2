@@ -13,6 +13,7 @@ import secrets
 import signal
 import subprocess
 import sys
+import tempfile
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,24 +46,35 @@ def checks(output):
 def run_command(command, env, timeout=600):
     group = ({'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == 'nt'
              else {'start_new_session': True})
-    with subprocess.Popen(command, cwd=ROOT, env=env, stdout=subprocess.PIPE,
-                          stderr=subprocess.STDOUT, text=True, encoding='utf-8',
-                          errors='replace', **group) as child:
+    # A descendant holding stdout must not prevent an exited parent from completing.
+    # shortcut: detached children of an exited Windows parent are not supervised; use a Job Object if harnesses daemonize.
+    with tempfile.TemporaryFile() as capture, subprocess.Popen(
+            command, cwd=ROOT, env=env, stdout=capture, stderr=subprocess.STDOUT, **group) as child:
+        diagnostic = ''
         try:
-            log, _ = child.communicate(timeout=timeout)
-            return child.returncode, log
+            code = child.wait(timeout=timeout)
         except subprocess.TimeoutExpired as error:
             # Kill the tree while its parent still exists so its servers and browsers are included.
             if os.name == 'nt':
-                subprocess.run(['taskkill', '/PID', str(child.pid), '/T', '/F'],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                try:
+                    cleanup = subprocess.run(['taskkill', '/PID', str(child.pid), '/T', '/F'],
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+                    if cleanup.returncode:
+                        diagnostic += f'\nProcess-tree cleanup failed: taskkill exit {cleanup.returncode}; descendants may remain.\n'
+                except (OSError, subprocess.TimeoutExpired) as cleanup_error:
+                    diagnostic += f'\nProcess-tree cleanup failed: {cleanup_error}; descendants may remain.\n'
             else:
                 try:
                     os.killpg(child.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-            log, _ = child.communicate()
-            return 124, log + f'\nTimeoutExpired: {error}\n'
+            if child.poll() is None:
+                child.kill()
+            child.wait()
+            code = 124
+            diagnostic += f'\nTimeoutExpired: {error}\n'
+        capture.seek(0)
+        return code, capture.read().decode('utf-8', errors='replace') + diagnostic
 
 
 def run(output):
