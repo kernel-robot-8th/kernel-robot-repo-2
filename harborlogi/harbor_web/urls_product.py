@@ -10,6 +10,7 @@ urlpatterns = [
     path('cargo/', views.cargo_list, name='cargo'),
     path('cargo/new/', views.cargo_new, name='cargo_new'),
     path('cargo/<int:pk>/footprint/', views.cargo_footprint, name='cargo_footprint'),
+    path('cargo/<int:pk>/history/', views.cargo_history, name='cargo_history'),
     path('requests/', views.order_list, name='requests'),
     path('requests/new/', views.order_new, name='request_new'),
     path('requests/<int:pk>/', views.order_detail, name='request_detail'),
