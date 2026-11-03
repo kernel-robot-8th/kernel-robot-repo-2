@@ -6,6 +6,7 @@ and completion is only a Command in COMPLETED (the business ledger's reconciliat
 """
 from harbor_web.command_models import EvidenceSubmission
 from harbor_web.models import Command, CommandFact, DepartureIntent, FieldConfirmation, Plan
+from harbor_web.operations import move_phases
 from harbor_web.workspace import COMMAND_LABELS
 
 LABELS = dict(COMMAND_LABELS, CANCELLED='취소됨', COMPLETED='업무 완료(업무 장부 대조)')
@@ -17,15 +18,8 @@ def _place(move, side):
 
 
 def _steps(plan):
-    moves = plan.result.get('moves') or []
-    # shortcut: phase fallback mirrors operations.py for plans saved without phase_label; share it when that moves.
-    target = next((i for i, m in enumerate(moves) if m['cargo_id'] == plan.order.cargo.code), -1)
-    steps = []
-    for i, move in enumerate(moves):
-        phase = move.get('phase_label') or ('입고' if plan.order.kind == 'INBOUND' else
-            '재취급' if i < target else '반출' if i == target else '복귀')
-        steps.append(dict(phase=phase, text=f"{move['cargo_id']} · {_place(move, 'source')} → {_place(move, 'destination')}"))
-    return steps
+    return [dict(phase=phase, text=f"{move['cargo_id']} · {_place(move, 'source')} → {_place(move, 'destination')}")
+            for move, phase in zip(plan.result.get('moves') or [], move_phases(plan, plan.order))]
 
 
 def order_timeline(order):

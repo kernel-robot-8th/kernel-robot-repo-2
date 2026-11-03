@@ -9,7 +9,7 @@ from harbor_web.workspace import COMMAND_LABELS
 ATTENTION_STATES = ('UNKNOWN', 'DISPATCHING', 'CANCEL_PENDING', 'BLOCKED')
 
 
-def _phases(plan, order):
+def move_phases(plan, order):
     """Phase of each stored move: its own label, else its order around the target cargo."""
     moves = plan.result.get('moves', [])
     target = next((i for i, m in enumerate(moves) if m['cargo_id'] == order.cargo.code), -1)
@@ -21,7 +21,7 @@ def _actual(commands):
     """Only ledger-completed commands count: Harbor saves COMPLETED solely after the
     ARM_TRANSFER business ledger finished (commands.advance_command); legacy cell stages never do."""
     done = [c for c in commands if c.state == 'COMPLETED' and c.order.kind == 'OUTBOUND']
-    return dict(completed=len(done), rehandle_moves=sum(_phases(c.plan, c.order).count('재취급') for c in done),
+    return dict(completed=len(done), rehandle_moves=sum(move_phases(c.plan, c.order).count('재취급') for c in done),
                 throughput=None)
 
 
@@ -103,7 +103,7 @@ def operations_context(observation, *, now=None):
         move_count += len(moves)
         outbound = plan.order.kind == 'OUTBOUND'
         outbound_plans += outbound
-        for move, phase in zip(moves, _phases(plan, plan.order)):
+        for move, phase in zip(moves, move_phases(plan, plan.order)):
             phases[phase] = phases.get(phase, 0) + 1
             outbound_rehandles += outbound and phase == '재취급'
             if move['cargo_id'] != plan.order.cargo.code:
