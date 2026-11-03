@@ -56,6 +56,13 @@ class OccupancyWorkspaceTests(TestCase):
         for text in ('칸별 점유 높이', '3층 이상', '재취급 예정 화물이 있는 칸', '계획 기준 · 실적 아님', 'data-rehandle="C2"'):
             self.assertContains(page, text)
 
+    def test_scene_carries_the_same_stored_rehandle_cargo_for_the_linked_views(self):
+        order, observation = self.grid()
+        plan = services.make_plan(self.operator, order_id=order.pk, expected_version=1, observation_id=observation.pk)
+        context = workspace_context(order, plan)
+        self.assertEqual(context['yard_scene']['rehandle'], context['yard_occupancy']['rehandle_cargo'])
+        self.assertEqual(context['yard_scene']['rehandle'], ['C2'])
+
     def test_without_a_plan_nothing_is_marked_for_rehandling(self):
         order, observation = self.grid()
         occupancy = workspace_context(order, None, review_observation=observation)['yard_occupancy']

@@ -141,6 +141,10 @@ def workspace_context(order, plan=None, *, priority_form=None, plan_form=None, r
     if priority_form is None:
         priority_form = forms.PriorityForm(initial=dict(expected_version=order.version, priority_group=order.priority_group,
             sequence=order.sequence, tie_policy=order.tie_policy, note=order.note))
+    occupancy = occupancy_map(stages[0] if stages else None, moves)
+    scene = scene_for(stages)
+    if scene:
+        scene['rehandle'] = occupancy['rehandle_cargo'] if occupancy else []  # Stored-plan cargo; the viewer never recomputes it.
     completion_plan = command.plan if command else plan
     completion_moves = completion_plan.result['moves'] if completion_plan else []
     related_arms = sorted({arm for move in completion_moves for arm in [move['primary_arm'], *move['alternate_arms']]})
@@ -148,7 +152,7 @@ def workspace_context(order, plan=None, *, priority_form=None, plan_form=None, r
     return dict(order=order, plan=plan, plans=plans, command=command, execution=detail,
         pipeline=pipeline_for(order, plan, command, detail), review_observation=review_observation,
         review_differs=bool(plan and review_observation and plan.observation_id != review_observation.pk),
-        source=source, latest_source=latest, yard_stages=stages, yard_scene=scene_for(stages), yard_occupancy=occupancy_map(stages[0] if stages else None, moves), display_moves=moves,
+        source=source, latest_source=latest, yard_stages=stages, yard_scene=scene, yard_occupancy=occupancy, display_moves=moves,
         plan_explanation=explain_plan(plan) if plan else None,
         plan_changes=changes, different_execution_plan=different, decision=decision,
         gate=gate, gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']) if plan else '',
