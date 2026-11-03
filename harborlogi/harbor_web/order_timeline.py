@@ -35,12 +35,12 @@ def order_timeline(order):
     # Every state change is saved with an immutable audit row in the same transaction (commands._save).
     plans_by_command = {str(c.pk): c.plan_id for c in commands}
     for audit in Audit.objects.filter(object_type='Command', object_id__in=plans_by_command,
-                                      action__startswith='command.').exclude(action='command.prepare'):
+                                      action__startswith='command.').exclude(action='command.prepare').order_by('created_at', 'pk'):
         state = audit.action.removeprefix('command.').upper()
         plan_id = plans_by_command[audit.object_id]
-        events.append(dict(at=audit.created_at, kind='지시 상태', source=f'감사 기록 #{audit.pk}',
+        events.append(dict(at=audit.created_at, kind='지시 상태', source=f'Harbor 저장 시각 · 감사 기록 #{audit.pk}',
                            href=f'/plans/{plan_id}/', text=f'Plan #{plan_id} 지시 → {LABELS.get(state, state)}'
-                           + (f" · {audit.detail['reason']}" if audit.detail.get('reason') else '')))
+                           + (f" · 사유 코드 {audit.detail['reason']}" if audit.detail.get('reason') else '')))
     for fact in CommandFact.objects.filter(command__in=commands):
         events.append(dict(at=fact.read_at, kind='ROSY 조회', source=f'ROSY 조회 사실 #{fact.pk}',
                            text=f"작업 {(fact.job or {}).get('status', '상태 미상')}" + (' · 물리 receipt 있음' if fact.receipt else '')))

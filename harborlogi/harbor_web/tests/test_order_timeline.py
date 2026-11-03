@@ -50,7 +50,7 @@ class OrderTimelineTests(TestCase):
         self.assertEqual({'실행 지시', '지시 상태', 'ROSY 조회', '업무 근거'}, {e['kind'] for e in events})
         transitions = [e['text'] for e in events if e['kind'] == '지시 상태']
         self.assertEqual(transitions, [f'Plan #{plan.pk} 지시 → 제출 대조 필요', f'Plan #{plan.pk} 지시 → 원본 대조됨'])
-        self.assertTrue(all(e['source'].startswith('감사 기록 #') for e in events if e['kind'] == '지시 상태'))
+        self.assertTrue(all(e['source'].startswith('Harbor 저장 시각 · 감사 기록 #') for e in events if e['kind'] == '지시 상태'))
         self.assertTrue(all(e['source'] for e in events))
         self.assertContains(response, '(대조 전)')
         self.assertContains(response, '물리 receipt 있음')

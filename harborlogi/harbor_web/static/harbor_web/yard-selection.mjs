@@ -68,7 +68,8 @@ export function mountLinkedGrid(preview, scene, onSelect, inspectDestination = (
         item.append(swatch, '재취급 예정 화물'); legend.append(item);
       }
       const basis = document.createElement('p'); basis.className = 'helptext'; basis.dataset.linkedOccupancyBasis = '';
-      basis.textContent = `점유 높이: ${mode === 'local-draft' ? '로컬 가상 배치' : stageLabel || '관측'} 기준 칸별 층 수 · 계획 기준 · 실적 아님`;
+      const kind = mode === 'local-draft' ? '가상 배치 · 실적 아님' : /예상/.test(stageLabel || '') ? '예상 · 실적 아님' : '관측값';
+      basis.textContent = `쌓인 높이: ${mode === 'local-draft' ? '로컬 가상 배치' : stageLabel || '관측'} 기준 칸별 층 수 · ${kind} · 재취급 예정은 저장된 계획 기준`;
       grid.append(legend, basis);
     }
     if (mode === 'local-draft') {
@@ -139,7 +140,7 @@ export function mountLinkedGrid(preview, scene, onSelect, inspectDestination = (
             const planned = box && mode !== 'local-draft' && rehandle.has(box.id);
             const chip = document.createElement('span'); chip.className = 'linked-occupancy'; chip.dataset.linkedOccupancy = '';
             chip.dataset.step = step; chip.dataset.height = height;
-            chip.textContent = `점유 ${height}층${planned ? ' · 재취급 예정' : ''}`;
+            chip.textContent = `쌓인 높이 ${height}층${planned ? ' · 재취급 예정' : ''}`;
             td.dataset.step = step; td.dataset.height = height;
             if (planned) { button.dataset.rehandle = box.id; td.dataset.rehandle = box.id; }
             button.append(chip);

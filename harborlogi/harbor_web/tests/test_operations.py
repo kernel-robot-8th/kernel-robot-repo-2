@@ -212,7 +212,15 @@ class OperationsTests(TestCase):
 
     def test_throughput_spans_first_to_last_completion_inside_the_window(self):
         throughput = self.completed_at(timedelta(hours=30), timedelta(minutes=40), timedelta(minutes=1))
-        self.assertEqual(throughput, dict(window_hours=24, count=2, span_minutes=39, per_hour=round(2 / (39 / 60), 1)))
+        self.assertEqual(throughput, dict(window_hours=24, count=2, span_minutes=39, per_hour=round(1 / (39 / 60), 1)))
+
+    def test_window_edges_and_a_single_completion(self):
+        edge = self.completed_at(timedelta(hours=24), timedelta(0))
+        self.assertEqual((edge['count'], edge['span_minutes'], edge['per_hour']), (2, 1440, round(1 / 24, 1)))
+
+    def test_single_completion_has_count_without_rate(self):
+        throughput = self.completed_at(timedelta(minutes=30))
+        self.assertEqual((throughput['count'], throughput['per_hour']), (1, None))
 
     def test_short_span_is_not_turned_into_an_hourly_rate(self):
         throughput = self.completed_at(timedelta(minutes=5), timedelta(minutes=1))

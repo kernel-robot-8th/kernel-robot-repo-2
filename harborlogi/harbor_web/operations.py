@@ -1,5 +1,5 @@
 """Read-only operations facts, keeping observations, proposals and handoffs separate."""
-from django.db.models import Count, Max
+from django.db.models import Count, Max, Min
 from django.utils import timezone
 
 from harbor_web import services
@@ -62,16 +62,18 @@ THROUGHPUT_MIN_SPAN = timezone.timedelta(minutes=10)  # shorter spans turn two c
 
 
 def _throughput(done, now):
-    """Gross-crane-productivity style: completions Harbor recorded in the window / (last - first).
+    """Interval rate between the first and last completion Harbor recorded in the window.
     The time is the audit row written with the COMPLETED save (commands._save), not the robot's finish time."""
     stamps = dict(Audit.objects.filter(object_type='Command', action='command.completed',
+                                       created_at__gte=now - THROUGHPUT_WINDOW, created_at__lte=now,
                                        object_id__in=[str(c.pk) for c in done])
-                  .values_list('object_id').annotate(at=Max('created_at')))
-    times = sorted(at for at in stamps.values() if now - THROUGHPUT_WINDOW <= at <= now)
+                  .values_list('object_id').annotate(at=Min('created_at')))  # first time Harbor recorded it
+    times = sorted(stamps.values())
     span = times[-1] - times[0] if times else timezone.timedelta(0)
+    # count - 1 intervals lie between the first and last completion
     return dict(window_hours=int(THROUGHPUT_WINDOW.total_seconds() // 3600), count=len(times),
                 span_minutes=int(span.total_seconds() // 60),
-                per_hour=round(len(times) / (span.total_seconds() / 3600), 1) if span >= THROUGHPUT_MIN_SPAN else None)
+                per_hour=round((len(times) - 1) / (span.total_seconds() / 3600), 1) if span >= THROUGHPUT_MIN_SPAN else None)
 
 
 def _actual(commands, now):
