@@ -97,6 +97,42 @@ class OperationsTests(TestCase):
         self.assertEqual(context['workload']['move_count'], 0)
         self.assertIsNone(context['actual']['completed'])
 
+    def test_planned_rehandle_ratio_and_arms_stay_apart_from_actuals(self):
+        plan = self.buried_plan()
+        context = operations_context(plan.observation, now=self.now)
+        workload = context['workload']
+        self.assertEqual((workload['outbound_rehandle_moves'], workload['outbound_plan_count']), (1, 1))
+        self.assertEqual(workload['rehandle_per_outbound'], 1.0)
+        arms = {m['primary_arm'] for m in plan.result['moves']}
+        self.assertEqual(workload['plans'][0]['primary_arms'], sorted(arms))
+        self.assertNotIn('S', workload['plans'][0]['primary_arms'] + workload['plans'][0]['alternate_arms'])
+        self.assertEqual(context['actual'], dict(completed=None, throughput=None))
+        self.assertEqual(context['attention'], [])
+        self.assertEqual(context['inventory']['occupancy_percent'], round(2 * 100 / 6))
+        html = render_to_string('operations_summary.html', dict(operations=context))
+        for text in ('확인이 필요한 것 0건', f'관측 #{plan.observation.pk} 기준', '반출 1건당 계획상 재취급 이동',
+                     '지시 전 계획 · 실적 아님', '재취급 1회 ÷ 반출 계획 1건', '공급암 S', '계획한 팔(주·대안)', '미집계'):
+            self.assertIn(text, html)
+
+    def test_stale_observation_is_flagged_and_has_no_ratio(self):
+        plan = self.buried_plan()
+        context = operations_context(plan.observation, now=self.now + timedelta(seconds=61))
+        self.assertEqual([a['label'] for a in context['attention']], ['관측 유효 시간 밖', '재검토로 이동 집계 제외'])
+        self.assertIsNone(context['workload']['rehandle_per_outbound'])
+        self.assertIn('대상 반출 계획 없음', render_to_string('operations_summary.html', dict(operations=context)))
+
+    def test_unknown_handoff_asks_for_original_reconciliation_only(self):
+        plan = self.buried_plan()
+        command = Command.objects.create(order=plan.order, plan=plan, actor=self.operator,
+            plan_version=1, ledger_identity='test', fleet_origin='http://127.0.0.1:9999',
+            fleet_principal='test', body_digest='a' * 64, binding={}, state='UNKNOWN')
+        context = operations_context(plan.observation, now=self.now)
+        self.assertEqual(context['attention'], [dict(label=f'결과 불명 · {plan.order.cargo.code}', count=1,
+                                                     action='원래 작업 대조', href=f'/work/{command.pk}/')])
+        html = render_to_string('operations_summary.html', dict(operations=context))
+        self.assertIn('확인이 필요한 것 1건', html)
+        self.assertNotIn('재전송', html)
+
     def test_hold_has_no_partial_workload_and_holdings_are_separate(self):
         order = self.order()
         self.cargo('C2')
