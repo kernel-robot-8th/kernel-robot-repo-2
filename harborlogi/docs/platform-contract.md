@@ -21,7 +21,7 @@ Harbor 사용자의 계획 확정은 준비·제출을 한 번에 이어서 수�
 
 D-856 첫 중립 이송 흐름은 API reference **v1.298**의 `GET /api/fleet/trip-jobs/{mission_id}`와 원본 `request_key` 조회를 요구한다. 기존 TRIP 접수·simulation gate를 유지하며 recipe/cell 없이 수행 사실을 읽는다. 앱 제출 의도·응답 유실 대조는 [실행 연결](execution.md#중립-이송-의도와-수행-조회-d-856-첫-흐름)에 있다. 아래의 기존 Cell 검증 SHA를 새 경로 검증으로 간주하지 않는다. 새 통합은 [고정 양 끝 SHA 검증](validation/2026-10-24-neutral-transport-http.md)으로 확인했다.
 
-기준 플랫폼: `584251615d5609a09ebcb52e18af0cbc0c9beaec`, API reference 문서 **v1.292**(후보 이송 요청 포함). 이는 실제 서버 연결 또는 버전 협상을 확인했다는 뜻이 아니다. 정본은 플랫폼 `docs/reference/application-contract-support.md`와 해당 route/schema다.
+기준 플랫폼: `584251615d5609a09ebcb52e18af0cbc0c9beaec`, API reference 문서 **v1.292**(후보 이송 요청 포함). 위 문단들은 이후 v1.330·v1.334 경로도 소비하므로 이 한 줄은 고정 HTTP로 다시 확인한 최신 기준이 아니다. 2026-11-04 플랫폼 main과의 경로 대조는 [경계 점검](validation/2026-11-04-rosy-boundary-audit.md)에 있고, 새 기준 커밋은 그 main에서 고정 Fleet 계약 시험을 다시 돌린 뒤 정한다. 이는 실제 서버 연결 또는 버전 협상을 확인했다는 뜻이 아니다. 정본은 플랫폼 `docs/reference/application-contract-support.md`와 해당 route/schema다.
 
 - 앱 모델·계획·배치·수동 후보 제외는 내부 업무 값이다. ROSY wire 타입·실행 원장·관측 원장을 복제하지 않는다.
 - 현재 제안/resolve/admit, mission snapshot/events, 취소/정지는 기존 HTTP 계약을 검토하여 사용할 수 있다. `trip-jobs`는 특정 `robot_id`와 현재 simulation profile에 묶인다.

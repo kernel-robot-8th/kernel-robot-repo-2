@@ -37,6 +37,8 @@ def capability(plan):
     try:
         if Command.objects.filter(order_id=plan.order_id, state__in=ACTIVE_COMMAND_STATES).exclude(plan=plan).exists():
             raise ValidationError('EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION')
+        if Command.objects.filter(order_id=plan.order_id, state='COMPLETED').exists():
+            raise ValidationError('ORDER_ALREADY_COMPLETED')  # the ledger closed it; a new command would repeat the work
         from harbor_web.runtime import execution_block_reason
         blocked = execution_block_reason()
         if blocked:
@@ -75,7 +77,7 @@ def capability(plan):
         _bound(plan, config)
     except ValidationError as error:
         safe = {'SPATIAL_EXECUTION_BINDINGS_REQUIRED', 'SPATIAL_OBSERVATION_REQUIRED',
-                'EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION', 'RESTORE_RECONCILIATION_REQUIRED', 'DEPLOYMENT_PROFILE_REQUIRED',
+                'EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION', 'ORDER_ALREADY_COMPLETED', 'RESTORE_RECONCILIATION_REQUIRED', 'DEPLOYMENT_PROFILE_REQUIRED',
                 'EXECUTION_CONFIGURATION_REQUIRED', 'ORIGIN_NOT_ALLOWED', 'INVALID_FLEET_PRINCIPAL', 'PLAN_NOT_READY', 'PLAN_QUEUE_CHANGED',
                 'OBSERVATION_NOT_FRESH', 'OBSERVATION_REVISION_CHANGED', 'AUTHENTICATED_OBSERVATION_AND_EVIDENCE_PRODUCER_REQUIRED'}
         reason = error.messages[0] if error.messages and error.messages[0] in safe else 'EXECUTION_INPUTS_UNAVAILABLE'

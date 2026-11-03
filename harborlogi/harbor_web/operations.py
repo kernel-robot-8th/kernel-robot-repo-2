@@ -1,9 +1,9 @@
 """Read-only operations facts, keeping observations, proposals and handoffs separate."""
-from django.db.models import Count, Max
+from django.db.models import Count, Max, Min
 from django.utils import timezone
 
 from harbor_web import services
-from harbor_web.models import Command, Observation, Order, Plan
+from harbor_web.models import Audit, Command, Observation, Order, Plan
 from harbor_web.workspace import COMMAND_LABELS
 
 ATTENTION_STATES = ('UNKNOWN', 'DISPATCHING', 'CANCEL_PENDING', 'BLOCKED')
@@ -48,10 +48,42 @@ def _cargo_label(order):
     return order.cargo.code if order.cargo else f'재배치 요청 #{order.pk}'  # REARRANGE has no cargo (design 32)
 
 
-def _actual(commands):
+def move_phases(plan, order):
+    """Phase of each stored move: its own label, else its order around the target cargo."""
+    moves = plan.result.get('moves', [])
+    code = order.cargo and order.cargo.code  # REARRANGE has no cargo (design 32)
+    target = next((i for i, m in enumerate(moves) if m['cargo_id'] == code), -1)
+    return [m.get('phase_label') or ('입고' if order.kind == 'INBOUND' else
+            '재취급' if i < target else '반출' if i == target else '복귀') for i, m in enumerate(moves)]
+
+
+THROUGHPUT_WINDOW = timezone.timedelta(hours=24)
+THROUGHPUT_MIN_SPAN = timezone.timedelta(minutes=10)  # shorter spans turn two completions into absurd hourly rates
+
+
+def _throughput(done, now):
+    """Interval rate between the first and last completion Harbor recorded in the window.
+    The time is the audit row written with the COMPLETED save (commands._save), not the robot's finish time."""
+    stamps = dict(Audit.objects.filter(object_type='Command', action='command.completed',
+                                       created_at__gte=now - THROUGHPUT_WINDOW, created_at__lte=now,
+                                       object_id__in=[str(c.pk) for c in done])
+                  .values_list('object_id').annotate(at=Min('created_at')))  # first time Harbor recorded it
+    times = sorted(stamps.values())
+    span = times[-1] - times[0] if times else timezone.timedelta(0)
+    # count - 1 intervals lie between the first and last completion
+    return dict(window_hours=int(THROUGHPUT_WINDOW.total_seconds() // 3600), count=len(times),
+                span_minutes=int(span.total_seconds() // 60),
+                per_hour=round((len(times) - 1) / (span.total_seconds() / 3600), 1) if span >= THROUGHPUT_MIN_SPAN else None)
+
+
+def _actual(commands, now):
     """COMPLETED is set only after the ARM_TRANSFER ledger finish() (commands.advance_command); legacy
     cell stages never create a Command. The binding is the digest-checked ledger payload."""
-    done = [c for c in commands if c.state == 'COMPLETED']
+    latest = {}
+    for c in commands:  # newest first: a newer completion of the same order replaces, not adds
+        if c.state == 'COMPLETED':
+            latest.setdefault(c.order_id, c)
+    done = list(latest.values())
     kinds = [c.order.kind for c in done]
     rehandles, unmatched = 0, []
     for c in done:
@@ -65,7 +97,7 @@ def _actual(commands):
             rehandles += index
     return dict(completed=len(done), inbound=kinds.count('INBOUND'), outbound=kinds.count('OUTBOUND'),
                 rearrange=kinds.count('REARRANGE'), outbound_rehandle_moves=None if unmatched else rehandles,
-                unmatched=unmatched, throughput=None)
+                unmatched=unmatched, throughput=_throughput(done, now))
 
 
 def operations_context(observation, *, now=None):
@@ -113,10 +145,7 @@ def operations_context(observation, *, now=None):
         outbound = plan.order.kind == 'OUTBOUND'
         outbound_plans += outbound
         code = plan.order.cargo and plan.order.cargo.code
-        target_index = next((i for i, m in enumerate(moves) if m['cargo_id'] == code), -1)
-        for i, move in enumerate(moves):
-            phase = move.get('phase_label') or ('입고' if plan.order.kind == 'INBOUND' else
-                '재취급' if i < target_index else '반출' if i == target_index else '복귀')
+        for move, phase in zip(moves, move_phases(plan, plan.order)):
             phases[phase] = phases.get(phase, 0) + 1
             outbound_rehandles += outbound and phase == '재취급'
             if move['cargo_id'] != code:
@@ -137,7 +166,7 @@ def operations_context(observation, *, now=None):
         if c.state in ATTENTION_STATES:
             attention.append(dict(label=f"전체 인계 · {COMMAND_LABELS[c.state]} · {_cargo_label(c.order)}", count=1,
                                   action='원래 작업 대조', href=f'/work/{c.pk}/'))
-    actual = _actual(commands)
+    actual = _actual(commands, now)
     for c in actual['unmatched']:
         attention.append(dict(label=f"완료 인계 · 반출 이동 대조 불가 · {_cargo_label(c.order)}", count=1,
                               action='원래 작업 대조', href=f'/work/{c.pk}/'))

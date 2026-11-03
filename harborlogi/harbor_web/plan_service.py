@@ -5,6 +5,7 @@ from dataclasses import asdict
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from harbor.model import OutboundRequest, aware_time
@@ -13,7 +14,15 @@ from harbor_web.coordination import serialized
 from harbor_web.models import CargoFootprint, Observation, Order, Plan, Audit
 from harbor_web.service_common import Conflict, _domain, _role, _save
 from harbor_web.site_config import constraints, snapshot, spatial_policy, spatial_snapshot
-from harbor_web.order_queue import queue_digest, queue_snapshot, request_snapshot
+from harbor_web.order_queue import open_outbound_orders, queue_digest, queue_snapshot, request_snapshot
+
+
+def _open_outbound_ahead(order):
+    """Open outbound orders ahead in priority; a ledger-completed order no longer blocks."""
+    ahead = Q(priority_group__lt=order.priority_group)
+    if order.tie_policy == 'FIXED':
+        ahead |= Q(priority_group=order.priority_group, sequence__lt=order.sequence)
+    return open_outbound_orders().filter(ahead)
 
 
 @serialized
@@ -44,6 +53,7 @@ def make_plan(actor, *, order_id, expected_version, observation_id, now=None, au
 
 def _outbound_schedule():
     schedule = {}
+    # Completed orders still rank their cargo for rearrangement (design 32); only blocking uses open orders.
     for outgoing in Order.objects.filter(kind='OUTBOUND').select_related('cargo').order_by('priority_group', 'sequence', 'pk'):
         schedule.setdefault(outgoing.cargo.code, (outgoing.priority_group, outgoing.sequence if outgoing.tie_policy == 'FIXED' else None))
     return schedule
@@ -96,8 +106,7 @@ def _calculate_plan(actor, order, observation, *, now=None, trigger='manual', in
             'HOLD', 'SPATIAL_OBSERVATION_REQUIRED', yard.revision)
     elif order.kind == 'INBOUND':
         proposal = OutboundProposal('HOLD', 'INBOUND_PLANNER_NOT_AVAILABLE', yard.revision)
-    elif Order.objects.filter(kind='OUTBOUND', priority_group__lt=order.priority_group).exists() or (
-            order.tie_policy == 'FIXED' and Order.objects.filter(kind='OUTBOUND', priority_group=order.priority_group, sequence__lt=order.sequence).exists()):
+    elif _open_outbound_ahead(order).exists():
         proposal = OutboundProposal('HOLD', 'PRIORITY_ORDER_BLOCKED', yard.revision)
     elif spatial:
         from harbor.spatial import plan_spatial

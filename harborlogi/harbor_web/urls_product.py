@@ -14,6 +14,7 @@ urlpatterns = [
     path('requests/', views.order_list, name='requests'),
     path('requests/new/', views.order_new, name='request_new'),
     path('requests/<int:pk>/', views.order_detail, name='request_detail'),
+    path('requests/<int:pk>/timeline/', views.order_timeline, name='request_timeline'),
     path('inventory/', views.inventory, name='inventory'),
     path('inventory/import/', views.observation_new, name='observation_new'),
     path('settings/', views.settings_page, name='settings'),

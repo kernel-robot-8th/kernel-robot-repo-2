@@ -23,6 +23,7 @@ def gate_text(code):
         'SPATIAL_EXECUTION_BINDINGS_REQUIRED': '공간 계획의 전체 점유 크기·방향·위치에 맞는 설치 대응 검증이 필요합니다.',
         'SPATIAL_OBSERVATION_REQUIRED': '다칸 화물이 등록되었습니다. 전체 점유 위치와 크기 원본을 포함한 공간 관측으로 다시 검토하세요.',
         'EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION': '이 요청에는 이미 실행 인계가 있습니다. 새로 제출하지 말고 원래 작업을 대조하세요.',
+        'ORDER_ALREADY_COMPLETED': '업무 장부가 이 요청을 이미 완료했습니다. 같은 업무를 다시 실행하지 않습니다. 완료 기록을 확인하세요.',
         'RESTORE_RECONCILIATION_REQUIRED': '복원한 자료입니다. 원래 실행과 복구 검토가 끝나기 전 새 제출을 보류합니다.',
         'DEPLOYMENT_PROFILE_REQUIRED': '배포 환경과 데이터베이스 기준을 먼저 확인해야 합니다.',
         'EXECUTION_CONFIGURATION_REQUIRED': 'ROSY 연동 설정과 설치된 이동 대응이 필요합니다.',
