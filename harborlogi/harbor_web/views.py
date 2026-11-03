@@ -8,6 +8,7 @@ from django.views.decorators.http import require_http_methods
 
 from harbor_web import forms, services
 from harbor_web.auth import has_role, require_roles
+from harbor_web.cargo_history import cargo_history as build_history
 from harbor_web.models import Audit, Cargo, CargoFootprint, Command, Condition, FieldEpisode, Observation, Order, Plan
 
 
@@ -124,6 +125,13 @@ def cargo_list(request):
     for cargo in pagination['page']:
         cargo.current_footprint = footprints.get(cargo.pk)
     return page(request, 'cargo.html', section='cargo', q=q, **pagination)
+
+
+@require_roles('viewer', 'operator', 'admin')
+@require_http_methods(['GET'])
+def cargo_history(request, pk):
+    cargo = get_object_or_404(Cargo, pk=pk)
+    return page(request, 'cargo_history.html', section='cargo', cargo=cargo, **build_history(cargo))
 
 
 @require_roles('viewer', 'operator', 'admin')
