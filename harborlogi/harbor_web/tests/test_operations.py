@@ -4,10 +4,11 @@ from unittest.mock import patch
 from django.template.loader import render_to_string
 from django.test import TestCase
 
-from harbor_web import services
+from harbor_web import rearrangement, services
 from harbor_web.models import Audit, Command, Plan
 from harbor_web.operations import operations_context
 from harbor_web.tests import test_multicell_services as spatial_fixtures
+from harbor_web.tests import test_rearrangement_execution as rearrangement_fixtures
 from harbor_web.tests import test_services as fixtures
 from harbor_web.tests import test_workspace as workspace_fixtures
 
@@ -27,7 +28,7 @@ class OperationsTests(TestCase):
         self.assertIsNone(context['workload']['move_count'])
         self.assertEqual(context['orders']['inbound'], 1)
         self.assertEqual(context['orders']['outbound'], 0)
-        self.assertEqual(context['actual'], dict(completed=None, throughput=None))
+        self.assertEqual(context['actual']['completed'], 0)
         html = render_to_string('operations_summary.html', dict(operations=context))
         self.assertIn('미관측', html)
         self.assertIn('미집계', html)
@@ -95,7 +96,7 @@ class OperationsTests(TestCase):
         self.assertEqual(context['handoffs'][0]['label'], '결과 불명')
         self.assertEqual(context['workload']['plans'], [])
         self.assertEqual(context['workload']['move_count'], 0)
-        self.assertIsNone(context['actual']['completed'])
+        self.assertEqual(context['actual']['completed'], 0)
 
     def test_planned_rehandle_ratio_and_arms_stay_apart_from_actuals(self):
         plan = self.buried_plan()
@@ -106,7 +107,7 @@ class OperationsTests(TestCase):
         arms = {m['primary_arm'] for m in plan.result['moves']}
         self.assertEqual(workload['plans'][0]['primary_arms'], sorted(arms))
         self.assertNotIn('S', workload['plans'][0]['primary_arms'] + workload['plans'][0]['alternate_arms'])
-        self.assertEqual(context['actual'], dict(completed=None, throughput=None))
+        self.assertEqual(context['actual']['completed'], 0)
         self.assertEqual(context['attention'], [])
         self.assertEqual(context['inventory']['occupancy_percent'], round(2 * 100 / 6))
         html = render_to_string('operations_summary.html', dict(operations=context))
@@ -164,6 +165,66 @@ class OperationsTests(TestCase):
         self.assertEqual(context['inventory']['holding_count'], 1)
         self.assertEqual(context['workload']['hold_count'], 1)
         self.assertEqual(context['workload']['move_count'], 0)
+
+    def handoff(self, plan, state, binding):
+        return Command.objects.create(order=plan.order, plan=plan, actor=self.operator, plan_version=1,
+            ledger_identity='test', fleet_origin='http://127.0.0.1:9999', fleet_principal='test',
+            body_digest='a' * 64, binding=binding, state=state)
+
+    def test_only_completed_handoffs_count_executed_rehandles(self):
+        plan = self.buried_plan()
+        outbound = plan.order.cargo.code
+        binding = dict(outbound_id=outbound, moves=[dict(cargo_id=m['cargo_id']) for m in plan.result['moves']])
+        command = self.handoff(plan, 'UNKNOWN', binding)
+        self.assertEqual(operations_context(plan.observation, now=self.now)['actual']['completed'], 0)
+        Command.objects.filter(pk=command.pk).update(state='COMPLETED')
+        inbound = self.order(self.cargo('C9'), kind='INBOUND')
+        self.handoff(services.make_plan(self.operator, order_id=inbound.pk, expected_version=1,
+                                        observation_id=plan.observation_id), 'CANCELLED', {})
+        actual = operations_context(plan.observation, now=self.now)['actual']
+        # Buried outbound: one cargo moved off before the outbound move, then returned.
+        self.assertEqual(actual, dict(completed=1, inbound=0, outbound=1, rearrange=0,
+                                      outbound_rehandle_moves=1, unmatched=[], throughput=None))
+        html = render_to_string('operations_summary.html',
+                                dict(operations=operations_context(plan.observation, now=self.now)))
+        for text in ('실제 완료량·처리율', '1<small> 건 완료', '실행된 재취급 이동 1회', '처리율 미집계'):
+            self.assertIn(text, html)
+
+
+class RearrangementOperationsTests(TestCase):
+    """A REARRANGE order has no cargo (design 32); the summary must still render it."""
+    setUp = rearrangement_fixtures.RearrangementExecutionTests.setUp
+    base_setup = rearrangement_fixtures.RearrangementExecutionTests.base_setup
+    cargo = rearrangement_fixtures.RearrangementExecutionTests.cargo
+    observe = rearrangement_fixtures.RearrangementExecutionTests.observe
+    payload = rearrangement_fixtures.RearrangementExecutionTests.payload
+    condition = rearrangement_fixtures.RearrangementExecutionTests.condition
+    place = rearrangement_fixtures.RearrangementExecutionTests.place
+    inverted = rearrangement_fixtures.RearrangementExecutionTests.inverted
+    finish_outbound = rearrangement_fixtures.RearrangementExecutionTests.finish_outbound
+
+    def test_rearrange_plan_handoff_and_completion_render(self):
+        plan = rearrangement.request_rearrangement(self.operator, observation_id=self.observation.pk, now=self.now)
+        context = operations_context(self.observation, now=self.now)
+        self.assertEqual([r['plan'].pk for r in context['workload']['plans']], [plan.pk])
+        self.assertEqual(context['workload']['outbound_plan_count'], 0)
+        command = Command.objects.create(order=plan.order, plan=plan, actor=self.operator, plan_version=1,
+            ledger_identity='t', fleet_origin='t', fleet_principal='t', body_digest='a' * 64, binding={},
+            state='UNKNOWN')
+        context = operations_context(self.observation, now=self.now)
+        self.assertIn(f'전체 인계 · 결과 불명 · 재배치 요청 #{plan.order_id}', [a['label'] for a in context['attention']])
+        self.assertIn(f'재배치 요청 #{plan.order_id}', render_to_string('operations_summary.html', dict(operations=context)))
+        Command.objects.filter(pk=command.pk).update(state='COMPLETED')
+        context = operations_context(self.observation, now=self.now)
+        actual = context['actual']
+        # setUp finished two outbound orders whose bindings carry no moves: unknown, never zero.
+        self.assertEqual((actual['completed'], actual['outbound'], actual['rearrange'], actual['outbound_rehandle_moves']),
+                         (3, 2, 1, None))
+        flagged = [a for a in context['attention'] if a['label'].startswith('완료 인계 · 반출 이동 대조 불가')]
+        self.assertEqual(sorted(a['href'] for a in flagged), sorted(f'/work/{c.pk}/' for c in actual['unmatched']))
+        self.assertEqual(len(flagged), 2)
+        self.assertIn('실행된 재취급 이동 미집계(대조 불가 2건)',
+                      render_to_string('operations_summary.html', dict(operations=context)))
 
 
 class SpatialOperationsTests(TestCase):
