@@ -9,6 +9,7 @@ from django.views.decorators.http import require_http_methods
 from harbor_web import forms, services
 from harbor_web.auth import has_role, require_roles
 from harbor_web.cargo_history import cargo_history as build_history
+from harbor_web.order_timeline import order_timeline as build_timeline
 from harbor_web.models import Audit, Cargo, CargoFootprint, Command, Condition, FieldEpisode, Observation, Order, Plan
 
 
@@ -132,6 +133,13 @@ def cargo_list(request):
 def cargo_history(request, pk):
     cargo = get_object_or_404(Cargo, pk=pk)
     return page(request, 'cargo_history.html', section='cargo', cargo=cargo, **build_history(cargo))
+
+
+@require_roles('viewer', 'operator', 'admin')
+@require_http_methods(['GET'])
+def order_timeline(request, pk):
+    order = get_object_or_404(Order.objects.select_related('cargo'), pk=pk)
+    return page(request, 'order_timeline.html', section='cargo', order=order, **build_timeline(order))
 
 
 @require_roles('viewer', 'operator', 'admin')
