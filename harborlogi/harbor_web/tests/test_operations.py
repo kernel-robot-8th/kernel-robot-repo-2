@@ -197,6 +197,21 @@ class OperationsTests(TestCase):
         actual = operations_context(plan.observation, now=self.now)['actual']
         self.assertEqual((actual['completed'], actual['outbound'], actual['outbound_rehandle_moves']), (1, 1, 0))
 
+    def test_overview_puts_finished_work_last_and_links_cancelled_work_to_review(self):
+        plan = self.buried_plan()
+        other = self.order(self.cargo('C8'), sequence=5)
+        other_plan = services.make_plan(self.operator, order_id=other.pk, expected_version=1, observation_id=plan.observation_id)
+        self.handoff(plan, 'COMPLETED', {})
+        self.handoff(other_plan, 'CANCELLED', {})
+        self.client.force_login(self.operator)
+        rows = self.client.get('/').context['rows']
+        self.assertEqual([r['order'].pk for r in rows][-1], plan.order_id)
+        finished, cancelled = rows[-1], next(r for r in rows if r['order'].pk == other.pk)
+        self.assertEqual((finished['status_label'], finished['action']), ('업무 완료', '완료 기록 보기'))
+        self.assertTrue(finished['href'].startswith(f'/requests/{plan.order_id}/timeline/'))
+        self.assertEqual((cancelled['status_label'], cancelled['action']), ('취소됨', '최신 기준으로 검토'))
+        self.assertTrue(cancelled['href'].startswith(f'/requests/{other.pk}/'))
+
     def completed_at(self, *ages):
         """One completed order per age, each saved through the real path so its audit row has that time."""
         from harbor_web.commands import _save

@@ -214,7 +214,11 @@ class ServicesTests(TestCase):
             fleet_origin='o', fleet_principal='p', body_digest='a' * 64, binding={}, state='RECONCILED')
         still = services.make_plan(self.operator, order_id=later.pk, expected_version=1, observation_id=observed.pk, now=self.now)
         self.assertEqual(still.result['reason'], 'PRIORITY_ORDER_BLOCKED')  # handed off is not finished
+        before = services.queue_digest()
         Command.objects.filter(pk=command.pk).update(state='COMPLETED')
+        self.assertNotEqual(services.queue_digest(), before)  # the blocked plan now reads as needing review
+        from harbor_web.workspace import plan_changes
+        self.assertTrue(plan_changes(later, still))
         freed = services.make_plan(self.operator, order_id=later.pk, expected_version=1, observation_id=observed.pk, now=self.now)
         self.assertNotEqual(freed.result['reason'], 'PRIORITY_ORDER_BLOCKED')
 
