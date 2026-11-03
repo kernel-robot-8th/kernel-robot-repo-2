@@ -43,7 +43,7 @@ class OrderTimelineTests(TestCase):
         EvidenceSubmission.objects.create(created_by=self.operator, command=command, placement={}, retreat={})
         response = self.get(plan.order)
         events = response.context['actual_line']
-        self.assertEqual({'실행 지시', '지시 상태', 'ROSY 조회', '업무 근거'}, {e['kind'] for e in events})
+        self.assertEqual({'실행 지시', '지시 상태(마지막 저장 시각)', 'ROSY 조회', '업무 근거'}, {e['kind'] for e in events})
         self.assertTrue(all(e['source'] for e in events))
         self.assertContains(response, '(대조 전)')
         self.assertContains(response, '물리 receipt 있음')

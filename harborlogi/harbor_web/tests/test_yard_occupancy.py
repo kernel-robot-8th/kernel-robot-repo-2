@@ -62,3 +62,13 @@ class OccupancyWorkspaceTests(TestCase):
         self.assertEqual(occupancy['rehandle_cargo'], [])
         self.assertFalse(occupancy['has_moves'])
         self.assertEqual(occupancy['areas'][0]['rows'][0]['cells'][0]['height'], 2)
+
+    def test_non_ready_plan_says_why_nothing_is_marked(self):
+        from types import SimpleNamespace
+        from django.template.loader import render_to_string
+        order, observation = self.grid()
+        occupancy = workspace_context(order, None, review_observation=observation)['yard_occupancy']
+        html = render_to_string('yard_occupancy.html', dict(yard_occupancy=occupancy,
+                                                            plan=SimpleNamespace(result=dict(status='HOLD'))))
+        self.assertIn('계획이 READY가 아니어서 재취급 예정 칸을 표시하지 않습니다.', html)
+        self.assertNotIn('저장된 계획에 이동이 없어', html)

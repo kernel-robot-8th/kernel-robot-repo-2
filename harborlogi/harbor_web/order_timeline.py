@@ -32,7 +32,7 @@ def order_timeline(order):
     for command in commands:
         events.append(dict(at=command.created_at, kind='실행 지시', source=f'Plan #{command.plan_id} 지시',
                            href=f'/plans/{command.plan_id}/', text='실행 지시 생성'))
-        events.append(dict(at=command.updated_at, kind='지시 상태', source=f'Plan #{command.plan_id} 지시',
+        events.append(dict(at=command.updated_at, kind='지시 상태(마지막 저장 시각)', source=f'Plan #{command.plan_id} 지시',
                            href=f'/plans/{command.plan_id}/',
                            text=f'마지막 기록 상태 {LABELS.get(command.state, command.state)}'
                                 + (f' · ROSY {command.mission_id}' if command.mission_id else '')))

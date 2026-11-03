@@ -154,9 +154,11 @@ class OperationsTests(TestCase):
 
     def test_only_ledger_completed_outbound_counts_as_actual(self):
         plan = self.buried_plan()
-        command = Command.objects.create(order=plan.order, plan=plan, actor=self.operator,
+        bound = dict(moves=plan.result['moves'], outbound_id=plan.order.cargo.code)
+        create = lambda binding, state, plan=plan: Command.objects.create(order=plan.order, plan=plan, actor=self.operator,
             plan_version=1, ledger_identity='test', fleet_origin='http://127.0.0.1:9999',
-            fleet_principal='test', body_digest='a' * 64, binding={}, state='RECONCILED')
+            fleet_principal='test', body_digest='a' * 64, binding=binding, state=state)
+        command = create(bound, 'RECONCILED')
         self.assertEqual(operations_context(plan.observation, now=self.now)['actual']['completed'], 0)
         Command.objects.filter(pk=command.pk).update(state='COMPLETED')
         context = operations_context(plan.observation, now=self.now)
@@ -165,6 +167,13 @@ class OperationsTests(TestCase):
         html = render_to_string('operations_summary.html', dict(operations=context))
         self.assertIn('재취급 실행 1회', html)
         self.assertIn('처리율·시간당 물동량: <strong>미집계</strong>', html)
+        # A newer completion of the same order replaces, not adds; it bound only the outbound move.
+        target = [m for m in plan.result['moves'] if m['cargo_id'] == plan.order.cargo.code]
+        newer = services.make_plan(self.operator, order_id=plan.order_id, expected_version=1,
+                                   observation_id=plan.observation_id)
+        create(dict(moves=target, outbound_id=plan.order.cargo.code), 'COMPLETED', newer)
+        self.assertEqual(operations_context(plan.observation, now=self.now)['actual'],
+                         dict(completed=1, rehandle_moves=0, throughput=None))
 
     def test_hold_has_no_partial_workload_and_holdings_are_separate(self):
         order = self.order()

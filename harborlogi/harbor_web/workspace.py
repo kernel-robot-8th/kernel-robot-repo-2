@@ -55,7 +55,7 @@ def _yard_stages(order, plan, source):
     outbound_index = next((i for i, m in enumerate(moves) if m['cargo_id'] == target), -1)
     display_moves = []
     for i, move in enumerate(moves):
-        phase = '재취급' if i < outbound_index else '반출' if i == outbound_index else '복귀'
+        phase = move.get('phase_label') or ('재취급' if i < outbound_index else '반출' if i == outbound_index else '복귀')
         by_id = {b['bay_id']: b for b in bays}
         display = dict(move, number=i + 1, phase_label=phase,
                        source_level=len(by_id[move['source']]['cargo']), destination_level=len(by_id[move['destination']]['cargo']) + 1)

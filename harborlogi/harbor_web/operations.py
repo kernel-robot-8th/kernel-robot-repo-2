@@ -17,11 +17,21 @@ def move_phases(plan, order):
             '재취급' if i < target else '반출' if i == target else '복귀') for i, m in enumerate(moves)]
 
 
+def _executed_rehandles(command):
+    """Rehandles the ledger ran: bound moves before the outbound cargo's move, not the plan's moves."""
+    moves = command.binding.get('moves', [])
+    target = command.binding.get('outbound_id')
+    return next((i for i, m in enumerate(moves) if m.get('cargo_id') == target), 0)
+
+
 def _actual(commands):
     """Only ledger-completed commands count: Harbor saves COMPLETED solely after the
     ARM_TRANSFER business ledger finished (commands.advance_command); legacy cell stages never do."""
-    done = [c for c in commands if c.state == 'COMPLETED' and c.order.kind == 'OUTBOUND']
-    return dict(completed=len(done), rehandle_moves=sum(move_phases(c.plan, c.order).count('재취급') for c in done),
+    done = {}
+    for c in commands:  # newest first, so one completion per order
+        if c.state == 'COMPLETED' and c.order.kind == 'OUTBOUND':
+            done.setdefault(c.order_id, c)
+    return dict(completed=len(done), rehandle_moves=sum(_executed_rehandles(c) for c in done.values()),
                 throughput=None)
 
 
