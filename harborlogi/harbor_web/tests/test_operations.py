@@ -27,7 +27,7 @@ class OperationsTests(TestCase):
         self.assertIsNone(context['workload']['move_count'])
         self.assertEqual(context['orders']['inbound'], 1)
         self.assertEqual(context['orders']['outbound'], 0)
-        self.assertEqual(context['actual'], dict(completed=None, throughput=None))
+        self.assertEqual(context['actual'], dict(completed=0, rehandle_moves=0, throughput=None))
         html = render_to_string('operations_summary.html', dict(operations=context))
         self.assertIn('미관측', html)
         self.assertIn('미집계', html)
@@ -95,7 +95,7 @@ class OperationsTests(TestCase):
         self.assertEqual(context['handoffs'][0]['label'], '결과 불명')
         self.assertEqual(context['workload']['plans'], [])
         self.assertEqual(context['workload']['move_count'], 0)
-        self.assertIsNone(context['actual']['completed'])
+        self.assertEqual(context['actual']['completed'], 0)
 
     def test_planned_rehandle_ratio_and_arms_stay_apart_from_actuals(self):
         plan = self.buried_plan()
@@ -106,7 +106,7 @@ class OperationsTests(TestCase):
         arms = {m['primary_arm'] for m in plan.result['moves']}
         self.assertEqual(workload['plans'][0]['primary_arms'], sorted(arms))
         self.assertNotIn('S', workload['plans'][0]['primary_arms'] + workload['plans'][0]['alternate_arms'])
-        self.assertEqual(context['actual'], dict(completed=None, throughput=None))
+        self.assertEqual(context['actual'], dict(completed=0, rehandle_moves=0, throughput=None))
         self.assertEqual(context['attention'], [])
         self.assertEqual(context['inventory']['occupancy_percent'], round(2 * 100 / 6))
         html = render_to_string('operations_summary.html', dict(operations=context))
@@ -151,6 +151,20 @@ class OperationsTests(TestCase):
         html = render_to_string('operations_summary.html', dict(operations=context))
         self.assertIn('확인이 필요한 것 1건', html)
         self.assertNotIn('재전송', html)
+
+    def test_only_ledger_completed_outbound_counts_as_actual(self):
+        plan = self.buried_plan()
+        command = Command.objects.create(order=plan.order, plan=plan, actor=self.operator,
+            plan_version=1, ledger_identity='test', fleet_origin='http://127.0.0.1:9999',
+            fleet_principal='test', body_digest='a' * 64, binding={}, state='RECONCILED')
+        self.assertEqual(operations_context(plan.observation, now=self.now)['actual']['completed'], 0)
+        Command.objects.filter(pk=command.pk).update(state='COMPLETED')
+        context = operations_context(plan.observation, now=self.now)
+        self.assertEqual(context['actual'], dict(completed=1, rehandle_moves=1, throughput=None))
+        self.assertEqual(context['workload']['move_count'], 0)  # a completed order leaves the planned view
+        html = render_to_string('operations_summary.html', dict(operations=context))
+        self.assertIn('재취급 실행 1회', html)
+        self.assertIn('처리율·시간당 물동량: <strong>미집계</strong>', html)
 
     def test_hold_has_no_partial_workload_and_holdings_are_separate(self):
         order = self.order()

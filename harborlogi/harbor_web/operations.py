@@ -9,6 +9,22 @@ from harbor_web.workspace import COMMAND_LABELS
 ATTENTION_STATES = ('UNKNOWN', 'DISPATCHING', 'CANCEL_PENDING', 'BLOCKED')
 
 
+def _phases(plan, order):
+    """Phase of each stored move: its own label, else its order around the target cargo."""
+    moves = plan.result.get('moves', [])
+    target = next((i for i, m in enumerate(moves) if m['cargo_id'] == order.cargo.code), -1)
+    return [m.get('phase_label') or ('입고' if order.kind == 'INBOUND' else
+            '재취급' if i < target else '반출' if i == target else '복귀') for i, m in enumerate(moves)]
+
+
+def _actual(commands):
+    """Only ledger-completed commands count: Harbor saves COMPLETED solely after the
+    ARM_TRANSFER business ledger finished (commands.advance_command); legacy cell stages never do."""
+    done = [c for c in commands if c.state == 'COMPLETED' and c.order.kind == 'OUTBOUND']
+    return dict(completed=len(done), rehandle_moves=sum(_phases(c.plan, c.order).count('재취급') for c in done),
+                throughput=None)
+
+
 def _inventory(observation):
     if observation is None:
         return dict(known=False, cargo_count=None, occupied=None, capacity=None,
@@ -87,10 +103,7 @@ def operations_context(observation, *, now=None):
         move_count += len(moves)
         outbound = plan.order.kind == 'OUTBOUND'
         outbound_plans += outbound
-        target_index = next((i for i, m in enumerate(moves) if m['cargo_id'] == plan.order.cargo.code), -1)
-        for i, move in enumerate(moves):
-            phase = move.get('phase_label') or ('입고' if plan.order.kind == 'INBOUND' else
-                '재취급' if i < target_index else '반출' if i == target_index else '복귀')
+        for move, phase in zip(moves, _phases(plan, plan.order)):
             phases[phase] = phases.get(phase, 0) + 1
             outbound_rehandles += outbound and phase == '재취급'
             if move['cargo_id'] != plan.order.cargo.code:
@@ -120,4 +133,4 @@ def operations_context(observation, *, now=None):
             rehandled_cargo=sorted(rehandled), outbound_plan_count=outbound_plans if observation else None,
             outbound_rehandle_moves=outbound_rehandles if observation else None,
             rehandle_per_outbound=round(outbound_rehandles / outbound_plans, 1) if observation and outbound_plans else None),
-        handoffs=handoffs, actual=dict(completed=None, throughput=None))
+        handoffs=handoffs, actual=_actual(commands))
