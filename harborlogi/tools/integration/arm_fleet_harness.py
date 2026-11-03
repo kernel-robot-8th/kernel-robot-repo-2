@@ -92,8 +92,10 @@ class SyntheticStops:
 
 class ArmFleet:
     def __init__(self, *, root, workdir, request_key_path=None, request_keys=("neutral-arm-http:0",), one_attempt=True,
-                 sim=False):
+                 sim=False, proposer="operator", before_app=None):
         self.root, self.workdir, self.sim = Path(root), Path(workdir), sim
+        # Whose proposals the test operator admits, and extra create_app arguments known only after install() (D-965 relay).
+        self.proposer, self.before_app = proposer, before_app
         self.identity, self.sim_process = (WORKCELL, INSTANCE), None
         self.request_key_path = Path(request_key_path) if request_key_path else None
         self.request_keys, self.one_attempt = tuple(request_keys), one_attempt
@@ -110,6 +112,8 @@ class ArmFleet:
     def start(self):
         db = self.workdir / "fleet.sqlite3"
         options = self.install(db)
+        if self.before_app is not None:
+            options.update(self.before_app(self))
         import uvicorn
         from fleet.server.app import create_app
         from fleet.server.console import FleetConsole
@@ -334,7 +338,7 @@ class ArmFleet:
         pending = [] if self.request_key_path else list(self.request_keys)
         loaded = False
         try:
-            with self.client() as proposer, self.client("approver") as approver, httpx.Client(
+            with self.client(self.proposer) as proposer, self.client("approver") as approver, httpx.Client(
                     base_url=self.url, headers={"X-Physical-Observation-Token": self.observer_token}, timeout=5) as observer:
                 while not self.stopped.wait(.05):
                     if self.request_key_path and not loaded:
@@ -446,3 +450,66 @@ class FullFlowFleet:
         finally:
             if self.fleet is not None:
                 self.fleet.stop()
+
+
+class RelayedArmFleet:
+    """D-965: Harbor talks only to R; R relays ARM work to the cell Fleet, whose operator alone admits it."""
+
+    def __init__(self, *, root, workdir, sim=False):
+        self.root, self.workdir = Path(root), Path(workdir)
+        self.peer = {unit: secrets.token_urlsafe(40) for unit in ("R", "CELL-A")}  # the token each unit sends
+        self.cell = ArmFleet(root=root, workdir=self.workdir / "cell", sim=sim, proposer="control-unit:R",
+                             before_app=lambda cell: {"control_unit_config": self._config(
+                                 "CELL-A", "R", self.url, cell.identity[0])})
+        self.cell.tokens["control-unit:R"] = self.peer["R"]
+        self.tokens = {name: secrets.token_urlsafe(40) for name in ("operator", "viewer")}
+        self.url = f"http://127.0.0.1:{_free_port()}"
+        self.server = None
+
+    @property
+    def identity(self):
+        return self.cell.identity
+
+    def _config(self, unit, peer, url, workcell):
+        folder = self.workdir / unit
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "peer.token").write_text(self.peer[unit], encoding="utf-8")
+        path = folder / "control-unit.json"  # the loader reads YAML, and JSON is YAML
+        path.write_text(json.dumps({"unit_id": unit, "peers": {peer: {"url": url, "token_file": "peer.token"}},
+            "manifest": {"revision": "harbor-int-1", "units": [
+                {"id": "R"}, {"id": "CELL-A", "parent": "R", "resources": ["workcell:" + workcell]}]}}),
+            encoding="utf-8")
+        return path
+
+    def start(self):
+        (self.workdir / "R").mkdir(parents=True, exist_ok=True)  # ArmFleet.install creates its own folder
+        self.cell.start()
+        import uvicorn
+        from fleet.server.app import create_app
+        from fleet.server.console import FleetConsole
+        from fleet.server.task_service import FleetTaskService
+        from fleet.server.task_store import FleetTaskStore
+        users = {hashlib.sha256(token.encode()).hexdigest(): {"principal_id": principal, "role": role}
+                 for token, principal, role in ((self.tokens["operator"], "harbor-operator", "service"),
+                                                (self.tokens["viewer"], "viewer", "viewer"),
+                                                (self.peer["CELL-A"], "control-unit:CELL-A", "service"))}
+        app = create_app(FleetConsole([], []), site_users=users,
+            task_service=FleetTaskService(FleetTaskStore(self.workdir / "R" / "fleet.sqlite3"), robot_ids=()),
+            control_unit_config=self._config("R", "CELL-A", self.cell.url, self.identity[0]))
+        if app.state.arm_transfer_job_store is not None or app.state.control_unit is None:
+            raise RuntimeError("R must relay ARM work, not own it")
+        self.server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=int(self.url.rsplit(":", 1)[1]),
+                                                    log_level="error", lifespan="on"))
+        self.cell._thread(self.server.run)
+        deadline = time.monotonic() + 10
+        while not self.server.started:
+            if time.monotonic() > deadline:
+                raise TimeoutError("R Fleet HTTP did not start")
+            time.sleep(.01)
+
+    def stop(self):
+        try:
+            if self.server is not None:
+                self.server.should_exit = True
+        finally:
+            self.cell.stop()
