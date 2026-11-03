@@ -184,7 +184,7 @@ class OperationsTests(TestCase):
         actual = operations_context(plan.observation, now=self.now)['actual']
         # Buried outbound: one cargo moved off before the outbound move, then returned.
         self.assertEqual(actual, dict(completed=1, inbound=0, outbound=1, rearrange=0,
-                                      outbound_rehandle_moves=1, throughput=None))
+                                      outbound_rehandle_moves=1, unmatched=[], throughput=None))
         html = render_to_string('operations_summary.html',
                                 dict(operations=operations_context(plan.observation, now=self.now)))
         for text in ('실제 완료량·처리율', '1<small> 건 완료', '실행된 재취급 이동 1회', '처리율 미집계'):
@@ -212,13 +212,19 @@ class RearrangementOperationsTests(TestCase):
             ledger_identity='t', fleet_origin='t', fleet_principal='t', body_digest='a' * 64, binding={},
             state='UNKNOWN')
         context = operations_context(self.observation, now=self.now)
-        self.assertEqual(context['attention'][-1]['label'], f'전체 인계 · 결과 불명 · 재배치 요청 #{plan.order_id}')
+        self.assertIn(f'전체 인계 · 결과 불명 · 재배치 요청 #{plan.order_id}', [a['label'] for a in context['attention']])
         self.assertIn(f'재배치 요청 #{plan.order_id}', render_to_string('operations_summary.html', dict(operations=context)))
         Command.objects.filter(pk=command.pk).update(state='COMPLETED')
-        actual = operations_context(self.observation, now=self.now)['actual']
-        # setUp finished two outbound orders whose test bindings carry no moves.
+        context = operations_context(self.observation, now=self.now)
+        actual = context['actual']
+        # setUp finished two outbound orders whose bindings carry no moves: unknown, never zero.
         self.assertEqual((actual['completed'], actual['outbound'], actual['rearrange'], actual['outbound_rehandle_moves']),
-                         (3, 2, 1, 0))
+                         (3, 2, 1, None))
+        flagged = [a for a in context['attention'] if a['label'].startswith('완료 인계 · 반출 이동 대조 불가')]
+        self.assertEqual(sorted(a['href'] for a in flagged), sorted(f'/work/{c.pk}/' for c in actual['unmatched']))
+        self.assertEqual(len(flagged), 2)
+        self.assertIn('실행된 재취급 이동 미집계(대조 불가 2건)',
+                      render_to_string('operations_summary.html', dict(operations=context)))
 
 
 class SpatialOperationsTests(TestCase):

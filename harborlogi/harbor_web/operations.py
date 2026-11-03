@@ -53,11 +53,19 @@ def _actual(commands):
     cell stages never create a Command. The binding is the digest-checked ledger payload."""
     done = [c for c in commands if c.state == 'COMPLETED']
     kinds = [c.order.kind for c in done]
-    rehandles = sum(next((i for i, m in enumerate(c.binding.get('moves', []))
-                          if m['cargo_id'] == c.binding.get('outbound_id')), 0)
-                    for c in done if c.order.kind == 'OUTBOUND')
+    rehandles, unmatched = 0, []
+    for c in done:
+        if c.order.kind != 'OUTBOUND':
+            continue
+        index = next((i for i, m in enumerate(c.binding.get('moves', []))
+                      if m.get('cargo_id') == c.binding.get('outbound_id')), None)
+        if index is None:
+            unmatched.append(c)  # No outbound move to count against: never report it as zero rehandles.
+        else:
+            rehandles += index
     return dict(completed=len(done), inbound=kinds.count('INBOUND'), outbound=kinds.count('OUTBOUND'),
-                rearrange=kinds.count('REARRANGE'), outbound_rehandle_moves=rehandles, throughput=None)
+                rearrange=kinds.count('REARRANGE'), outbound_rehandle_moves=None if unmatched else rehandles,
+                unmatched=unmatched, throughput=None)
 
 
 def operations_context(observation, *, now=None):
@@ -129,6 +137,10 @@ def operations_context(observation, *, now=None):
         if c.state in ATTENTION_STATES:
             attention.append(dict(label=f"전체 인계 · {COMMAND_LABELS[c.state]} · {_cargo_label(c.order)}", count=1,
                                   action='원래 작업 대조', href=f'/work/{c.pk}/'))
+    actual = _actual(commands)
+    for c in actual['unmatched']:
+        attention.append(dict(label=f"완료 인계 · 반출 이동 대조 불가 · {_cargo_label(c.order)}", count=1,
+                              action='원래 작업 대조', href=f'/work/{c.pk}/'))
     return dict(observation=observation, inventory=inventory, freshness=freshness, attention=attention,
         attention_total=sum(item['count'] for item in attention),
         orders=dict(inbound=counts.get('INBOUND', 0), outbound=counts.get('OUTBOUND', 0), scope='전체 등록 지시'),
@@ -138,4 +150,4 @@ def operations_context(observation, *, now=None):
             rehandled_cargo=sorted(rehandled), outbound_plan_count=outbound_plans if observation else None,
             outbound_rehandle_moves=outbound_rehandles if observation else None,
             rehandle_per_outbound=round(outbound_rehandles / outbound_plans, 1) if observation and outbound_plans else None),
-        handoffs=handoffs, actual=_actual(commands))
+        handoffs=handoffs, actual=actual)
