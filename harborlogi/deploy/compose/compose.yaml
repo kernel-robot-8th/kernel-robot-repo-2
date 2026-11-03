@@ -51,6 +51,7 @@ services:
     environment:
       HARBOR_HOSTNAME: ${HARBOR_HOSTNAME:?set HARBOR_HOSTNAME}
       HARBOR_HTTPS_PORT: ${HARBOR_HTTPS_PORT:-9443}
+      HARBOR_LISTEN_PORT: ${HARBOR_LISTEN_PORT:-443}
     volumes:
       - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
       - ${HARBOR_TLS_DIR:?set HARBOR_TLS_DIR}:/etc/harbor-tls:ro

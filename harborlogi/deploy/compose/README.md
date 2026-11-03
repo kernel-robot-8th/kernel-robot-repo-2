@@ -32,6 +32,24 @@ docker compose up -d harbor proxy
 
 migrate를 하지 않으면 `harbor`가 시작을 거절한다. R principal·token·binding 중 하나라도 비어 있으면 Fleet 실행 연결 없이 화면만 뜬다.
 
+### R과 같은 호스트에서의 덮어쓰기
+
+ROSY 사이트 방화벽(`ROSY-SITE-INGRESS`)은 브리지 인터페이스에서 호스트 자신의 주소로 들어오는 R 포트 연결을 버린다(`fib daddr type local drop`). 그래서 기본 브리지 네트워크의 Harbor는 같은 호스트의 R에 닿지 못하고 시간 초과가 난다. 방화벽은 사이트가 정한 경계이므로 열지 않는다. 대신 저장소 밖에 덮어쓰기 파일을 두고 Harbor를 호스트 네트워크로 돌린다. 이러면 R로 가는 연결이 `lo`를 지난다.
+
+```yaml
+# /etc/harbor/compose.site.yaml — docker compose ... -f compose.yaml -f /etc/harbor/compose.site.yaml
+services:
+  harbor:
+    network_mode: host
+    ports: !reset []
+    extra_hosts: ["<R의 TLS 이름>:127.0.0.1"]   # mDNS 이름을 lo로 고정한다. 인증서 이름 검사는 그대로 유지된다
+  proxy:
+    environment:
+      HARBOR_LISTEN_PORT: "9443"                 # 호스트 네트워크에서는 443이 R 것이다
+```
+
+Waitress는 그대로 `127.0.0.1:8060`에서 듣는다. 호스트의 8060 포트가 비어 있는지 먼저 확인한다.
+
 ## 갱신
 
 팀 `main`에 병합된 커밋만 올린다. 그 커밋을 체크아웃하고 `HARBOR_IMAGE=harborlogi:<커밋 앞 12자리>`로 빌드·기동한다. 아래 갱신 순서를 따른다.
