@@ -443,6 +443,12 @@ class ArmFleet:
         lookups = sum(o.operations.count("GetAction") for o in self.owners)
         print("Synthetic UDS submits:", submits, "lookups:", lookups, "physical proofs:", sorted(self.observed), flush=True)
         if self.one_attempt and (submits != 1 or lookups < 1 or self.observed != {"PRE_DISPATCH", "POST_ACTION"}):
+            import sqlite3  # diagnostic: the job's own account, read after the server stopped
+            with sqlite3.connect(self.workdir / "fleet.sqlite3") as db:
+                for row in db.execute("SELECT mission_id, status, reason FROM fleet_cell_jobs"):
+                    print("== cell job", *row, flush=True)
+                for row in db.execute("SELECT * FROM fleet_cell_events ORDER BY rowid DESC LIMIT 8"):
+                    print("== cell job event", *[str(value)[:300] for value in row], flush=True)
             raise AssertionError("simulation did not complete exactly one admitted physical attempt")
 
 
