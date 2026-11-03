@@ -24,7 +24,7 @@ Harbor 서버는 웹, 상시 실행기, 웹 DB, 업무 장부로 이루어진다
 1. **Harbor는 R과 같은 운영 PC에 둔다.** 지금은 OMX 관제 PC에서 R 옆에 둔다. R이 전용 PC로 옮기면 Harbor도 같은 창에서 함께 옮긴다. Harbor의 유일한 Fleet 상대가 R이므로, 둘을 함께 두면 연결과 장애 범위가 같이 움직인다. 모델 PC와 AI PC에는 두지 않는다.
 2. **설치는 Docker Compose로 하고, R·CELL-A와 섞지 않는다.** 아래 다섯 가지를 Harbor 자기 것으로 갖는다(D-893 §3).
    - Compose project 이름 `harbor`
-   - 공개 포트(기본 8443)
+   - 공개 포트(기본 9443. robttt의 443·8443은 rosy-site, 8543은 CELL-A가 쓴다)
    - 데이터 volume
    - TLS 인증서
    - R이 발급한 서비스 principal(ADR0015)

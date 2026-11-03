@@ -34,7 +34,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     ports:
-      - "${HARBOR_HTTPS_PORT:-8443}:443"
+      - "${HARBOR_HTTPS_PORT:-9443}:443"  # robttt 2026-11-04: 443·8443 rosy-site(R), 8543 CELL-A
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8060), 3).close()"]
       interval: 30s

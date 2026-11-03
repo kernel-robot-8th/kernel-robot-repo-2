@@ -18,7 +18,7 @@ R 호스트에서 이 저장소의 고정 커밋을 체크아웃한 뒤 실행�
 2. 저장소 밖 폴더 두 개를 준비한다.
    - 설정 폴더: 설치 binding `bindings.json`을 넣는다. R 인증서가 사설 CA이면 `r-ca.pem`도 넣는다.
    - TLS 폴더: Harbor 자기 인증서 `fullchain.pem`과 `private-key.pem`을 넣는다. R 인증서를 빌려 쓰지 않는다.
-3. 환경 변수를 지정한다: `HARBOR_ENV_FILE`, `HARBOR_CONFIG_DIR`, `HARBOR_TLS_DIR`, `HARBOR_HOSTNAME`, `HARBOR_BACKUP_DIR`, 그리고 R·CELL-A와 겹치지 않는 `HARBOR_HTTPS_PORT`(기본 8443).
+3. 환경 변수를 지정한다: `HARBOR_ENV_FILE`, `HARBOR_CONFIG_DIR`, `HARBOR_TLS_DIR`, `HARBOR_HOSTNAME`, `HARBOR_BACKUP_DIR`, 그리고 R·CELL-A와 겹치지 않는 `HARBOR_HTTPS_PORT`(기본 9443. 2026-11-04 robttt에서 443·8443은 rosy-site, 8543은 CELL-A가 쓴다. 설치 전에 `ss -ltn`으로 다시 확인한다).
 4. 다음 순서로 실행한다.
 
 ```bash
