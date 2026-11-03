@@ -77,6 +77,8 @@ Harbor는 ROSY 코드를 import하지 않고 ROSY 계층 꼭대기 관제(현장
 
 ## 문서
 
+전체 자동 검사 실행: `python -m tools.check_all` — 준비 사항·기능별 검증 범위·결과 해석은 [기능 검증 안내](docs/testing.md)를 따른다.
+
 | 문서 | 내용 |
 |---|---|
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | 함께 작업하기 — Harbor와 ROSY 중 어디서 고칠지, 연결 확인 단계, PR 절차 |
