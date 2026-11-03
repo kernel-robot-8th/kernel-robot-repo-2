@@ -16,6 +16,21 @@ class ModuleBoundaryTests(unittest.TestCase):
                 for name in names:
                     self.assertNotIn(name.split('.')[0], ('django', 'harbor_web'), path.name)
 
+    def test_product_code_reaches_rosy_only_over_fleet_http(self):
+        # ROSY-only top-level packages (rosy-platform git ls-files, 2026-11-04) and ROS itself; generic
+        # names such as web/api/core are left out because they collide with stdlib or Harbor modules.
+        rosy = {'fleet', 'core_common', 'core_events', 'core_features', 'core_api_web', 'rosy_account', 'rosy_agent',
+                'rosy_cell', 'rosy_gateway', 'rosy_vision', 'rosy_situation', 'rosylib', 'omx_adapter',
+                'lerobot_robot_rosy_omx', 'perception', 'perception_runtime', 'manipulation', 'navigation',
+                'decision', 'swarm', 'device_core', 'rclpy'}
+        for package in ('harbor', 'harbor_web'):
+            for path in (ROOT / package).rglob('*.py'):
+                for node in ast.walk(ast.parse(path.read_text(encoding='utf-8-sig'))):
+                    names = [a.name for a in node.names] if isinstance(node, ast.Import) else \
+                        [node.module or ''] if isinstance(node, ast.ImportFrom) and not node.level else []
+                    for name in names:
+                        self.assertNotIn(name.split('.')[0], rosy, path)
+
     def test_executor_only_schedules_application_commands(self):
         tree = ast.parse((ROOT / 'harbor_web/executor.py').read_text(encoding='utf8'))
         for node in ast.walk(tree):
