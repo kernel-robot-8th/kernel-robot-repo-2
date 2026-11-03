@@ -92,10 +92,11 @@ class SyntheticStops:
 
 class ArmFleet:
     def __init__(self, *, root, workdir, request_key_path=None, request_keys=("neutral-arm-http:0",), one_attempt=True,
-                 sim=False, proposer="operator", before_app=None):
+                 sim=False, delegated=False, before_app=None):
         self.root, self.workdir, self.sim = Path(root), Path(workdir), sim
-        # Whose proposals the test operator admits, and extra create_app arguments known only after install() (D-965 relay).
-        self.proposer, self.before_app = proposer, before_app
+        # D-965 relay: proposals come from R's delegations, found by the cell operator; and extra create_app
+        # arguments known only after install().
+        self.delegated, self.before_app = delegated, before_app
         self.identity, self.sim_process = (WORKCELL, INSTANCE), None
         self.request_key_path = Path(request_key_path) if request_key_path else None
         self.request_keys, self.one_attempt = tuple(request_keys), one_attempt
@@ -333,12 +334,33 @@ class ArmFleet:
     def client(self, who="operator"):
         return httpx.Client(base_url=self.url, headers={"Authorization": "Bearer " + self.tokens[who]}, timeout=5)
 
+    def _proposed(self, client, request_key):
+        """The job to admit: the test proposer's own key, or (D-965) the one R's delegation bound at this cell.
+
+        R's peer credential reaches only the control-unit API, so the cell operator finds it from the delegation list.
+        """
+        if not self.delegated:
+            response = client.get("/api/fleet/arm-transfers/jobs", params={"request_key": request_key})
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()["job"]
+        listed = client.get("/api/fleet/control-unit/delegations")
+        listed.raise_for_status()
+        for reply in listed.json()["delegations"]:
+            row = reply["delegation"]
+            if row["request"].get("transfer", {}).get("request_key") == request_key and row["local_task_id"]:
+                response = client.get("/api/fleet/arm-transfers/jobs/" + row["local_task_id"])
+                response.raise_for_status()
+                return response.json()["job"]
+        return None
+
     def _approve(self):
         """Test-operator approval (D-927 decision 4); observation phases are only read, never answered here."""
         pending = [] if self.request_key_path else list(self.request_keys)
         loaded = False
         try:
-            with self.client(self.proposer) as proposer, self.client("approver") as approver, httpx.Client(
+            with self.client() as proposer, self.client("approver") as approver, httpx.Client(
                     base_url=self.url, headers={"X-Physical-Observation-Token": self.observer_token}, timeout=5) as observer:
                 while not self.stopped.wait(.05):
                     if self.request_key_path and not loaded:
@@ -350,17 +372,14 @@ class ArmFleet:
                         pending.append(request_key)
                         loaded = True
                     for request_key in tuple(pending):
-                        response = proposer.get("/api/fleet/arm-transfers/jobs", params={"request_key": request_key})
-                        if response.status_code == 200:
-                            job = response.json()["job"]
+                        job = self._proposed(approver if self.delegated else proposer, request_key)
+                        if job is not None:
                             # shortcut: each move's object starts at the one installed source; per-move bindings come with S4.
                             self.scene["position_m"] = [0, 0, .2]
                             generation = approver.get("/api/fleet/dispatch-control").json()["generation"]
                             approver.post("/api/fleet/arm-transfers/jobs/" + job["mission_id"] + "/admit", json={
                                 "expected_proposal_digest": job["proposal_digest"], "expected_generation": generation}).raise_for_status()
                             pending.remove(request_key)
-                        elif response.status_code != 404:
-                            response.raise_for_status()
                     response = observer.get("/api/fleet/arm-transfers/observation-context")
                     response.raise_for_status()
                     context = response.json()["context"]
@@ -458,7 +477,7 @@ class RelayedArmFleet:
     def __init__(self, *, root, workdir, sim=False):
         self.root, self.workdir = Path(root), Path(workdir)
         self.peer = {unit: secrets.token_urlsafe(40) for unit in ("R", "CELL-A")}  # the token each unit sends
-        self.cell = ArmFleet(root=root, workdir=self.workdir / "cell", sim=sim, proposer="control-unit:R",
+        self.cell = ArmFleet(root=root, workdir=self.workdir / "cell", sim=sim, delegated=True,
                              before_app=lambda cell: {"control_unit_config": self._config(
                                  "CELL-A", "R", self.url, cell.identity[0])})
         self.cell.tokens["control-unit:R"] = self.peer["R"]
