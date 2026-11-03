@@ -44,6 +44,22 @@ def _inventory(observation):
         holding_count=len(snapshot.holdings), holdings=snapshot.holdings)
 
 
+def _cargo_label(order):
+    return order.cargo.code if order.cargo else f'재배치 요청 #{order.pk}'  # REARRANGE has no cargo (design 32)
+
+
+def _actual(commands):
+    """COMPLETED is set only after the ARM_TRANSFER ledger finish() (commands.advance_command); legacy
+    cell stages never create a Command. The binding is the digest-checked ledger payload."""
+    done = [c for c in commands if c.state == 'COMPLETED']
+    kinds = [c.order.kind for c in done]
+    rehandles = sum(next((i for i, m in enumerate(c.binding.get('moves', []))
+                          if m['cargo_id'] == c.binding.get('outbound_id')), 0)
+                    for c in done if c.order.kind == 'OUTBOUND')
+    return dict(completed=len(done), inbound=kinds.count('INBOUND'), outbound=kinds.count('OUTBOUND'),
+                rearrange=kinds.count('REARRANGE'), outbound_rehandle_moves=rehandles, throughput=None)
+
+
 def operations_context(observation, *, now=None):
     """Summarize one exact observation pin; registered orders and handoffs are global."""
     now = timezone.now() if now is None else now
@@ -57,7 +73,8 @@ def operations_context(observation, *, now=None):
     counts = dict(Order.objects.values_list('kind').annotate(count=Count('pk')))
     commands = list(Command.objects.select_related('plan__observation__condition', 'order__cargo').order_by('-pk'))
     commanded = {c.order_id for c in commands}
-    handoffs = [dict(command=c, plan=c.plan, label=COMMAND_LABELS.get(c.state, c.state)) for c in commands]
+    handoffs = [dict(command=c, plan=c.plan, label=COMMAND_LABELS.get(c.state, c.state), cargo=_cargo_label(c.order))
+                for c in commands]
     latest_ids = Plan.objects.values('order_id').annotate(latest_id=Max('pk')).values('latest_id')
     latest = Plan.objects.filter(pk__in=latest_ids).select_related(
         'order__cargo', 'observation__condition', 'condition').order_by('-pk')
@@ -75,7 +92,7 @@ def operations_context(observation, *, now=None):
         moves = plan.result.get('moves', [])
         primary = sorted({m['primary_arm'] for m in moves if m.get('primary_arm')})
         alternate = sorted({a for m in moves for a in m.get('alternate_arms', [])} - set(primary))
-        rows.append(dict(plan=plan, stale=stale, included=included, status=status,
+        rows.append(dict(plan=plan, stale=stale, included=included, status=status, cargo=_cargo_label(plan.order),
                          primary_arms=primary, alternate_arms=alternate))
         if status == 'HOLD':
             hold += 1
@@ -87,13 +104,14 @@ def operations_context(observation, *, now=None):
         move_count += len(moves)
         outbound = plan.order.kind == 'OUTBOUND'
         outbound_plans += outbound
-        target_index = next((i for i, m in enumerate(moves) if m['cargo_id'] == plan.order.cargo.code), -1)
+        code = plan.order.cargo and plan.order.cargo.code
+        target_index = next((i for i, m in enumerate(moves) if m['cargo_id'] == code), -1)
         for i, move in enumerate(moves):
             phase = move.get('phase_label') or ('입고' if plan.order.kind == 'INBOUND' else
                 '재취급' if i < target_index else '반출' if i == target_index else '복귀')
             phases[phase] = phases.get(phase, 0) + 1
             outbound_rehandles += outbound and phase == '재취급'
-            if move['cargo_id'] != plan.order.cargo.code:
+            if move['cargo_id'] != code:
                 rehandled.add(move['cargo_id'])
     # Existing fields only (ADR 0020): no new state interpretation, no resend action.
     attention = []
@@ -109,7 +127,7 @@ def operations_context(observation, *, now=None):
         attention.append(dict(label='재검토로 이동 집계 제외', count=excluded, action='현재 검토 보기', href='#proposal-title'))
     for c in commands:
         if c.state in ATTENTION_STATES:
-            attention.append(dict(label=f"전체 인계 · {COMMAND_LABELS[c.state]} · {c.order.cargo.code}", count=1,
+            attention.append(dict(label=f"전체 인계 · {COMMAND_LABELS[c.state]} · {_cargo_label(c.order)}", count=1,
                                   action='원래 작업 대조', href=f'/work/{c.pk}/'))
     return dict(observation=observation, inventory=inventory, freshness=freshness, attention=attention,
         attention_total=sum(item['count'] for item in attention),
@@ -120,4 +138,4 @@ def operations_context(observation, *, now=None):
             rehandled_cargo=sorted(rehandled), outbound_plan_count=outbound_plans if observation else None,
             outbound_rehandle_moves=outbound_rehandles if observation else None,
             rehandle_per_outbound=round(outbound_rehandles / outbound_plans, 1) if observation and outbound_plans else None),
-        handoffs=handoffs, actual=dict(completed=None, throughput=None))
+        handoffs=handoffs, actual=_actual(commands))

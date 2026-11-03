@@ -21,7 +21,7 @@ class OperationsPagesTests(TestCase):
         self.assertNotEqual(response.context['condition'].pk, newer_condition.pk)
         self.assertContains(response, '입고 배치 추천')
         self.assertContains(response, '현장 인계: 배정 전')
-        self.assertIsNone(response.context['operations']['actual']['completed'])
+        self.assertEqual(response.context['operations']['actual']['completed'], 0)
         self.assertContains(response, '시간당 물동량')
         self.assertEqual(self.client.get('/?observation=missing').status_code, 404)
         self.assertEqual(counts, (Plan.objects.count(), Observation.objects.count(), Audit.objects.count()))
