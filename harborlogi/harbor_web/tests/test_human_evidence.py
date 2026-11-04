@@ -53,8 +53,10 @@ class HumanEvidenceTests(TestCase):
 
     def test_form_shows_only_while_the_ledger_waits_and_only_to_named_roles(self):
         command, _ = self.waiting(status='PROPOSED')
-        self.client.force_login(self.field)
+        self.client.force_login(self.operator)
         self.assertNotContains(self.client.get(f'/work/{command.pk}/'), 'name="action" value="attest"')
+        self.client.force_login(self.field)  # field staff only open a command that waits for them
+        self.assertEqual(self.client.get(f'/work/{command.pk}/').status_code, 403)
         command, row = self.waiting(command=command)
         page = self.client.get(f'/work/{command.pk}/')
         self.assertContains(page, 'name="action" value="attest"')
@@ -65,6 +67,25 @@ class HumanEvidenceTests(TestCase):
         self.client.force_login(self.operator)
         self.assertNotContains(self.client.get(f'/work/{command.pk}/'), 'name="action" value="attest"')
         self.producer(True)
+
+    def test_field_sees_a_command_only_to_confirm_and_cannot_use_other_actions(self):
+        command, _ = self.waiting(status='PROPOSED')
+        self.client.force_login(self.field)
+        self.assertEqual(self.client.get(f'/work/{command.pk}/').status_code, 403)
+        command, row = self.waiting(command=command)
+        self.assertEqual(self.client.get(f'/work/{command.pk}/').status_code, 200)
+        for action in ('submit', 'cancel', 'reconcile'):
+            response = self.client.post(f'/work/{command.pk}/', dict(action=action, expected_version=command.version))
+            self.assertEqual(response.status_code, 403, action)
+
+    def test_provider_stops_offering_a_record_before_the_ledger_window_ends(self):
+        from datetime import timedelta
+        from unittest.mock import patch
+        command, row = self.waiting()
+        self.assertEqual(self.post(self.field, command, row).status_code, 302)
+        late = timezone.now() + human_evidence.FRESHNESS - human_evidence.LEDGER_MARGIN + timedelta(seconds=1)
+        with patch('django.utils.timezone.now', return_value=late):
+            self.assertIsNone(human_evidence.human_provider()(command, row, json.loads(row['payload']), 'step'))
 
     def test_viewer_is_forbidden_and_nothing_is_stored(self):
         command, row = self.waiting()

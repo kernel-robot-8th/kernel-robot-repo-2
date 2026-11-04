@@ -17,11 +17,15 @@ from harbor.ledger import ReadOnlyLedger, plan_payload
 from harbor.workflow import HumanArmRetreat, MoveEvidence, PlacementEvidence, RetreatEvidence
 from harbor_web import commands
 from harbor_web.command_models import Command, HumanAttestation
+from harbor_web.coordination import serialized
 from harbor_web.service_common import Conflict, _role, _save
 
 HUMAN_PLACEMENT_SOURCE = 'human-attested-placement'
 HUMAN_RETREAT_SOURCE = 'human-attested-retreat'
-FRESHNESS = timedelta(minutes=5)  # The ledger's human window; the provider pre-filters with it.
+FRESHNESS = timedelta(minutes=5)  # The ledger's human window.
+# Offer a record only while it has this much ledger window left: the ledger re-reads the clock, and a record
+# expiring between the two reads would turn a stale confirmation into an UNKNOWN reconciliation case.
+LEDGER_MARGIN = timedelta(seconds=30)
 ROLES = ('field', 'operator')
 ARM_CLAIM = '구역 밖 대기 자세 육안 확인'
 
@@ -77,7 +81,8 @@ def _live_record(command, stage):
         if ((record.phase, record.step_index, record.mission_id, record.attempt_id, record.revision)
                 == (stage['phase'], stage['step_index'], stage['mission_id'], stage['attempt_id'], stage['revision'])
                 and set(record.arms) == set(stage['arms'])
-                and timedelta(0) <= now - record.created_at <= FRESHNESS and not ledger.consumed(_ids(record))):
+                and timedelta(0) <= now - record.created_at <= FRESHNESS - LEDGER_MARGIN
+                and not ledger.consumed(_ids(record))):
             return record
     return None
 
@@ -110,6 +115,7 @@ def form_for(command, stage):
         attempt_id=stage['attempt_id'], phase=stage['phase']))
 
 
+@serialized  # SQLite ignores select_for_update; one writer at a time keeps one live record per stage
 def attest(actor, *, command_id, expected_version, phase, step_index, mission_id, attempt_id, arms,
            note='', photo_ref=''):
     """Store one attestation if it still matches the live ledger stage; otherwise reject."""

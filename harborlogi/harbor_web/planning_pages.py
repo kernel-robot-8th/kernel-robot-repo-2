@@ -128,6 +128,10 @@ def work_list(request):
 @require_http_methods(['GET', 'POST'])
 def work_detail(request, pk):
     command = get_object_or_404(Command.objects.select_related('plan__order__cargo', 'plan__observation'), pk=pk)
+    if request.method == 'GET' and not has_role(request.user, 'viewer', 'operator', 'admin') and (
+            not human_evidence.human_evidence_enabled() or human_evidence.awaiting(command) is None):
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied  # field staff see a command only while it waits for their confirmation
     attest_form = None
     if request.method == 'POST' and request.POST.get('action') == 'attest':
         if not has_role(request.user, *human_evidence.ROLES):
