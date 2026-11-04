@@ -21,6 +21,7 @@ from harbor_web.command_models import ACTIVE_COMMAND_STATES
 from harbor_web.models import Plan, Command, CommandFact, Audit, Observation
 from harbor_web.services import _role, Conflict, queue_digest, constraints
 from harbor_web.coordination import serialized
+from harbor_web.readiness import REASONS as READINESS_REASONS
 # Imported by name so tests that patch `harbor_web.commands._config`/`_bound` still reach these call sites.
 from harbor_web.command_binding import (_bindings, _bound, _config, _digest, _identity, _rearrangement,
                                         _spatial_binding, _spatial_from_path)
@@ -71,15 +72,21 @@ def capability(plan):
             loopback = host == 'localhost' or ipaddress.ip_address(host).is_loopback
         except ValueError:
             loopback = False
-        if not (settings.MODE in {'development', 'test'} and os.environ.get('HARBOR_WEB_ALLOW_SIMULATION') == '1'
-                and loopback and plan.observation.provenance == 'SYNTHETIC'):
+        simulation = (settings.MODE in {'development', 'test'} and os.environ.get('HARBOR_WEB_ALLOW_SIMULATION') == '1'
+                      and loopback)
+        if simulation and plan.observation.provenance != 'SYNTHETIC':
             raise ValidationError('AUTHENTICATED_OBSERVATION_AND_EVIDENCE_PRODUCER_REQUIRED')
+        if not simulation:
+            from harbor_web.readiness import first_unmet
+            blocked = first_unmet(plan)  # ADR0022: every production condition from a fresh stored check
+            if blocked:
+                raise ValidationError(blocked)
         _bound(plan, config)
     except ValidationError as error:
         safe = {'SPATIAL_EXECUTION_BINDINGS_REQUIRED', 'SPATIAL_OBSERVATION_REQUIRED',
                 'EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION', 'ORDER_ALREADY_COMPLETED', 'RESTORE_RECONCILIATION_REQUIRED', 'DEPLOYMENT_PROFILE_REQUIRED',
                 'EXECUTION_CONFIGURATION_REQUIRED', 'ORIGIN_NOT_ALLOWED', 'INVALID_FLEET_PRINCIPAL', 'PLAN_NOT_READY', 'PLAN_QUEUE_CHANGED',
-                'OBSERVATION_NOT_FRESH', 'OBSERVATION_REVISION_CHANGED', 'AUTHENTICATED_OBSERVATION_AND_EVIDENCE_PRODUCER_REQUIRED'}
+                'OBSERVATION_NOT_FRESH', 'OBSERVATION_REVISION_CHANGED', 'AUTHENTICATED_OBSERVATION_AND_EVIDENCE_PRODUCER_REQUIRED'} | READINESS_REASONS
         reason = error.messages[0] if error.messages and error.messages[0] in safe else 'EXECUTION_INPUTS_UNAVAILABLE'
     except (ValueError, KeyError, TypeError, OSError):
         reason = 'EXECUTION_INPUTS_UNAVAILABLE'
