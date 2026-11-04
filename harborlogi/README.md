@@ -77,6 +77,8 @@ Harbor는 ROSY 코드를 import하지 않고 ROSY 계층 꼭대기 관제(현장
 
 ## 문서
 
+전체 자동 검사 실행: `python -m tools.check_all` — 준비 사항·기능별 검증 범위·결과 해석은 [기능 검증 안내](docs/testing.md)를 따른다.
+
 | 문서 | 내용 |
 |---|---|
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | 함께 작업하기 — Harbor와 ROSY 중 어디서 고칠지, 연결 확인 단계, PR 절차 |
@@ -87,7 +89,7 @@ Harbor는 ROSY 코드를 import하지 않고 ROSY 계층 꼭대기 관제(현장
 | [docs/execution.md](docs/execution.md) | 공정 제안과 업무 장부 사용법 |
 | [docs/observation-acceptance.md](docs/observation-acceptance.md) | 물리 관측 연동의 수용 조건 |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | 실행 연결 계획 |
-| [docs/adr/](docs/adr/) | 설계 결정 기록 (0001 공정 binding과 완료 근거, 0002 고정 소스 Fleet 계약 시험, 0003 Harbor가 가진 Fleet 계약 시험 하네스, 0004 도메인 중립 ROSY 위의 항만 앱 경계(제안), 0005 Harbor·ROSY 책임 지도, 0018 꼭대기 관제 하나로 연결) |
+| [docs/adr/](docs/adr/) | 설계 결정 기록 (0001 공정 binding과 완료 근거, 0002 고정 소스 Fleet 계약 시험, 0003 Harbor가 가진 Fleet 계약 시험 하네스, 0004 도메인 중립 ROSY 위의 항만 앱 경계(제안), 0005 Harbor·ROSY 책임 지도, 0018 꼭대기 관제 하나로 연결, 0019 컨테이너 사건 이력, 0021 R 옆 운영 PC에 Compose 설치) |
 | [docs/plans/](docs/plans/) | 작업 계획 (2026-10-21 항만 앱 분할) |
 | [docs/validation/](docs/validation/) | 날짜별 검증 기록 |
 

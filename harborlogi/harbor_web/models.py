@@ -238,4 +238,4 @@ class Measurement(Immutable):
 
 from harbor_web.command_models import Command, CommandFact
 
-from harbor_web.runtime_models import DeploymentState, FleetConnection
+from harbor_web.runtime_models import DeploymentState, EvidenceProducerSetting, FleetConnection

@@ -36,11 +36,14 @@ class PlacementEvidence:
     observed_at: datetime
     cargo_id: str
     location: str
+    attested_by: str = ""  # A named person's visual verdict (ADR 0023); empty means an automatic producer.
 
     def __post_init__(self):
         _header(self)
         identifier(self.cargo_id)
         identifier(self.location)
+        if self.attested_by:
+            identifier(self.attested_by)
 
 
 @dataclass(frozen=True)
@@ -68,6 +71,21 @@ class ArmRetreat:
 
 
 @dataclass(frozen=True)
+class HumanArmRetreat:
+    """A named person saw this yard arm waiting outside the zone (ADR 0023): a verdict, not a measurement."""
+    arm: str
+    attested_by: str
+    outside_zone_seen: bool
+
+    def __post_init__(self):
+        if self.arm not in YARD_ARMS:
+            raise ValueError("Retreat evidence covers yard arms A/B only")
+        identifier(self.attested_by)
+        if type(self.outside_zone_seen) is not bool:
+            raise ValueError("Physical facts must be explicit booleans")
+
+
+@dataclass(frozen=True)
 class RetreatEvidence:
     """Platform-data retreat record for the arms a step may have used; no camera is involved."""
     evidence_id: str
@@ -76,11 +94,11 @@ class RetreatEvidence:
     revision: int
     source_id: str
     observed_at: datetime
-    arms: tuple[ArmRetreat, ...]
+    arms: tuple[ArmRetreat | HumanArmRetreat, ...]
 
     def __post_init__(self):
         _header(self)
-        if not isinstance(self.arms, tuple) or not all(isinstance(a, ArmRetreat) for a in self.arms):
+        if not isinstance(self.arms, tuple) or not all(isinstance(a, (ArmRetreat, HumanArmRetreat)) for a in self.arms):
             raise ValueError("Expected immutable arm retreat facts")
         identifiers(tuple(a.arm for a in self.arms))
 
@@ -93,14 +111,21 @@ class MoveEvidence:
 
 
 class BusinessLedger:
-    def __init__(self, path, *, placement_sources, retreat_sources, freshness=timedelta(seconds=5)):
+    def __init__(self, path, *, placement_sources, retreat_sources, freshness=timedelta(seconds=5),
+                 human_placement_sources=(), human_retreat_sources=(), human_freshness=timedelta(minutes=5)):
         identifiers(placement_sources)
         identifiers(retreat_sources)
-        if (not placement_sources or not retreat_sources or set(placement_sources) & set(retreat_sources)
-                or not isinstance(freshness, timedelta) or freshness <= timedelta(0)):
+        identifiers(human_placement_sources)
+        identifiers(human_retreat_sources)
+        every = [placement_sources, retreat_sources, human_placement_sources, human_retreat_sources]
+        if (not placement_sources or not retreat_sources
+                or sum(len(set(group)) for group in every) != len(set().union(*every))
+                or not isinstance(freshness, timedelta) or freshness <= timedelta(0)
+                or not isinstance(human_freshness, timedelta) or human_freshness <= timedelta(0)):
             raise ValueError("Separate configured placement and retreat sources and positive freshness are required")
-        self.path, self.freshness = str(path), freshness
+        self.path, self.freshness, self.human_freshness = str(path), freshness, human_freshness
         self.placement_sources, self.retreat_sources = placement_sources, retreat_sources
+        self.human_placement_sources, self.human_retreat_sources = human_placement_sources, human_retreat_sources
         self._reads = {}
         with closing(self._connect()) as c, c:
             c.executescript("""
@@ -293,22 +318,32 @@ class BusinessLedger:
             raise ValueError("Placement and retreat evidence are both required")
         placement, retreat = evidence.placement, evidence.retreat
 
+        # A named person's verdict (ADR 0023) rides separate source ids and its own freshness window;
+        # it is never mixed with automatic facts, and nothing here reads Fleet state.
+        human = isinstance(placement, PlacementEvidence) and bool(placement.attested_by)
+        window = self.human_freshness if human else self.freshness
+
         def bound(e, kind, sources):
             if (not isinstance(e, kind) or e.source_id not in sources
                     or e.revision != payload["revision"] or e.mission_id != mission_id
                     or e.attempt_id != attempt_id
-                    or not timedelta(0) <= now - e.observed_at <= self.freshness):
+                    or not timedelta(0) <= now - e.observed_at <= window):
                 raise ValueError("Physical evidence does not match the current business execution")
 
-        bound(placement, PlacementEvidence, self.placement_sources)
+        bound(placement, PlacementEvidence, self.human_placement_sources if human else self.placement_sources)
         if placement.cargo_id != cargo_id or placement.location != location:
             raise ValueError("Placement evidence does not show the cargo at its destination")
-        bound(retreat, RetreatEvidence, self.retreat_sources)
+        bound(retreat, RetreatEvidence, self.human_retreat_sources if human else self.retreat_sources)
         by_arm = {a.arm: a for a in retreat.arms}
         for arm in arms:
             fact = by_arm.get(arm)
-            if (fact is None or not fact.claim_released or not fact.outside_zone
-                    or not timedelta(0) <= now - fact.pose_observed_at <= self.freshness):
+            if human:
+                ok = (isinstance(fact, HumanArmRetreat) and fact.outside_zone_seen
+                      and fact.attested_by == placement.attested_by)
+            else:
+                ok = (isinstance(fact, ArmRetreat) and fact.claim_released and fact.outside_zone
+                      and timedelta(0) <= now - fact.pose_observed_at <= self.freshness)
+            if not ok:
                 raise ValueError("Retreat evidence does not show every related arm out of the space")
 
     @staticmethod

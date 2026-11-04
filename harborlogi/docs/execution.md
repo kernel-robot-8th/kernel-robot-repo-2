@@ -65,6 +65,16 @@ API v1.298 지원 서버에서는 `harbor.transport.TripIntent(request_key, cand
 
 응답 유실이나 제출 중 재시작은 `UNCERTAIN`이고 새 POST는 거절한다. `reconcile(key, client)`는 원본 key의 GET만 수행한다. GET 404·연결 오류는 자동 재접수·새 key·장치 재배정의 근거가 아니다. `ACKNOWLEDGED`는 일치하는 Fleet 참조를 조회했다는 뜻이며 HOLD 작업도 포함할 수 있다. 로봇의 `GOAL_CONFIRMED`는 화물 내려놓기·팔 퇴피·반출 완료를 뜻하지 않는다. 현재 반출 업무 장부와 관측 판정은 그대로 유지한다.
 
+### 이송 제안 경로 (D-908, API v1.329)
+
+Harbor 서비스 신원은 `POST /api/fleet/trip-jobs`(named operator 전용)를 쓸 수 없으므로 `TransportLedger.propose(key, client)`가 `RosyClient.trip_propose`로 `POST /api/fleet/trip-proposals`를 정확히 한 번 보낸다. Harbor는 승인하지 않는다(`admit` 호출 없음). 다른 named operator가 승인해야 같은 request key의 trip job이 생긴다. 시뮬레이션 프로필 전용이며, 미설치 서버는 503 `TRIP_PROPOSAL_UNAVAILABLE`이다.
+
+`harbor.execution.submit_trip_proposal_execution`/`read_trip_proposal_execution`이 응답을 저장된 의도(key·digest·후보·step)와 대조하고 제안자 주체를 확인한다. 승인자가 제안자와 같으면 거절한다. 대기 중이면 mission_id 없는 `awaiting_approval` 스냅샷을, 승인되면 `trip-jobs?request_key=`를 읽어 job의 mission_id가 제안과 같은지 확인한 스냅샷을 돌려준다. 장부는 Fleet 상태 문자열을 해석하지 않고 이 정규화된 phase만 본다.
+
+장부 상태: PLANNED → SUBMITTING → AWAITING_APPROVAL(승인 대기, mission_id 없음) → ACKNOWLEDGED(job 연결). 응답 유실·재시작은 UNCERTAIN이며 `reconcile_proposal(key, client)`가 같은 key로만 조회하고 재전송하지 않는다. 기존 직접 `submit()`은 operator 신원이 `trip()`을 쓸 때만 남겨 두었다(최소 변경, 기존 시험·통합 하네스 유지). 서비스 신원의 앱 경로는 `propose()`다.
+
+**미검증**: 실제 Fleet(v1.329)에 대한 제안→승인→job 시험은 돌리지 않았다. 단위 시험은 가짜 Fleet이며, `tests/integration/transport_http.py`는 아직 제안 경로를 다루지 않는다. 웹은 이송을 제출하지 않는다.
+
 `RosyClient.trip_job(id)`와 `trip_request(key)`는 공정 문서 없는 수행 snapshot을 읽는다. 이송 후보·장소만 wire로 보내며 `cargo_id`·recipe·pallet/layer는 새 요청에 넣지 않는다. typed 동작의 추가·도달 사전 검증·중립 팔 동작은 후속 계약이다.
 
 공정 compiler 없는 실제 Fleet simulation HTTP 검증은 아래와 같이 명시 실행한다. 일반 단독 시험의 integration skip과 별개다.

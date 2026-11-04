@@ -86,6 +86,15 @@ class RosyClient:
             "candidate_robot_ids": list(candidates), "request_key": request_key, "steps": list(steps),
         })
 
+    def trip_propose(self, candidates, steps, *, request_key):
+        # D-908: the app only proposes; a different named operator admits outside Harbor.
+        return self._call("POST", "/api/fleet/trip-proposals", {
+            "candidate_robot_ids": list(candidates), "request_key": request_key, "steps": list(steps),
+        })
+
+    def trip_proposal_request(self, request_key):
+        return self._call("GET", "/api/fleet/trip-proposals?request_key=" + quote(request_key, safe=""), None)
+
     def trip_job(self, mission_id):
         return self._call("GET", "/api/fleet/trip-jobs/" + quote(mission_id, safe=""), None)
 
@@ -112,6 +121,13 @@ class RosyClient:
 
     def physical_evidence(self, mission_id):
         return self._call("GET", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/physical-evidence", None)
+
+    def recheck_read(self, mission_id, recheck_key):
+        return self._call("GET", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/rechecks/" + quote(recheck_key, safe=""), None)
+
+    def execution_profile(self):
+        # Proposed read-only platform signal (ADR0022); no platform route exists yet, so every answer is unmet.
+        return self._call("GET", "/api/fleet/execution-profile", None)
 
     def request_recheck(self, mission_id, recheck_key):
         return self._call("POST", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/rechecks",
