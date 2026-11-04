@@ -75,6 +75,14 @@ class ReadinessGateTests(TestCase):
         self.target.observation.provenance = 'DECLARED'
         self.assertEqual(self.reason(), 'READINESS_OBSERVATION_UNAUTHENTICATED')
 
+    def test_declared_observation_runs_only_under_human_confirmation(self):
+        self.check()
+        self.target.observation.provenance = 'DECLARED'
+        bridge.set_human_confirmation(self.admin, enabled=True, expected_version=0)
+        self.assertEqual(self.reason(), '')  # user decision 2026-11-04: person-declared + person-confirmed
+        self.target.observation.provenance = 'SYNTHETIC'
+        self.assertEqual(self.reason(), 'READINESS_OBSERVATION_UNAUTHENTICATED')  # never in production
+
     def test_human_confirmation_needs_admin_switch_and_a_field_user(self):
         self.check(auto_producer='UNMET')
         self.field.groups.clear()

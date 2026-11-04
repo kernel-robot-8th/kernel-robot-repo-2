@@ -22,8 +22,9 @@ CONDITIONS = [
     ('producer', '근거 생산자: 사람 확인 켜짐+현장 확인자 1명 이상, 또는 인증된 자동 생산자 공개', True,
      'READINESS_EVIDENCE_PRODUCER_REQUIRED', 'Harbor 관리자',
      '관리자가 사람 확인 생산자를 켜고 현장 확인 권한 사용자를 지정하세요.'),
-    ('observation', '계획 관측이 수동·합성 입력이 아님', True, 'READINESS_OBSERVATION_UNAUTHENTICATED', 'Harbor',
-     '인증된 관측 입력 경로가 생기기 전에는 수동·합성 관측으로 운영 실행하지 않습니다.'),
+    ('observation', '계획 관측이 합성이 아님(사람 선언 관측은 사람 확인 생산자가 켜졌을 때만)', True,
+     'READINESS_OBSERVATION_UNAUTHENTICATED', 'Harbor',
+     '합성 관측으로는 운영 실행하지 않습니다. 사람 선언 관측은 사람 확인 생산자를 켠 동안에만 씁니다(2026-11-04 사용자 결정).'),
     ('proposal', 'R 이송 제안 경로 설치', False, 'READINESS_PROPOSAL_UNMET', 'ROSY',
      '표시 전용입니다. 웹 실행기는 ARM만 쓰므로 이송 단계가 생길 때 관문에 넣습니다.'),
 ]
@@ -51,6 +52,14 @@ def human_confirmation_ready():
                 and get_user_model().objects.filter(is_active=True, groups__name='field').exists())
 
 
+def _observation_state(provenance):
+    if provenance == 'SYNTHETIC':
+        return 'UNMET'
+    if provenance == 'DECLARED':
+        return 'MET' if human_confirmation_ready() else 'UNMET'
+    return 'MET'
+
+
 def states(plan, check):
     """condition key -> MET | UNMET | UNKNOWN for one plan against the stored check."""
     found = (check.detail.get('conditions') or {}) if check else {}
@@ -59,8 +68,9 @@ def states(plan, check):
         session='MET' if check and check.detail.get('session') == 'MATCHED' else 'UNKNOWN' if not check else 'UNMET',
         evidence='MET' if found.get('evidence') == found.get('recheck') == 'MET' else
                  'UNMET' if 'UNMET' in (found.get('evidence'), found.get('recheck')) else 'UNKNOWN',
-        # Manual entries are never production evidence; only a future authenticated provenance value passes.
-        observation='UNKNOWN' if plan is None else 'UNMET' if plan.observation.provenance in {'SYNTHETIC', 'DECLARED'} else 'MET')
+        # SYNTHETIC never runs in production. A person-DECLARED observation runs only while named-person
+        # confirmation is the evidence producer (user decision 2026-11-04); other provenances are authenticated.
+        observation='UNKNOWN' if plan is None else _observation_state(plan.observation.provenance))
     value['producer'] = 'MET' if found.get('auto_producer') == 'MET' or human_confirmation_ready() else 'UNMET'
     for key in ('arm', 'arm_live', 'proposal'):
         value[key] = found.get(key) if found.get(key) in {'MET', 'UNMET'} else 'UNKNOWN'
