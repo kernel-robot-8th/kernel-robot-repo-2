@@ -94,6 +94,14 @@ tools/integration/nightly_full_flow.sh <작업-폴더> [harbor-ref] [platform-re
 
 `nightly_full_flow.sh`는 두 저장소의 지정 ref(기본 main)를 얕게 받아 한 번 실행하고 `<작업-폴더>/reports/`에 보고서와 로그를 2주 보관한다. 종료 코드가 0이 아니면 보고서의 `first_failure`가 멈춘 단계다.
 
+### 통합관제 R을 거친 ARM (D-965, ADR 0018)
+
+`--arm-via-r`는 같은 ARM 시험(`tests/integration/arm_http.py`)을 R 하나에 연결해 돌린다. R은 ARM 설치 없는 Fleet이고, 셀 Fleet(`ArmFleet`)이 제안을 R의 service principal(`control-unit:R`)로 받아 셀 운영자만 승인한다. Harbor는 R의 origin과 토큰만 받는다. 플랫폼 API v1.355 이상이 필요하다.
+
+```text
+python -m tools.integration.real_fleet_http --platform-root <플랫폼-root> --platform-sha <전체-40자리-SHA> --arm-via-r
+```
+
 ### 기존 Cell 공정 계약 시험
 
 `python -m unittest discover -s tests -v`의 통합 skip은 실제 서버 미검증을 뜻한다. 시험 PC에 깨끗한 고정 플랫폼 소스를 준비하고, 해당 플랫폼의 기존 시험 의존성을 설치한 별도 환경에서 다음 개발 도구를 실행한다.

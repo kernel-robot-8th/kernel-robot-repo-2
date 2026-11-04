@@ -92,8 +92,11 @@ class SyntheticStops:
 
 class ArmFleet:
     def __init__(self, *, root, workdir, request_key_path=None, request_keys=("neutral-arm-http:0",), one_attempt=True,
-                 sim=False):
+                 sim=False, delegated=False, before_app=None):
         self.root, self.workdir, self.sim = Path(root), Path(workdir), sim
+        # D-965 relay: proposals come from R's delegations, found by the cell operator; and extra create_app
+        # arguments known only after install().
+        self.delegated, self.before_app = delegated, before_app
         self.identity, self.sim_process = (WORKCELL, INSTANCE), None
         self.request_key_path = Path(request_key_path) if request_key_path else None
         self.request_keys, self.one_attempt = tuple(request_keys), one_attempt
@@ -110,6 +113,8 @@ class ArmFleet:
     def start(self):
         db = self.workdir / "fleet.sqlite3"
         options = self.install(db)
+        if self.before_app is not None:
+            options.update(self.before_app(self))
         import uvicorn
         from fleet.server.app import create_app
         from fleet.server.console import FleetConsole
@@ -329,6 +334,27 @@ class ArmFleet:
     def client(self, who="operator"):
         return httpx.Client(base_url=self.url, headers={"Authorization": "Bearer " + self.tokens[who]}, timeout=5)
 
+    def _proposed(self, client, request_key):
+        """The job to admit: the test proposer's own key, or (D-965) the one R's delegation bound at this cell.
+
+        R's peer credential reaches only the control-unit API, so the cell operator finds it from the delegation list.
+        """
+        if not self.delegated:
+            response = client.get("/api/fleet/arm-transfers/jobs", params={"request_key": request_key})
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()["job"]
+        listed = client.get("/api/fleet/control-unit/delegations")
+        listed.raise_for_status()
+        for reply in listed.json()["delegations"]:
+            row = reply["delegation"]
+            if row["request"].get("transfer", {}).get("request_key") == request_key and row["local_task_id"]:
+                response = client.get("/api/fleet/arm-transfers/jobs/" + row["local_task_id"])
+                response.raise_for_status()
+                return response.json()["job"]
+        return None
+
     def _approve(self):
         """Test-operator approval (D-927 decision 4); observation phases are only read, never answered here."""
         pending = [] if self.request_key_path else list(self.request_keys)
@@ -346,17 +372,14 @@ class ArmFleet:
                         pending.append(request_key)
                         loaded = True
                     for request_key in tuple(pending):
-                        response = proposer.get("/api/fleet/arm-transfers/jobs", params={"request_key": request_key})
-                        if response.status_code == 200:
-                            job = response.json()["job"]
+                        job = self._proposed(approver if self.delegated else proposer, request_key)
+                        if job is not None:
                             # shortcut: each move's object starts at the one installed source; per-move bindings come with S4.
                             self.scene["position_m"] = [0, 0, .2]
                             generation = approver.get("/api/fleet/dispatch-control").json()["generation"]
                             approver.post("/api/fleet/arm-transfers/jobs/" + job["mission_id"] + "/admit", json={
                                 "expected_proposal_digest": job["proposal_digest"], "expected_generation": generation}).raise_for_status()
                             pending.remove(request_key)
-                        elif response.status_code != 404:
-                            response.raise_for_status()
                     response = observer.get("/api/fleet/arm-transfers/observation-context")
                     response.raise_for_status()
                     context = response.json()["context"]
@@ -420,6 +443,12 @@ class ArmFleet:
         lookups = sum(o.operations.count("GetAction") for o in self.owners)
         print("Synthetic UDS submits:", submits, "lookups:", lookups, "physical proofs:", sorted(self.observed), flush=True)
         if self.one_attempt and (submits != 1 or lookups < 1 or self.observed != {"PRE_DISPATCH", "POST_ACTION"}):
+            import sqlite3  # diagnostic: the job's own account, read after the server stopped
+            with sqlite3.connect(self.workdir / "fleet.sqlite3") as db:
+                for row in db.execute("SELECT mission_id, status, reason FROM fleet_cell_jobs"):
+                    print("== cell job", *row, flush=True)
+                for row in db.execute("SELECT * FROM fleet_cell_events ORDER BY rowid DESC LIMIT 8"):
+                    print("== cell job event", *[str(value)[:300] for value in row], flush=True)
             raise AssertionError("simulation did not complete exactly one admitted physical attempt")
 
 
@@ -446,3 +475,66 @@ class FullFlowFleet:
         finally:
             if self.fleet is not None:
                 self.fleet.stop()
+
+
+class RelayedArmFleet:
+    """D-965: Harbor talks only to R; R relays ARM work to the cell Fleet, whose operator alone admits it."""
+
+    def __init__(self, *, root, workdir, sim=False):
+        self.root, self.workdir = Path(root), Path(workdir)
+        self.peer = {unit: secrets.token_urlsafe(40) for unit in ("R", "CELL-A")}  # the token each unit sends
+        self.cell = ArmFleet(root=root, workdir=self.workdir / "cell", sim=sim, delegated=True,
+                             before_app=lambda cell: {"control_unit_config": self._config(
+                                 "CELL-A", "R", self.url, cell.identity[0])})
+        self.cell.tokens["control-unit:R"] = self.peer["R"]
+        self.tokens = {name: secrets.token_urlsafe(40) for name in ("operator", "viewer")}
+        self.url = f"http://127.0.0.1:{_free_port()}"
+        self.server = None
+
+    @property
+    def identity(self):
+        return self.cell.identity
+
+    def _config(self, unit, peer, url, workcell):
+        folder = self.workdir / unit
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "peer.token").write_text(self.peer[unit], encoding="utf-8")
+        path = folder / "control-unit.json"  # the loader reads YAML, and JSON is YAML
+        path.write_text(json.dumps({"unit_id": unit, "peers": {peer: {"url": url, "token_file": "peer.token"}},
+            "manifest": {"revision": "harbor-int-1", "units": [
+                {"id": "R"}, {"id": "CELL-A", "parent": "R", "resources": ["workcell:" + workcell]}]}}),
+            encoding="utf-8")
+        return path
+
+    def start(self):
+        (self.workdir / "R").mkdir(parents=True, exist_ok=True)  # ArmFleet.install creates its own folder
+        self.cell.start()
+        import uvicorn
+        from fleet.server.app import create_app
+        from fleet.server.console import FleetConsole
+        from fleet.server.task_service import FleetTaskService
+        from fleet.server.task_store import FleetTaskStore
+        users = {hashlib.sha256(token.encode()).hexdigest(): {"principal_id": principal, "role": role}
+                 for token, principal, role in ((self.tokens["operator"], "harbor-operator", "service"),
+                                                (self.tokens["viewer"], "viewer", "viewer"),
+                                                (self.peer["CELL-A"], "control-unit:CELL-A", "service"))}
+        app = create_app(FleetConsole([], []), site_users=users,
+            task_service=FleetTaskService(FleetTaskStore(self.workdir / "R" / "fleet.sqlite3"), robot_ids=()),
+            control_unit_config=self._config("R", "CELL-A", self.cell.url, self.identity[0]))
+        if app.state.arm_transfer_job_store is not None or app.state.control_unit is None:
+            raise RuntimeError("R must relay ARM work, not own it")
+        self.server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=int(self.url.rsplit(":", 1)[1]),
+                                                    log_level="error", lifespan="on"))
+        self.cell._thread(self.server.run)
+        deadline = time.monotonic() + 10
+        while not self.server.started:
+            if time.monotonic() > deadline:
+                raise TimeoutError("R Fleet HTTP did not start")
+            time.sleep(.01)
+
+    def stop(self):
+        try:
+            if self.server is not None:
+                self.server.should_exit = True
+        finally:
+            self.cell.stop()
