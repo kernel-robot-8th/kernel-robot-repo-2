@@ -122,6 +122,13 @@ class RosyClient:
     def physical_evidence(self, mission_id):
         return self._call("GET", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/physical-evidence", None)
 
+    def recheck_read(self, mission_id, recheck_key):
+        return self._call("GET", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/rechecks/" + quote(recheck_key, safe=""), None)
+
+    def execution_profile(self):
+        # Proposed read-only platform signal (ADR0022); no platform route exists yet, so every answer is unmet.
+        return self._call("GET", "/api/fleet/execution-profile", None)
+
     def request_recheck(self, mission_id, recheck_key):
         return self._call("POST", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/rechecks",
                           {"recheck_key": recheck_key})
