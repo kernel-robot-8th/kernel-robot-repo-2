@@ -92,3 +92,28 @@ def validate_trip_job(intent, job):
             attempt is None or steps[0].get("status") != "GOAL_CONFIRMED"):
         raise ValueError("Fleet transport attempt is not consistent")
     return job
+
+
+def validate_trip_proposal(intent, proposal, principal=None):
+    """Check a D-908 proposal against the saved intent; the proposer may never be its own approver."""
+    if (not isinstance(proposal, dict) or proposal.get("request_key") != intent.request_key
+            or proposal.get("request_digest") != intent.digest
+            or proposal.get("candidate_robot_ids") != list(intent.candidates)
+            or proposal.get("steps") != intent.steps
+            or proposal.get("status") not in {"PROPOSED", "ADMITTED"}):
+        raise ValueError("Fleet trip proposal does not match the saved intent")
+    proposer = proposal.get("proposal_principal_id")
+    if not isinstance(proposer, str) or not proposer or principal is not None and proposer != principal:
+        raise ValueError("Fleet proposal principal differs")
+    identifier(proposal.get("proposal_id"))
+    admitted = (proposal.get("dispatch_generation"), proposal.get("approved_by"), proposal.get("mission_id"))
+    if proposal["status"] == "PROPOSED":
+        if any(value is not None for value in admitted):
+            raise ValueError("A pending proposal cannot carry admission facts")
+    else:
+        if any(value is None for value in admitted):
+            raise ValueError("An admitted proposal requires its approver, generation and job")
+        if proposal["approved_by"] == proposer:
+            raise ValueError("The proposer cannot approve its own trip")
+        identifier(proposal["mission_id"])
+    return proposal

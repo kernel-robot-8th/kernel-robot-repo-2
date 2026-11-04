@@ -59,4 +59,4 @@ class ModuleBoundaryTests(unittest.TestCase):
             for node in ast.walk(tree):
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                     self.assertNotIn(node.func.attr, ('propose_arm', 'arm_request', 'arm_job', 'physical_receipt',
-                                                      'trip', 'trip_request', 'compile', 'cancel_arm'), name)
+                                                      'trip', 'trip_request', 'trip_propose', 'trip_proposal_request', 'compile', 'cancel_arm'), name)

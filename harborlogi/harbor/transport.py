@@ -6,7 +6,8 @@ import re
 import sqlite3
 
 from harbor.model import identifier, identifiers
-from harbor.execution import read_trip_execution, submit_trip_execution
+from harbor.execution import (read_trip_execution, read_trip_proposal_execution,
+                              submit_trip_execution, submit_trip_proposal_execution)
 
 
 def _json(value):
@@ -95,18 +96,28 @@ class TransportLedger:
                                "VALUES(?,?,?,'PLANNED')", (intent.request_key, payload, intent.digest))
 
     def _adopt(self, row, execution):
+        # A proposal waiting for another operator has no job yet; it must not be mistaken for an accepted trip.
+        state = "AWAITING_APPROVAL" if execution.phase == "awaiting_approval" else "ACKNOWLEDGED"
         if row["mission_id"] is not None and row["mission_id"] != execution.mission_id:
             raise ValueError("Fleet transport identity changed")
         with closing(self._connect()) as connection, connection:
-            result = connection.execute("UPDATE transport_intents SET state='ACKNOWLEDGED',mission_id=?,version=version+1 "
-                "WHERE request_key=? AND version=?", (execution.mission_id, row["request_key"], row["version"]))
+            result = connection.execute("UPDATE transport_intents SET state=?,mission_id=?,version=version+1 "
+                "WHERE request_key=? AND version=?", (state, execution.mission_id, row["request_key"], row["version"]))
             if result.rowcount != 1:
                 raise ValueError("Transport intent changed while the response was pending; reconcile again")
         return execution.job
 
     def submit(self, key, client, *, operator_confirmed):
+        """Direct named-operator TRIP start; a service identity must use propose()."""
         if operator_confirmed is not True:
             raise ValueError("Explicit operator confirmation is required to start transport")
+        return self._submit(key, client, submit_trip_execution)
+
+    def propose(self, key, client):
+        """D-908: ask Fleet for approval once. Nothing moves until a different named operator admits."""
+        return self._submit(key, client, submit_trip_proposal_execution)
+
+    def _submit(self, key, client, send):
         row = self.read(key)
         if row["state"] != "PLANNED":
             raise ValueError("Transport was already submitted or is uncertain; reconcile without resubmitting")
@@ -118,7 +129,7 @@ class TransportLedger:
         row = {**row, "version": row["version"] + 1, "state": "SUBMITTING"}
         intent = self._intent(row)
         try:
-            job = submit_trip_execution(client, intent)
+            job = send(client, intent)
             return self._adopt(row, job)
         except BaseException:
             with closing(self._connect()) as connection, connection:
@@ -127,7 +138,13 @@ class TransportLedger:
             raise
 
     def reconcile(self, key, client):
+        return self._reconcile(key, client, read_trip_execution)
+
+    def reconcile_proposal(self, key, client):
+        return self._reconcile(key, client, read_trip_proposal_execution)
+
+    def _reconcile(self, key, client, read):
         row = self.read(key)
         if row["state"] == "SUBMITTING":
             raise ValueError("Submission is still pending")
-        return self._adopt(row, read_trip_execution(client, self._intent(row)))
+        return self._adopt(row, read(client, self._intent(row)))
