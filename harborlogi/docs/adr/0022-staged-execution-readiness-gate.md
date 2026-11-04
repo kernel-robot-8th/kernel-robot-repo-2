@@ -53,9 +53,9 @@
  "evidence_producers": [{"producer_id": "...", "authenticated": true}]}
 ```
 
-- `profile`은 `production`·`simulation` 중 하나이고, `arm_execution`은 ARM 경로가 실물을 실행할 때만 `physical`이다. 시뮬레이션 프로필은 `simulation`이다.
+- `profile`은 ROSY 배포 프로필 그대로(`simulation`·`device_trial`·`production`)이고, `arm_execution`은 ARM 경로가 실물을 실행할 때만 `physical`이다. 시뮬레이션 프로필은 `simulation`이다.
 - 생산자 목록은 운영 모드에서 실제로 근거를 제출할 수 있는 인증된 생산자만 담는다. 신원 값(토큰·주소)은 담지 않는다. `revision`은 바뀔 때 바뀌는 불투명 값이다.
-- Harbor는 엄격히 읽는다. `profile == production` 이고 `arm_execution == physical`이면 (f1), 거기에 두 목록이 비어 있지 않고 모두 `authenticated: true`이면 (ii)가 참이다. 경로가 없거나 형식이 다르면 거짓이다. 계약이 달라지면 이 ADR과 `_platform_signal`을 함께 고친다.
+- Harbor는 엄격히 읽는다. `profile`이 `production` 또는 `device_trial`이고 `arm_execution == physical`이면 (f1)(2026-11-04 갱신: ROSY는 실물 팔을 `device_trial`에서만 연다, D-797·D-858 S4), 거기에 두 목록이 비어 있지 않고 모두 `authenticated: true`이면 (ii)가 참이다. 경로가 없거나 형식이 다르면 거짓이다. 계약이 달라지면 이 ADR과 `_platform_signal`을 함께 고친다.
 
 ## 결과
 

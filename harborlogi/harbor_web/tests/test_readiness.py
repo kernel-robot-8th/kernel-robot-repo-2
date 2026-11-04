@@ -124,6 +124,8 @@ class ReadinessGateTests(TestCase):
         good = dict(profile='production', arm_execution='physical',
                     observation_producers=[dict(authenticated=True)], evidence_producers=[dict(authenticated=True)])
         for value, expected in [(good, ('MET', 'MET')), (dict(good, profile='simulation'), ('UNMET', 'UNMET')),
+                                (dict(good, profile='device_trial'), ('MET', 'MET')),
+                                (dict(good, profile='device_trial', arm_execution='closed'), ('UNMET', 'MET')),
                                 (dict(good, arm_execution='simulated'), ('UNMET', 'MET')),
                                 (dict(good, evidence_producers=[dict(authenticated=False)]), ('MET', 'UNMET')),
                                 (dict(good, observation_producers=[]), ('MET', 'UNMET'))]:

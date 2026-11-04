@@ -127,7 +127,8 @@ def _platform_signal(client):
         return state, state
     except (URLError, TimeoutError, OSError, ValueError, TypeError, AttributeError):
         return 'UNKNOWN', 'UNKNOWN'
-    production = value.get('profile') == 'production'
+    # ROSY opens real arms only in device_trial (D-797, D-858 S4); production keeps arms closed for now.
+    production = value.get('profile') in {'production', 'device_trial'}
     lists = [value.get(key) for key in ('observation_producers', 'evidence_producers')]
     return (('MET' if production and value.get('arm_execution') == 'physical' else 'UNMET'),
             'MET' if production and all(isinstance(rows, list) and rows and all(
