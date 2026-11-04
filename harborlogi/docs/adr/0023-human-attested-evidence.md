@@ -4,7 +4,7 @@
 
 상태: 수락(2026-11-04, 사용자 결정 "실운영에서 업무 완료 근거(내려놓기·팔 퇴피)는 자동 근거 생산자가 생길 때까지 기명 현장 운영자 확인으로 받는다. Harbor는 그 기록을 '사람 확인' 출처로 구분해 업무 완료에 쓴다.").
 - 번호: ADR 0022는 readiness-gate가 쓴다. 병합 시점 `main`의 번호를 다시 확인한다.
-- 연결: 사람 확인 생산자를 켜는 관리자 설정은 readiness-gate PR이 정한다. 이 PR은 `harbor_web/human_evidence.py:human_evidence_enabled()` 한 곳만 읽으며, 지금은 환경 변수 `HARBOR_HUMAN_EVIDENCE=1`로 둔다. readiness-gate 병합 뒤 그 함수를 설정 읽기로 바꾼다.
+- 연결: 사람 확인 생산자를 켜는 관리자 설정은 ADR 0022의 `EvidenceProducerSetting`(감사 기록이 남는 설정 행)이다. `harbor_web/human_evidence.py:human_evidence_enabled()` 한 곳만 그 행을 읽는다.
 - 잇는 결정: ADR 0005 결정 6·7(업무 완료 3요소), ADR 0013(업무 실행 독립), ADR 0019.
 
 ## 배경

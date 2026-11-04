@@ -1,7 +1,5 @@
 """Named field-person confirmation as business evidence (ADR 0023)."""
 import json
-import os
-from unittest.mock import patch
 
 from django.contrib.auth.models import Group, User
 from django.test import TestCase
@@ -21,11 +19,14 @@ class HumanEvidenceTests(TestCase):
 
     def setUp(self):
         self.base.setUp(self)
-        flag = patch.dict(os.environ, {'HARBOR_HUMAN_EVIDENCE': '1'})
-        flag.start()
-        self.addCleanup(flag.stop)
+        self.producer(True)
         self.viewer = User.objects.create_user('viewer')
         self.viewer.groups.add(Group.objects.get_or_create(name='viewer')[0])
+
+    @staticmethod
+    def producer(on):
+        from harbor_web.models import EvidenceProducerSetting
+        EvidenceProducerSetting.objects.update_or_create(pk=1, defaults=dict(human_confirmation=on))
 
     def waiting(self, status='GOAL_CONFIRMED', command=None):
         command = command or self.confirmed_command()
@@ -60,9 +61,10 @@ class HumanEvidenceTests(TestCase):
         self.assertContains(page, 'csrfmiddlewaretoken')
         self.client.force_login(self.viewer)
         self.assertNotContains(self.client.get(f'/work/{command.pk}/'), 'name="action" value="attest"')
-        with patch.dict(os.environ, {'HARBOR_HUMAN_EVIDENCE': '0'}):
-            self.client.force_login(self.operator)
-            self.assertNotContains(self.client.get(f'/work/{command.pk}/'), 'name="action" value="attest"')
+        self.producer(False)
+        self.client.force_login(self.operator)
+        self.assertNotContains(self.client.get(f'/work/{command.pk}/'), 'name="action" value="attest"')
+        self.producer(True)
 
     def test_viewer_is_forbidden_and_nothing_is_stored(self):
         command, row = self.waiting()
@@ -101,11 +103,13 @@ class HumanEvidenceTests(TestCase):
 
     def test_switching_the_producer_off_blocks_the_form_and_consumption(self):
         command, row = self.waiting()
-        with patch.dict(os.environ, {'HARBOR_HUMAN_EVIDENCE': '0'}):
-            self.assertEqual(self.post(self.field, command, row).status_code, 409)
+        self.producer(False)
+        self.assertEqual(self.post(self.field, command, row).status_code, 409)
+        self.producer(True)
         self.assertEqual(self.post(self.field, command, row).status_code, 302)
-        with patch.dict(os.environ, {'HARBOR_HUMAN_EVIDENCE': '0'}):
-            executor.tick(registry=self.registry, evidence=human_evidence.human_provider(), now=timezone.now())
+        self.producer(False)
+        executor.tick(registry=self.registry, evidence=human_evidence.human_provider(), now=timezone.now())
+        self.producer(True)
         self.assertEqual(self.registry.ledger.read(commands._key(command))['step_index'], 0)
 
     def test_human_verdict_cannot_pass_as_an_automatic_source(self):

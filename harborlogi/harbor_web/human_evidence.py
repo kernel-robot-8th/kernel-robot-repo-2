@@ -27,11 +27,10 @@ ARM_CLAIM = '구역 밖 대기 자세 육안 확인'
 
 
 def human_evidence_enabled():
-    """Whether the admin switch for the human evidence producer is on.
-
-    Placeholder until readiness-gate (ADR 0022) lands its setting; connect it here and nowhere else.
-    """
-    return os.environ.get('HARBOR_HUMAN_EVIDENCE') == '1'
+    """Whether the admin switch for the human evidence producer is on (the audited ADR0022 setting)."""
+    from harbor_web.models import EvidenceProducerSetting
+    setting = EvidenceProducerSetting.objects.filter(pk=1).first()
+    return bool(setting and setting.human_confirmation)
 
 
 def _stage(command):

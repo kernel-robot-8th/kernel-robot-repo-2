@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('harbor_web', '0015_rearrange_authorization'),
+        ('harbor_web', '0016_evidenceproducersetting'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
