@@ -4,7 +4,7 @@ Plan line: the plan and its expected steps; steps have an order but no time, so 
 Actual line: only records that carry their own time. Nothing is synthesized, interpolated or inferred,
 and completion is only a Command in COMPLETED (the business ledger's reconciliation result).
 """
-from harbor_web.command_models import EvidenceSubmission
+from harbor_web.command_models import EvidenceSubmission, HumanAttestation
 from harbor_web.models import Audit, Command, CommandFact, DepartureIntent, FieldConfirmation, Plan
 from harbor_web.operations import move_phases
 from harbor_web.workspace import COMMAND_LABELS
@@ -47,6 +47,11 @@ def order_timeline(order):
     for evidence in EvidenceSubmission.objects.filter(command__in=commands):
         events.append(dict(at=evidence.received_at, kind='업무 근거', source=f'근거 제출 #{evidence.pk}',
                            text='내려놓기·퇴피 근거 접수(대조 전)'))
+    for human in HumanAttestation.objects.filter(command__in=commands).select_related('created_by'):
+        events.append(dict(at=human.created_at, kind='사람 확인', source=f'현장 확인 기록 #{human.pk} · {human.created_by.get_username()}',
+                           href=f'/work/{human.command_id}/',
+                           text=f"{'최종' if human.phase == 'final' else str(human.step_index + 1) + '번째 이동'} "
+                                f"{human.cargo_id} → {human.location} 육안 확인, 팔 {'·'.join(human.arms)} 구역 밖 대기 확인 (측정값 아님)"))
     for confirmation in FieldConfirmation.objects.filter(episode__order=order).select_related('episode'):
         events.append(dict(at=confirmation.observed_at, kind='현장 확인', source=f'현장 확인 #{confirmation.pk}',
                            href=f'/field/{confirmation.episode_id}/',

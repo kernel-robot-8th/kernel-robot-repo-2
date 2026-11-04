@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.http import Http404
 from django.views.decorators.http import require_http_methods
 
-from harbor_web import commands, services
+from harbor_web import commands, human_evidence, services
 from harbor_web.auth import has_role, require_roles
 from harbor_web.models import Command, Plan
 from harbor_web.pipeline import COMMAND_LABELS, pipeline_for
@@ -115,11 +115,28 @@ def work_list(request):
     return page(request, 'work.html', section='work', q=q, state=state, **context)
 
 
-@require_roles('viewer', 'operator', 'admin')
+@require_roles('viewer', 'operator', 'admin', 'field')
 @require_http_methods(['GET', 'POST'])
 def work_detail(request, pk):
     command = get_object_or_404(Command.objects.select_related('plan__order__cargo', 'plan__observation'), pk=pk)
-    if request.method == 'POST':
+    attest_form = None
+    if request.method == 'POST' and request.POST.get('action') == 'attest':
+        if not has_role(request.user, *human_evidence.ROLES):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        stage = human_evidence.awaiting(command)
+        if stage is None:
+            return render(request, 'error.html', dict(heading='현장 확인을 받을 단계가 아닙니다', reason='지금은 사람 확인을 기다리는 단계가 아니거나 이미 기록되었습니다. 화면을 새로 열어 확인하세요.', return_url=f'/work/{pk}/'), status=409)
+        attest_form = human_evidence.AttestForm(request.POST, required_arms=stage['arms'])
+        if attest_form.is_valid():
+            try:
+                human_evidence.attest(request.user, command_id=pk, **{k: v for k, v in attest_form.cleaned_data.items()
+                                                                      if k != 'cargo_seen'})
+            except (services.Conflict, ValidationError):
+                return render(request, 'error.html', dict(heading='현장 확인 대상이 바뀌었습니다', reason='이 확인은 현재 단계와 시도에 맞지 않거나 이미 기록되었습니다. 화면을 새로 열어 현재 단계를 다시 확인하세요.', return_url=f'/work/{pk}/'), status=409)
+            messages.info(request, '현장 확인을 기록했습니다. 업무 장부가 대조하기 전에는 업무 완료가 아닙니다.')
+            return redirect(f'/work/{pk}/')
+    elif request.method == 'POST':
         if not has_role(request.user, 'operator'):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
@@ -142,6 +159,10 @@ def work_detail(request, pk):
             return redirect(f'/work/{pk}/')
         return render(request, 'error.html', dict(reason='요청 형식이나 취소 사유가 올바르지 않습니다.', return_url=f'/work/{pk}/'), status=400)
     detail = commands.command_detail(command)
+    stage = human_evidence.awaiting(command) if has_role(request.user, *human_evidence.ROLES) else None
+    if stage and attest_form is None:
+        attest_form = human_evidence.form_for(command, stage)
     return page(request, 'work_detail.html', section='work', command=command, detail=detail,
+                attest_form=attest_form if stage else None, attest_stage=stage,
                 pipeline=pipeline_for(command.plan.order, command.plan, command, detail),
                 gate_reason=gate_text(detail['reason']))
