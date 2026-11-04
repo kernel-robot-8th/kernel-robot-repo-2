@@ -183,7 +183,7 @@ class OperationsTests(TestCase):
                                         observation_id=plan.observation_id), 'CANCELLED', {})
         actual = operations_context(plan.observation, now=self.now)['actual']
         # Buried outbound: one cargo moved off before the outbound move, then returned.
-        self.assertEqual(actual, dict(completed=1, inbound=0, outbound=1, rearrange=0,
+        self.assertEqual(actual, dict(completed=1, human_attested=0, inbound=0, outbound=1, rearrange=0,
                                       outbound_rehandle_moves=1, unmatched=[],
                                       throughput=dict(window_hours=24, count=0, span_minutes=0, per_hour=None)))
         html = render_to_string('operations_summary.html',

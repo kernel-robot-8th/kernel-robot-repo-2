@@ -104,8 +104,12 @@ class Registry:
             # Unconfigured deployments keep placeholder sources that cannot authorize
             # anything: no real submission ever carries them.
             placement_sources, retreat_sources = ledger_sources()
+            from harbor_web import human_evidence as human
             self.ledger = BusinessLedger(config['path'], placement_sources=placement_sources,
-                                         retreat_sources=retreat_sources)
+                                         retreat_sources=retreat_sources,
+                                         human_placement_sources=(human.HUMAN_PLACEMENT_SOURCE,),
+                                         human_retreat_sources=(human.HUMAN_RETREAT_SOURCE,),
+                                         human_freshness=human.FRESHNESS)
             self.client = RosyClient(config['origin'], config['token'])
             self.client.expected_principal = config['principal']
             self.client.expected_role = 'service'

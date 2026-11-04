@@ -95,7 +95,9 @@ def _actual(commands, now):
             unmatched.append(c)  # No outbound move to count against: never report it as zero rehandles.
         else:
             rehandles += index
-    return dict(completed=len(done), inbound=kinds.count('INBOUND'), outbound=kinds.count('OUTBOUND'),
+    from harbor_web.human_evidence import attested_final_commands
+    human = len(attested_final_commands([c.pk for c in done]))  # 완료 근거가 기명 사람 확인(ADR 0023)인 건
+    return dict(completed=len(done), human_attested=human, inbound=kinds.count('INBOUND'), outbound=kinds.count('OUTBOUND'),
                 rearrange=kinds.count('REARRANGE'), outbound_rehandle_moves=None if unmatched else rehandles,
                 unmatched=unmatched, throughput=_throughput(done, now))
 
