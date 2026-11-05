@@ -195,7 +195,7 @@ document.querySelectorAll('[data-history-back]').forEach(button => {
 // Choosing another observation reloads at once; the submit button stays for keyboard and no-script use.
 document.querySelectorAll('[data-auto-submit]').forEach(select => select.addEventListener('change', () => select.form.requestSubmit()));
 
-// Outbound queue lanes: drag cards, or use ▲▼ and 최우선; the lane fields are rebuilt on submit.
+// Outbound queue lanes: drag cards, or use ▲▼ and 맨 앞으로; the lane fields are rebuilt on submit.
 document.querySelectorAll('[data-queue-editor]').forEach(editor => {
   const box = editor.querySelector('[data-queue-lanes]');
   const form = editor.querySelector('form');

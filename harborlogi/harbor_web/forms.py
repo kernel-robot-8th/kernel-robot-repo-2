@@ -48,7 +48,7 @@ TIE_POLICY_HELP = '기본은 고정입니다. 해제하면 같은 그룹의 요�
 
 
 class OrderForm(forms.ModelForm):
-    make_first = forms.BooleanField(label='최우선으로 등록', required=False,
+    make_first = forms.BooleanField(label='맨 앞에 등록', required=False,
         help_text='반출 대기열 맨 앞에 새 그룹으로 넣고, 기존 요청은 한 그룹씩 뒤로 미룹니다.')
 
     class Meta:

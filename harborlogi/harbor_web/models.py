@@ -122,7 +122,8 @@ class Order(Authored):
     priority_group = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
     sequence = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
     tie_policy = models.CharField(max_length=5, default='FIXED', choices=[('FIXED', 'Fixed'), ('ANY', 'Any')])
-    # Display name only: queue_digest leaves it out, so a title never changes other requests' plans.
+    # Display name. queue_digest leaves the column out, so adding it kept stored plan digests intact; editing a
+    # title still bumps the order version like any instruction change, which marks plans for review (#34).
     title = models.CharField(max_length=80, blank=True, default='')
     note = models.CharField(max_length=500, blank=True)
     version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
