@@ -291,3 +291,12 @@ document.querySelectorAll('[data-queue-editor]').forEach(editor => {
   });
   refresh();
 });
+
+// The first-place box only affects the outbound queue; keep it off inbound requests.
+document.querySelectorAll('[data-outbound-only]').forEach(box => {
+  const kind = box.closest('form')?.querySelector('[name=kind]');
+  if (!kind) return;
+  const sync = () => { box.hidden = kind.value !== 'OUTBOUND'; };
+  kind.addEventListener('change', sync);
+  sync();
+});

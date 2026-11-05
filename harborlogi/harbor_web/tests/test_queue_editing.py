@@ -103,6 +103,11 @@ class QueueEditingTests(TestCase):
         self.client.post('/requests/new/', dict(cargo=cargo.pk, kind='OUTBOUND', priority_group=1, sequence=1))
         self.assertEqual(Order.objects.get().tie_policy, 'ANY')
 
+    def test_first_place_box_is_marked_outbound_only(self):
+        self.client.force_login(self.operator)
+        self.assertContains(self.client.get('/requests/new/'), 'data-outbound-only')
+        self.assertContains(self.client.get('/requests/new/?kind=INBOUND'), 'name="make_first"')
+
     def test_outbound_page_posts_lane_order(self):
         a, b = self.order('A', 1, 1, title='첫 요청'), self.order('B', 2, 1)
         self.client.force_login(self.operator)
