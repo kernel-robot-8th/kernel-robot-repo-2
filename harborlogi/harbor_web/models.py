@@ -104,6 +104,14 @@ class Observation(Immutable):
     class Meta:
         constraints = [models.UniqueConstraint(fields=['source_id', 'source_revision'], name='observation_source_revision_unique')]
 
+    @property
+    def display_label(self):
+        """Short choice label; the raw source revision stays on the source and evidence lines."""
+        from django.utils import timezone
+        observed = timezone.localtime(self.observed_at) if timezone.is_aware(self.observed_at) else self.observed_at
+        kind = {'SYNTHETIC': '합성 자료', 'DECLARED': '수동 등록'}.get(self.provenance, self.provenance)
+        return f'#{self.pk} · {self.source_id} · {observed:%m-%d %H:%M} 관측 · {kind}'
+
 
 class Order(Authored):
     auto_replan = models.BooleanField(default=False)
@@ -114,6 +122,8 @@ class Order(Authored):
     priority_group = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
     sequence = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
     tie_policy = models.CharField(max_length=5, default='FIXED', choices=[('FIXED', 'Fixed'), ('ANY', 'Any')])
+    # Display name only: queue_digest leaves it out, so a title never changes other requests' plans.
+    title = models.CharField(max_length=80, blank=True, default='')
     note = models.CharField(max_length=500, blank=True)
     version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
     updated_at = models.DateTimeField(auto_now=True)
