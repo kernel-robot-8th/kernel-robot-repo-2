@@ -480,10 +480,13 @@ class FullFlowFleet:
 class RelayedArmFleet:
     """D-965: Harbor talks only to R; R relays ARM work to the cell Fleet, whose operator alone admits it."""
 
-    def __init__(self, *, root, workdir, sim=False):
+    r_resources = ()  # the manifest's R resources; both units must load identical manifests
+
+    def __init__(self, *, root, workdir, sim=False, request_keys=("neutral-arm-http:0",), one_attempt=True):
         self.root, self.workdir = Path(root), Path(workdir)
         self.peer = {unit: secrets.token_urlsafe(40) for unit in ("R", "CELL-A")}  # the token each unit sends
         self.cell = ArmFleet(root=root, workdir=self.workdir / "cell", sim=sim, delegated=True,
+                             request_keys=request_keys, one_attempt=one_attempt,
                              before_app=lambda cell: {"control_unit_config": self._config(
                                  "CELL-A", "R", self.url, cell.identity[0])})
         self.cell.tokens["control-unit:R"] = self.peer["R"]
@@ -502,7 +505,8 @@ class RelayedArmFleet:
         path = folder / "control-unit.json"  # the loader reads YAML, and JSON is YAML
         path.write_text(json.dumps({"unit_id": unit, "peers": {peer: {"url": url, "token_file": "peer.token"}},
             "manifest": {"revision": "harbor-int-1", "units": [
-                {"id": "R"}, {"id": "CELL-A", "parent": "R", "resources": ["workcell:" + workcell]}]}}),
+                {"id": "R", "resources": list(self.r_resources)},
+                {"id": "CELL-A", "parent": "R", "resources": ["workcell:" + workcell]}]}}),
             encoding="utf-8")
         return path
 
@@ -536,5 +540,34 @@ class RelayedArmFleet:
         try:
             if self.server is not None:
                 self.server.should_exit = True
+        finally:
+            self.cell.stop()
+
+
+class RelayedFullFlowFleet(RelayedArmFleet):
+    """D-965 full first flow: Harbor has only R's origin; R owns the Pinky TRIP path and relays arm work to the cell."""
+
+    def __init__(self, *, root, workdir, request_keys):
+        from tools.integration.fleet_harness import ROBOT
+        self.r_resources = ("robot:" + ROBOT,)  # Fleet refuses an R whose robots differ from its console roster
+        super().__init__(root=root, workdir=workdir, request_keys=request_keys, one_attempt=False)
+        self.fleet = None
+
+    def start(self):
+        from tools.integration.fleet_harness import RealFleet
+        (self.workdir / "R").mkdir(parents=True, exist_ok=True)
+        self.cell.start()
+        self.fleet = RealFleet(root=self.root, workdir=self.workdir / "R", transport_only=True,
+                               port=int(self.url.rsplit(":", 1)[1]),
+                               extra_app={"control_unit_config": self._config("R", "CELL-A", self.cell.url, self.identity[0])})
+        self.fleet.tokens["cell"] = self.peer["CELL-A"]
+        self.fleet.principals["cell"] = ("control-unit:CELL-A", "service")
+        self.tokens = self.fleet.tokens
+        self.fleet.start()
+
+    def stop(self):
+        try:
+            if self.fleet is not None:
+                self.fleet.stop()
         finally:
             self.cell.stop()
