@@ -31,5 +31,6 @@ class OperationsPagesTests(TestCase):
         self.client.force_login(self.operator)
         response = self.client.get(f'/plans/{plan.pk}/')
         self.assertContains(response, '화물별 이동 계획')
-        self.assertContains(response, f'data-plan-cargo="{order.cargo.code}"')
+        self.assertContains(response, 'data-plan-sequence', count=1)
+        self.assertContains(response, f'<h3>{order.cargo.code} · ')
         self.assertContains(response, '관측된 출발 위치 없음')

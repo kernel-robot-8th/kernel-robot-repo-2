@@ -69,3 +69,7 @@
 .planning-recommendation {padding:var(--primitive-space-4);margin-block:var(--primitive-space-4);border:1px solid var(--semantic-border-divider);border-radius:var(--primitive-radius-panel);background:var(--semantic-surface-panel)}
 .planning-recommendation .section-heading {flex-wrap:wrap;gap:var(--primitive-space-2)}
 .recommendation-candidate + .recommendation-candidate {border-top:1px solid var(--semantic-border-divider);padding-top:var(--primitive-space-3);margin-top:var(--primitive-space-3)}
+.operations-attention ul.attention-list {display:grid;gap:var(--primitive-space-2)}
+.attention-list li {display:flex;align-items:center;justify-content:space-between;gap:var(--primitive-space-4);padding:var(--primitive-space-2) var(--primitive-space-3);background:var(--semantic-surface-panel);border:1px solid var(--semantic-border-divider);border-radius:var(--primitive-radius-control)}
+.attention-list .button {flex:none}
+.operations-selector .helptext {flex-basis:100%;margin:0}

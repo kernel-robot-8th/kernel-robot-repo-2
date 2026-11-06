@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('harbor_web', '0017_human_attestation'),
+        ('harbor_web', '0018_order_title'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

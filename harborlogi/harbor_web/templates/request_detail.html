@@ -1,5 +1,5 @@
 {% extends 'base.html' %}{% block title %}요청 #{{ order.pk }}{% endblock %}{% block content %}
-<p><a href="/requests/">업무 요청</a> / 요청 #{{ order.pk }}</p><div class="page-head"><div><h1>{{ order.cargo.code }} {% if order.kind == 'INBOUND' %}입고{% else %}반출{% endif %} 요청</h1><p>{{ order.cargo.name }} · {{ order.cargo.destination }}</p></div><span class="badge">요청 v{{ order.version }}</span></div>
+<p><a href="/requests/">업무 요청</a> / 요청 #{{ order.pk }}</p><div class="page-head"><div><h1>{% if order.title %}{{ order.title }}{% else %}{{ order.cargo.code }} {% if order.kind == 'INBOUND' %}입고{% else %}반출{% endif %} 요청{% endif %}</h1><p>{% if order.title %}{{ order.cargo.code }} {% if order.kind == 'INBOUND' %}입고{% else %}반출{% endif %} · {% endif %}{{ order.cargo.name }} · {{ order.cargo.destination }}</p></div><span class="badge">요청 v{{ order.version }}</span></div>
 <dl class="facts"><div><dt>우선순위</dt><dd>그룹 {{ order.priority_group }} · {{ order.sequence }}번째</dd></div><div><dt>동순위 처리</dt><dd>{% if order.tie_policy == 'ANY' %}그룹 안 선택 허용{% else %}순서 고정{% endif %}</dd></div><div><dt>마지막 변경</dt><dd>{{ order.updated_at|date:'Y-m-d H:i' }}</dd></div></dl><p>{{ order.note|default:'등록된 메모 없음' }}</p><p><a href="/requests/{{ order.pk }}/timeline/">업무 타임라인 보기</a></p>
 {% if order.kind == 'INBOUND' %}
 {% include 'placement_request_form.html' %}

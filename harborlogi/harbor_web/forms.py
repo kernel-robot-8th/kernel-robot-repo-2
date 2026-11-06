@@ -25,13 +25,41 @@ class CargoForm(forms.ModelForm):
         help_texts = dict(code='등록 뒤에도 원래 ID를 유지합니다. 실제 위치는 관측으로 확인합니다.')
 
 
+class FixedOrderCheckbox(forms.CheckboxInput):
+    """Tie policy as one box: checked (the default) keeps FIXED, unchecked sends ANY.
+
+    Explicit FIXED/ANY values from older forms and scripts are still read as given.
+    """
+    def __init__(self, attrs=None):
+        super().__init__(attrs, check_test=lambda value: value in (None, '', 'FIXED'))
+
+    def format_value(self, value):
+        return 'FIXED'
+
+    def value_from_datadict(self, data, files, name):
+        value = data.get(name)
+        if value in ('FIXED', 'ANY'):
+            return value
+        return 'FIXED' if value else 'ANY'
+
+
+TIE_POLICY_LABEL = '그룹 안 순서 고정'
+TIE_POLICY_HELP = '기본은 고정입니다. 해제하면 같은 그룹의 요청을 순서와 관계없이 처리할 수 있습니다.'
+
+
 class OrderForm(forms.ModelForm):
+    make_first = forms.BooleanField(label='맨 앞에 등록', required=False,
+        help_text='반출 대기열 맨 앞에 새 그룹으로 넣고, 기존 요청은 한 그룹씩 뒤로 미룹니다.')
+
     class Meta:
         model = Order
-        fields = ['cargo', 'kind', 'priority_group', 'sequence', 'tie_policy', 'note']
-        labels = dict(cargo='화물', kind='요청 종류', priority_group='우선순위 그룹', sequence='그룹 안 순서', tie_policy='동순위 처리', note='요청 메모')
-        widgets = {'note': forms.Textarea(attrs={'rows': 3})}
-        help_texts = dict(priority_group='작은 그룹부터 검토합니다.', sequence='순서 고정 그룹에서 작은 값부터 처리합니다.')
+        fields = ['cargo', 'kind', 'title', 'priority_group', 'sequence', 'tie_policy', 'note']
+        labels = dict(cargo='화물', kind='요청 종류', title='요청 제목', priority_group='우선순위 그룹', sequence='그룹 안 순서', tie_policy=TIE_POLICY_LABEL, note='요청 메모')
+        widgets = {'note': forms.Textarea(attrs={'rows': 3}), 'tie_policy': FixedOrderCheckbox(),
+                   'title': forms.TextInput(attrs={'placeholder': '예: 본선 1차 선적분'})}
+        help_texts = dict(title='목록에서 화물 ID 대신 먼저 보이는 이름입니다. 비우면 화물 이름을 씁니다.',
+                          priority_group='작은 그룹부터 검토합니다.', sequence='순서 고정 그룹에서 작은 값부터 처리합니다.',
+                          tie_policy=TIE_POLICY_HELP)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -48,9 +76,11 @@ class OrderForm(forms.ModelForm):
 
 class PriorityForm(forms.Form):
     expected_version = forms.IntegerField(widget=forms.HiddenInput)
+    title = forms.CharField(label='요청 제목', max_length=80, required=False)
     priority_group = forms.IntegerField(label='우선순위 그룹', min_value=1)
     sequence = forms.IntegerField(label='그룹 안 순서', min_value=1)
-    tie_policy = forms.ChoiceField(label='동순위 처리', choices=[('FIXED', '순서 고정'), ('ANY', '그룹 안 선택 허용')])
+    tie_policy = forms.ChoiceField(label=TIE_POLICY_LABEL, choices=[('FIXED', '순서 고정'), ('ANY', '그룹 안 선택 허용')],
+                                   widget=FixedOrderCheckbox(), help_text=TIE_POLICY_HELP)
     note = forms.CharField(label='변경 메모', max_length=500, required=False, widget=forms.Textarea(attrs={'rows': 3}))
 
     def __init__(self, *args, **kwargs):
@@ -71,7 +101,7 @@ class PlanForm(forms.Form):
         recent = Observation.objects.order_by('-id').values('pk')[:100]
         selected = Q(pk=review_observation.pk) if review_observation else Q(pk__in=[])
         self.fields['observation'].queryset = Observation.objects.filter(Q(pk__in=recent) | selected).select_related('condition').order_by('-id')
-        self.fields['observation'].label_from_instance = lambda item: f'{item.source_id} / {item.source_revision} · {item.observed_at:%m-%d %H:%M} · {item.provenance}'
+        self.fields['observation'].label_from_instance = lambda item: item.display_label
 
 
 class ConditionForm(forms.ModelForm):

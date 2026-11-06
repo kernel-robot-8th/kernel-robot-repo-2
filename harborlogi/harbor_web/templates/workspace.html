@@ -3,7 +3,7 @@
 {% block content %}
 <nav class="breadcrumbs" aria-label="현재 위치"><a href="/outbound/">반출 관제</a><span aria-hidden="true">/</span><span>요청 #{{ order.pk }}{% if plan %} · 계획 #{{ plan.pk }}{% endif %}</span></nav>
 <div class="page-head workspace-heading">
-  <div><h1>{{ order.cargo.code }} 반출 업무</h1><p>{{ order.cargo.name }} · {{ order.cargo.destination }}</p></div>
+  <div><h1>{% if order.title %}{{ order.title }}{% else %}{{ order.cargo.code }} 반출 업무{% endif %}</h1><p>{% if order.title %}{{ order.cargo.code }} 반출 · {% endif %}{{ order.cargo.name }} · {{ order.cargo.destination }}</p></div>
   <div class="task-state"><span class="badge {% if command %}{{ command.state }}{% elif plan %}{{ plan.result.status }}{% endif %}">{% if command %}{{ command_label }}{% elif plan %}{% if plan_changes %}검토 당시{% else %}계획{% endif %} {{ plan.result.status }}{% else %}계획 전{% endif %}</span><span>업무 완료 {{ completion_state }}</span></div>
 </div>
 <dl class="task-meta"><div><dt>현재 지시</dt><dd>v{{ order.version }}</dd></div><div><dt>반출 순서</dt><dd>그룹 {{ order.priority_group }} · {{ order.sequence }}순위</dd></div><div><dt>동순위 규칙</dt><dd>{% if order.tie_policy == 'ANY' %}그룹 안 선택 허용{% else %}순서 고정{% endif %}</dd></div>{% if plan %}<div><dt>계획 기준 지시</dt><dd>v{{ plan.order_version }} · {{ plan.created_at|date:'m-d H:i' }}</dd></div>{% endif %}</dl>
