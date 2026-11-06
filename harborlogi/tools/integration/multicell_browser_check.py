@@ -149,13 +149,13 @@ def main():
             page.locator('[data-yard-stage="2"]').click()
             assert page.locator('[data-scene-play]').get_attribute('aria-pressed') == 'true'
             page.wait_for_function('() => document.querySelector("canvas").dataset.frame === "2" && document.querySelector("canvas").dataset.moving === "false"')
-            page.locator('[data-plan-step="2"]').first.click()
-            page.wait_for_function('() => document.querySelector("canvas").dataset.frame === "2" && document.querySelector("canvas").dataset.moving === "true"')
+            page.locator('[data-plan-sequence]').click()
+            page.wait_for_function('() => document.querySelector("canvas").dataset.moving === "true"')
             assert page.locator('[data-scene-play]').get_attribute('aria-pressed') == 'true'
             page.locator('[data-scene-play]').click()
             assert page.locator('canvas').get_attribute('data-moving') == 'false'
             assert page.locator('[data-scene-play]').get_attribute('aria-pressed') == 'false'
-            result['checks'].append('Cargo route step jumps to its preceding snapshot and animates only that step; manual motion can be stopped')
+            result['checks'].append('One sequence button replays the stored plan from the observed layout; manual motion can be stopped')
             result['checks'].append('3D Canvas renders six atomic cuboids; footprint selection, real projected hit selection, keyboard camera and complete explicit playback stay synchronized')
             result['checks'].append('Explicit stop snaps to selected endpoint; manual step interrupts automatic playback without another step')
             from tools.integration.linked_yard_browser_checks import exercise_linked_views

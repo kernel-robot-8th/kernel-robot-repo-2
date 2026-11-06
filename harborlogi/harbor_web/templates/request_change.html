@@ -4,5 +4,6 @@
 <tr><td>우선순위 그룹</td><td>{{ before.priority_group|default:'—' }}</td><td>{{ after.priority_group }}</td></tr>
 <tr><td>그룹 안 순서</td><td>{{ before.sequence|default:'—' }}</td><td>{{ after.sequence }}</td></tr>
 <tr><td>동순위 처리</td><td>{% if before.tie_policy == 'FIXED' %}순서 고정{% elif before.tie_policy == 'ANY' %}선택 허용{% else %}—{% endif %}</td><td>{% if after.tie_policy == 'FIXED' %}순서 고정{% else %}선택 허용{% endif %}</td></tr>
+<tr><td>요청 제목</td><td>{{ before.title|default:'없음' }}</td><td>{{ after.title|default:'없음' }}</td></tr>
 <tr><td>요청 메모</td><td>{{ before.note|default:'없음' }}</td><td>{{ after.note|default:'없음' }}</td></tr>
 </tbody></table></div>
