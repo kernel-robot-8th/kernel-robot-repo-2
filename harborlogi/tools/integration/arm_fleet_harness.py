@@ -564,6 +564,8 @@ class RelayedFullFlowFleet(RelayedArmFleet):
         self.fleet.principals["cell"] = ("control-unit:CELL-A", "service")
         self.tokens = self.fleet.tokens
         self.fleet.start()
+        if self.fleet.app.state.arm_transfer_job_store is not None or self.fleet.app.state.control_unit is None:
+            raise RuntimeError("R must relay ARM work, not own it")
 
     def stop(self):
         try:
