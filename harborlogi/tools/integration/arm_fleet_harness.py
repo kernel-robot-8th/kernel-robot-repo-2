@@ -393,7 +393,7 @@ class ArmFleet:
 
     def stop(self):
         self.stopped.set()
-        if self.sim and self.server is not None and self.observed != {"PRE_DISPATCH", "POST_ACTION"}:
+        if self.sim and self.server is not None and self.observed - {"RECHECK"} != {"PRE_DISPATCH", "POST_ACTION"}:
             with self.client() as client:  # Fleet's own account of the attempt, before it shuts down
                 for key in self.request_keys:
                     print("== Fleet job", key, client.get("/api/fleet/arm-transfers/jobs",
@@ -426,7 +426,7 @@ class ArmFleet:
                   "s, failures", self.fence_failures[:10], flush=True)
             for entry in self.send_trace[:2] + self.send_trace[-6:]:
                 print("== Fleet send", *entry, flush=True)
-            if self.one_attempt and self.observed != {"PRE_DISPATCH", "POST_ACTION"}:
+            if self.one_attempt and self.observed - {"RECHECK"} != {"PRE_DISPATCH", "POST_ACTION"}:
                 import sqlite3
                 with sqlite3.connect(self.sim_out / "journal" / "owner.sqlite3") as db:
                     for row in db.execute("SELECT phase_id, state, result_json FROM omx_action_phases ORDER BY ordinal"):
@@ -442,7 +442,7 @@ class ArmFleet:
         submits = sum(o.operations.count("SubmitAction") for o in self.owners)
         lookups = sum(o.operations.count("GetAction") for o in self.owners)
         print("Synthetic UDS submits:", submits, "lookups:", lookups, "physical proofs:", sorted(self.observed), flush=True)
-        if self.one_attempt and (submits != 1 or lookups < 1 or self.observed != {"PRE_DISPATCH", "POST_ACTION"}):
+        if self.one_attempt and (submits != 1 or lookups < 1 or self.observed - {"RECHECK"} != {"PRE_DISPATCH", "POST_ACTION"}):
             import sqlite3  # diagnostic: the job's own account, read after the server stopped
             with sqlite3.connect(self.workdir / "fleet.sqlite3") as db:
                 for row in db.execute("SELECT mission_id, status, reason FROM fleet_cell_jobs"):
