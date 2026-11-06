@@ -23,7 +23,7 @@ D-856 첫 중립 이송 흐름은 API reference **v1.298**의 `GET /api/fleet/tr
 
 D-908 이송 제안은 API reference **v1.329**의 `/api/fleet/trip-proposals`(제안 POST·`request_key` 조회, 시뮬레이션 프로필 전용, 아니면 503)를 소비한다. 서비스 신원이 제안만 하고 승인은 다른 named operator가 한다. 앱 측 규칙은 [이송 제안 경로](execution.md#이송-제안-경로-d-908-api-v1329)에 있다. 실제 Fleet 대상 시험은 **미검증**이다.
 
-기준 플랫폼: `ed455ea03af48100085c32487ba11a56ce80c085`(공개 main, 2026-11-03), API reference 문서 **v1.355**. Harbor main `7ceda0f`와 이 커밋으로 고정 양 끝 실제 Fleet HTTP 전체 흐름(①~⑤, TRIP·ARM·근거·재확인)을 통과했다([2026-11-04 기록](validation/2026-11-04-pinned-full-flow.md)). 그 뒤 들어온 D-908 이송 제안 경로(PR #26)는 가짜 Fleet 단위 시험만 거쳤다. 이전 기준은 `584251615d5609a09ebcb52e18af0cbc0c9beaec`(v1.292)였다. 이 기준은 시뮬레이션 Fleet 계약이며, 운영 R의 설치 버전과는 다르다(운영 R은 [경계 점검](validation/2026-11-04-rosy-boundary-audit.md) 참조).
+기준 플랫폼: `647223ec39b8d68b5ad724faf7f070e30aa0f283`(공개 main, 2026-11-05), API reference 문서 **v1.361**. R이 물리 근거·재확인을 셀로 중계하는 v1.356을 포함한다. 이 커밋으로 `--full-flow`, `--arm-only`, R을 거친 `--arm-via-r` 5회를 통과했다([2026-11-06 기록](validation/2026-11-06-evidence-through-r.md)). D-908 이송 제안 경로(PR #26)는 가짜 Fleet 단위 시험만 거쳤다. 이전 기준은 `ed455ea03af48100085c32487ba11a56ce80c085`(v1.355, [2026-11-04 기록](validation/2026-11-04-pinned-full-flow.md))다. 이 기준은 시뮬레이션 Fleet 계약이며, 운영 R의 설치 버전과는 다르다(운영 R은 [경계 점검](validation/2026-11-04-rosy-boundary-audit.md) 참조).
 
 - 앱 모델·계획·배치·수동 후보 제외는 내부 업무 값이다. ROSY wire 타입·실행 원장·관측 원장을 복제하지 않는다.
 - 현재 제안/resolve/admit, mission snapshot/events, 취소/정지는 기존 HTTP 계약을 검토하여 사용할 수 있다. `trip-jobs`는 특정 `robot_id`와 현재 simulation profile에 묶인다.
