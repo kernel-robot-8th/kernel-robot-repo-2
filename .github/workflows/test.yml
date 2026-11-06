@@ -27,8 +27,8 @@ jobs:
       matrix:
         python: ["3.10", "3.12"]
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
       # Django renders a leftover marker as page text, so the test suites stay green with one committed.
@@ -49,8 +49,8 @@ jobs:
       HARBOR_WEB_SECRET_KEY: ci-test-only-not-a-deployment-secret-000000000000000000000000
       HARBOR_WEB_DATABASE: ":memory:"
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install '.[web]'
@@ -68,7 +68,7 @@ jobs:
       HARBOR_TLS_DIR: /tmp
       HARBOR_HOSTNAME: ci.invalid
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Compose file resolves
         run: HARBOR_ENV_FILE="$PWD/deploy/compose/harbor.env.example" docker compose -f deploy/compose/compose.yaml --profile setup config --quiet
       - name: Image builds and imports the app
