@@ -110,7 +110,7 @@ def main():
                 with page.expect_response(lambda response: response.url.endswith('/validate/') and response.request.method == 'POST') as response:
                     page.locator('[data-map-validate]').click()
                 assert response.value.status == (200 if ok else 400), response.value.text()
-                page.wait_for_function('document.querySelector("[data-map-editor]").getAttribute("aria-busy") === "false"')
+                page.wait_for_function('() => document.querySelector("[data-map-editor]").getAttribute("aria-busy") === "false"')
                 assert save.is_enabled() == ok
 
             apply(columns=4)
