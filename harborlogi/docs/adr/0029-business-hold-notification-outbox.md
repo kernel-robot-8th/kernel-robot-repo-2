@@ -2,7 +2,7 @@
 
 날짜: 2026-11-08
 
-상태: 수락(ROSY [D-997](https://github.com/robotics-team-1213/rosy-platform/blob/main/docs/adr/D-997-common-function-ownership-and-failure-contracts.md) Decision 6의 Harbor 행을 이 저장소의 계약으로 반영). 플랫폼 알림 전달 서비스는 아직 없는 목표이며 이 결정이 그 존재를 가정하지 않는다. 배포·실제 채널 발송·전환은 하지 않는다.
+상태: 수락(ROSY D-997 Decision 6의 Harbor 행을 이 저장소의 계약으로 반영). 플랫폼 알림 전달 서비스는 아직 없는 목표이며 이 결정이 그 존재를 가정하지 않는다. 배포·실제 채널 발송·전환은 하지 않는다.
 
 ## 배경
 
