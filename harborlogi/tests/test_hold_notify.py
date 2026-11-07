@@ -8,7 +8,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from harbor.hold_notify import HoldNotifier, occurrence_id, pre_send_check, validated_screen_base
+from harbor.hold_notify import (DefiniteDeliveryFailure, HoldNotifier, UnknownDeliveryFailure,
+                                business_ref, occurrence_id, pre_send_check)
+from harbor.ledger import ReadOnlyLedger
 from harbor.process import ArmTransferBinding
 from harbor.rosy_http import RosyClient
 from harbor.workflow import BusinessLedger
@@ -40,6 +42,9 @@ class HoldNotificationTests(unittest.TestCase):
     def outbox(self, ledger):
         return HoldNotifier(ledger).outbox()
 
+    def deliveries(self, ledger):
+        return HoldNotifier(ledger).deliveries()
+
     def test_hold_records_one_occurrence_and_polling_keeps_it(self):
         with TemporaryDirectory() as directory:
             ledger, binding, job = self.prepared(directory)
@@ -47,7 +52,6 @@ class HoldNotificationTests(unittest.TestCase):
             self.assertEqual(ledger.read('request')['state'], 'HOLD')
             rows = self.outbox(ledger)
             self.assertEqual([r['occurrence_id'] for r in rows], ['request#hold-1'])
-            self.assertEqual(rows[0]['delivery_state'], 'PENDING')
             self.assertEqual(ledger.read('request')['hold_sequence'], 1)
             ledger.hold('request')  # HOLD → HOLD bookkeeping is the same occurrence.
             ledger.recover_arm('request', self.client(job), now=FIXED)  # A poll that stays HOLD.
@@ -66,6 +70,18 @@ class HoldNotificationTests(unittest.TestCase):
             self.assertEqual([r['occurrence_id'] for r in self.outbox(ledger)],
                              ['request#hold-1', 'request#hold-2'])
 
+    def test_refresh_and_reconcile_entering_hold_record_the_occurrence(self):
+        with TemporaryDirectory() as directory:
+            ledger, binding, job = self.prepared(directory)
+            ledger.propose('request', self.client(job))
+            self.assertEqual(ledger.read('request')['state'], 'WAITING')
+            job['status'] = 'HOLD'
+            ledger.refresh('request', self.client(job), now=FIXED)  # WAITING → HOLD through a read.
+            self.assertEqual(ledger.read('request')['state'], 'HOLD')
+            self.assertEqual([r['occurrence_id'] for r in self.outbox(ledger)], ['request#hold-1'])
+            ledger.reconcile_arm('request', self.client(job), now=FIXED)  # HOLD → HOLD: nothing new.
+            self.assertEqual([r['occurrence_id'] for r in self.outbox(ledger)], ['request#hold-1'])
+
     def test_failed_submission_records_a_hold_occurrence(self):
         with TemporaryDirectory() as directory:
             ledger, binding, job = self.prepared(directory)
@@ -82,8 +98,8 @@ class HoldNotificationTests(unittest.TestCase):
             ledger, binding, job = self.prepared(directory)
             with closing(sqlite3.connect(Path(directory) / 'ledger.db')) as direct:  # A conflicting row.
                 with direct:
-                    direct.execute("INSERT INTO hold_outbox VALUES(?,?,?,?,?,?,?,?)",
-                                   ('request#hold-1', 'request', 1, '', '', '{}', 'PENDING', None))
+                    direct.execute("INSERT INTO hold_outbox VALUES(?,?,?,?,?,?,?)",
+                                   ('request#hold-1', '0' * 32, 'request', 1, '', '', '{}'))
             with self.assertRaises(sqlite3.IntegrityError):
                 ledger.hold('request')
             self.assertEqual(ledger.read('request')['state'], 'PLANNED')
@@ -101,19 +117,50 @@ class HoldNotificationTests(unittest.TestCase):
             self.assertEqual(reopened.read('request')['hold_sequence'], 2)
             rows = self.outbox(reopened)
             self.assertEqual([r['occurrence_id'] for r in rows], ['request#hold-1', 'request#hold-2'])
-            self.assertEqual([r['delivery_state'] for r in rows], ['PENDING', 'PENDING'])
+            self.assertTrue(all(r['notification_id'] for r in rows))
 
-    def test_body_carries_only_the_allowed_fields(self):
+    def test_old_ledger_schema_gains_hold_sequence_and_still_records_occurrences(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'ledger.db'
+            with closing(sqlite3.connect(path)) as direct:  # A pre-ADR-0029 ledger shape.
+                with direct:
+                    direct.execute("CREATE TABLE business (request_key TEXT PRIMARY KEY, digest TEXT NOT NULL, "
+                                   "payload TEXT NOT NULL, state TEXT NOT NULL, step_index INTEGER NOT NULL DEFAULT 0, "
+                                   "row_version INTEGER NOT NULL DEFAULT 0, mission_id TEXT, attempt_id TEXT, "
+                                   "goal_confirmed INTEGER NOT NULL DEFAULT 0, outbound_mission_id TEXT, "
+                                   "outbound_attempt_id TEXT)")
+                    direct.execute("INSERT INTO business(request_key,digest,payload,state) "
+                                   "VALUES('request','d','{}','PLANNED')")
+            ledger = self.ledger(directory)
+            self.assertEqual(ledger.read('request')['hold_sequence'], 0)
+            ledger.hold('request')
+            self.assertEqual(ledger.read('request')['state'], 'HOLD')
+            self.assertEqual([r['occurrence_id'] for r in self.outbox(ledger)], ['request#hold-1'])
+
+    def test_body_carries_only_opaque_fields(self):
         with TemporaryDirectory() as directory:
             ledger, binding, job = self.prepared(directory, screen_base='https://harbor.invalid')
             ledger.hold('request')
-            payload = json.loads(self.outbox(ledger)[0]['payload'])
+            row = self.outbox(ledger)[0]
+            payload = json.loads(row['payload'])
             self.assertEqual(payload, {
-                'classification': 'INTERVENTION_REQUIRED', 'business_id': 'request',
-                'occurrence_id': 'request#hold-1', 'occurred_at': FIXED.isoformat(),
+                'classification': 'INTERVENTION_REQUIRED', 'notification_id': row['notification_id'],
+                'business_ref': business_ref('request'), 'occurred_at': FIXED.isoformat(),
                 'expires_at': (FIXED + timedelta(hours=1)).isoformat(),
-                'screen_url': 'https://harbor.invalid/work/request'})
-            self.assertNotIn('?', payload['screen_url'])  # No token or query on the protected link.
+                'screen_url': f'https://harbor.invalid/work/{row["notification_id"]}'})
+            self.assertNotIn('?', payload['screen_url'])
+            self.assertNotIn('request', row['payload'])  # The raw business key never reaches a channel.
+
+    def test_notification_link_resolves_the_business_row(self):
+        with TemporaryDirectory() as directory:
+            ledger, binding, job = self.prepared(directory)
+            ledger.hold('request')
+            notification = self.outbox(ledger)[0]['notification_id']
+            reader = ReadOnlyLedger(Path(directory) / 'ledger.db')
+            self.assertEqual(reader.read(notification)['request_key'], 'request')
+            self.assertEqual(reader.read('request')['state'], 'HOLD')  # The key path still works.
+            with self.assertRaises(KeyError):
+                reader.read('0' * 32)
 
     def test_screen_base_must_be_a_protected_origin(self):
         with TemporaryDirectory() as directory:
@@ -128,7 +175,7 @@ class HoldNotificationTests(unittest.TestCase):
             ledger, binding, job = self.prepared(directory)
             ledger.hold('request')
             self.assertEqual(HoldNotifier(ledger).deliver_pending(now=FIXED + timedelta(minutes=5)), [])
-            self.assertEqual(self.outbox(ledger)[0]['delivery_state'], 'PENDING')
+            self.assertEqual(self.deliveries(ledger), [])
             self.assertEqual(ledger.read('request')['state'], 'HOLD')  # The local HOLD stays.
             with self.assertRaises(ValueError):
                 HoldNotifier(ledger, client=lambda channel, body: None)
@@ -143,9 +190,10 @@ class HoldNotificationTests(unittest.TestCase):
                                     client=lambda channel, body: sent.append((channel, body)))
             self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=5)), [])
             self.assertEqual(sent, [])
-            row = self.outbox(ledger)[0]
-            self.assertEqual(row['delivery_state'], 'REJECTED')
-            self.assertIn('left this HOLD', row['delivery_note'])
+            delivery = self.deliveries(ledger)[0]
+            self.assertEqual((delivery['occurrence_id'], delivery['channel']), ('request#hold-1', 'ops'))
+            self.assertEqual(delivery['state'], 'REJECTED')
+            self.assertIn('left this HOLD', delivery['note'])
 
     def test_valid_occurrence_is_sent_once_per_approved_channel(self):
         with TemporaryDirectory() as directory:
@@ -156,10 +204,82 @@ class HoldNotificationTests(unittest.TestCase):
                                     client=lambda channel, body: sent.append((channel, body)))
             self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=5)), ['request#hold-1'])
             self.assertEqual([channel for channel, _ in sent], ['ops'])
-            self.assertEqual(sent[0][1]['occurrence_id'], 'request#hold-1')
-            self.assertEqual(self.outbox(ledger)[0]['delivery_state'], 'SENT')
+            self.assertEqual(sent[0][1]['business_ref'], business_ref('request'))
+            self.assertEqual(self.deliveries(ledger)[0]['state'], 'SENT')
             self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=6)), [])
             self.assertEqual(len(sent), 1)
+
+    def test_later_failure_does_not_resend_an_already_sent_occurrence(self):
+        with TemporaryDirectory() as directory:
+            ledger, binding, job = self.prepared(directory)
+            binding2 = ArmTransferBinding('D', 'bay2', 'out', 'cell', 'instance', 'object', 'source', 'target')
+            ledger.prepare('second', 1, (binding2,), outbound_id='D', outbound_stand='out',
+                           move_arms=(('A',),))
+            ledger.hold('request')
+            ledger.hold('second')
+            notifications = {r['request_key']: r['notification_id'] for r in self.outbox(ledger)}
+
+            def client(channel, body):
+                if body['notification_id'] == notifications['second']:
+                    raise DefiniteDeliveryFailure('refused before the connection')
+                sent.append(body['notification_id'])
+            sent = []
+            notifier = HoldNotifier(ledger, channels=('ops',), client=client)
+            self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=5)), ['request#hold-1'])
+            second = [d for d in self.deliveries(ledger) if d['channel'] == 'ops'
+                      and d['occurrence_id'] == 'second#hold-1'][0]
+            self.assertEqual(second['state'], 'PENDING')  # A definite failure may retry later.
+            notifier.client = lambda channel, body: sent.append(body['notification_id'])
+            self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=6)), ['second#hold-1'])
+            self.assertEqual(sent, [notifications['request'], notifications['second']])  # No resend.
+
+    def test_timeout_on_one_channel_is_unknown_while_the_other_is_sent(self):
+        with TemporaryDirectory() as directory:
+            ledger, binding, job = self.prepared(directory)
+            ledger.hold('request')
+
+            def client(channel, body):
+                if channel == 'b':
+                    raise UnknownDeliveryFailure('timeout')
+                sent.append((channel, body['notification_id']))
+            sent = []
+            notifier = HoldNotifier(ledger, channels=('a', 'b'), client=client)
+            self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=5)), ['request#hold-1'])
+            states = {d['channel']: d['state'] for d in self.deliveries(ledger)}
+            self.assertEqual(states, {'a': 'SENT', 'b': 'UNKNOWN'})
+            self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=6)), [])
+            self.assertEqual(len(sent), 1)  # Neither channel resends.
+            self.assertEqual(sent[0][0], 'a')
+
+    def test_unclassified_client_failure_is_unknown_not_resent(self):
+        with TemporaryDirectory() as directory:
+            ledger, binding, job = self.prepared(directory)
+            ledger.hold('request')
+            sent = []
+
+            def client(channel, body):
+                sent.append(body['notification_id'])
+                raise RuntimeError('garbage response')
+            notifier = HoldNotifier(ledger, channels=('ops',), client=client)
+            self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=5)), [])
+            self.assertEqual(self.deliveries(ledger)[0]['state'], 'UNKNOWN')
+            self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=6)), [])
+            self.assertEqual(len(sent), 1)
+
+    def test_interrupted_sending_settles_to_unknown_without_resending(self):
+        with TemporaryDirectory() as directory:
+            ledger, binding, job = self.prepared(directory)
+            ledger.hold('request')
+            with closing(sqlite3.connect(Path(directory) / 'ledger.db')) as direct:  # A crashed send.
+                with direct:
+                    direct.execute("INSERT INTO hold_delivery VALUES(?,?,?,?)",
+                                   ('request#hold-1', 'ops', 'SENDING', None))
+            sent = []
+            notifier = HoldNotifier(ledger, channels=('ops',),
+                                    client=lambda channel, body: sent.append(body['notification_id']))
+            self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=5)), [])
+            self.assertEqual(sent, [])
+            self.assertEqual(self.deliveries(ledger)[0]['state'], 'UNKNOWN')
 
     def test_expired_occurrence_is_rejected_without_sending(self):
         with TemporaryDirectory() as directory:
@@ -170,8 +290,8 @@ class HoldNotificationTests(unittest.TestCase):
                                     client=lambda channel, body: sent.append((channel, body)))
             self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=1)), [])
             self.assertEqual(sent, [])
-            self.assertEqual(self.outbox(ledger)[0]['delivery_state'], 'REJECTED')
-            self.assertEqual(self.outbox(ledger)[0]['delivery_note'], 'Occurrence expired')
+            self.assertEqual(self.deliveries(ledger)[0]['state'], 'REJECTED')
+            self.assertEqual(self.deliveries(ledger)[0]['note'], 'Occurrence expired')
 
     def test_pre_send_check_covers_channel_scope_and_unknown_occurrences(self):
         with TemporaryDirectory() as directory:

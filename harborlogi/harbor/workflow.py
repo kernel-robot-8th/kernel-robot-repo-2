@@ -7,7 +7,8 @@ import math
 import sqlite3
 
 from harbor.ledger import business_row, plan_payload as _payload
-from harbor.hold_notify import OUTBOX_SCHEMA, record_hold, screen_url, validated_screen_base
+from harbor.hold_notify import (OUTBOX_SCHEMA, new_notification_id, record_hold, screen_url,
+                                validated_screen_base)
 from harbor.model import YARD_ARMS, aware_time, identifier, identifiers, revision
 from harbor.process import ArmTransferBinding, ProcessBinding
 from harbor.execution import read_arm_execution, prepare_execution, submit_execution, read_cell_execution
@@ -167,8 +168,10 @@ class BusinessLedger:
             return
         sequence = self._row(c, key)["hold_sequence"] + 1
         c.execute("UPDATE business SET hold_sequence=? WHERE request_key=?", (sequence, key))
-        record_hold(c, key, sequence, now=now, expires_at=now + self.notify_expiry,
-                    screen_url=screen_url(self._screen_base, key))
+        notification = new_notification_id()
+        record_hold(c, key, sequence, notification_id=notification, now=now,
+                    expires_at=now + self.notify_expiry,
+                    screen_url=screen_url(self._screen_base, notification))
 
     def _connect(self):
         c = sqlite3.connect(self.path, timeout=10)
