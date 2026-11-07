@@ -143,15 +143,23 @@ class SpatialPolicy:
     arm_reach: frozenset[tuple[str, str]]
     max_observation_age: timedelta
     storage_areas: tuple[str, ...] = ('yard',)
+    # Design 33: one outbound line per arm plate; outbound_area stays the primary (legacy) one.
+    extra_outbound_areas: tuple[str, ...] = ()
+
+    @property
+    def outbound_areas(self):
+        return (self.outbound_area, *self.extra_outbound_areas)
 
     def __post_init__(self):
-        identifier(self.outbound_area)
+        identifiers(self.outbound_areas)
         identifiers(self.temporary_areas)
         identifiers(self.storage_areas)
-        if 'yard' not in self.storage_areas or set(self.storage_areas) & {*self.temporary_areas, self.outbound_area, 'conveyor'}:
+        if len(set(self.outbound_areas)) != len(self.outbound_areas):
+            raise ValueError('Outbound areas must be unique')
+        if 'yard' not in self.storage_areas or set(self.storage_areas) & {*self.temporary_areas, *self.outbound_areas, 'conveyor'}:
             raise ValueError('Storage, temporary and outbound roles must be disjoint')
-        if self.outbound_area == 'yard' or any(a in ('yard', 'conveyor', self.outbound_area)
-                                               for a in self.temporary_areas):
+        if 'yard' in self.outbound_areas or any(a in ('yard', 'conveyor', *self.outbound_areas)
+                                                for a in self.temporary_areas):
             raise ValueError('Temporary storage must exclude yard, conveyor and outbound areas')
         if not isinstance(self.allowed_moves, frozenset) or not isinstance(self.arm_reach, frozenset):
             raise ValueError('Expected immutable movement and reach pairs')
@@ -262,7 +270,7 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
     schedule = {} if schedule is None else schedule
     validate_schedule(schedule)
     areas = {a.area_id: a for a in snapshot.areas}
-    referenced = {policy.outbound_area, *policy.temporary_areas, *policy.storage_areas}
+    referenced = {*policy.outbound_areas, *policy.temporary_areas, *policy.storage_areas}
     referenced.update(a for edge in policy.allowed_moves for a in edge)
     if not referenced <= areas.keys():
         raise ValueError('Policy references an unknown area')
@@ -279,7 +287,7 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
     if request.cargo_id not in {p.cargo_id for p in snapshot.placements}:
         return hold('OUTBOUND_NOT_OBSERVED')
     target = snapshot.placement(request.cargo_id)
-    if target.area_id == policy.outbound_area:
+    if target.area_id in policy.outbound_areas:
         return hold('OUTBOUND_ALREADY_ON_STAND_REQUIRES_EVIDENCE')
     if target.area_id not in policy.storage_areas:
         return hold('OUTBOUND_NOT_IN_A_BAY')
@@ -399,7 +407,7 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
         if remaining:
             tasks = [(cargo, policy.temporary_areas, '재취급') for cargo in sorted(remaining)]
         elif not exported:
-            tasks = [(target.cargo_id, (policy.outbound_area,), '반출')]
+            tasks = [(target.cargo_id, policy.outbound_areas, '반출')]  # L5: the arm check below picks reachable lines
         else:
             tasks = [(cargo, policy.storage_areas, '복귀') for cargo in sorted(restoring)]
         for cargo, area_ids, phase in tasks:
@@ -496,7 +504,7 @@ def plan_rearrangement(snapshot: SpatialSnapshot, policy: SpatialPolicy,
     if any(n not in (1, 2, 3) for n in pending_inbound):
         raise ValueError('Expected pending inbound lengths of 1 to 3 cells')
     areas = {a.area_id: a for a in snapshot.areas}
-    if not {policy.outbound_area, *policy.temporary_areas, *policy.storage_areas} <= areas.keys():
+    if not {*policy.outbound_areas, *policy.temporary_areas, *policy.storage_areas} <= areas.keys():
         raise ValueError('Policy references an unknown area')
 
     def hold(reason, optimization=None):
@@ -517,7 +525,7 @@ def plan_rearrangement(snapshot: SpatialSnapshot, policy: SpatialPolicy,
     if any(p.area_id in temporary for p in snapshot.placements):
         return hold('TEMPORARY_AREA_OCCUPIED')
 
-    outbound = areas[policy.outbound_area]
+    outbound_lines = [areas[a] for a in policy.outbound_areas]
     lengths = {s.cargo_id: s.length_cells for s in snapshot.shapes}
     originals = {p.cargo_id: p for p in snapshot.placements}
 
@@ -536,9 +544,8 @@ def plan_rearrangement(snapshot: SpatialSnapshot, policy: SpatialPolicy,
 
     def fits_outbound(p):
         n = lengths[p.cargo_id]
-        if (p.area_id, policy.outbound_area) in rotation_moves:
-            return n <= max(outbound.rows, outbound.columns)
-        return n <= (outbound.rows if p.orientation == 90 else outbound.columns)
+        return any(n <= (max(o.rows, o.columns) if (p.area_id, o.area_id) in rotation_moves else
+                         o.rows if p.orientation == 90 else o.columns) for o in outbound_lines)
 
     def free_positions(occupied, n):
         total = 0

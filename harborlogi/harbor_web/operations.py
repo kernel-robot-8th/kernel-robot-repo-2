@@ -16,7 +16,7 @@ def _inventory(observation):
                     holding_count=None, areas=[])
     policy = observation.condition.payload
     temporary = set(policy['temporary_bays'])
-    outbound = policy['outbound_stand']
+    outbound = {policy['outbound_stand'], *policy.get('extra_outbound_stands', [])}
     spatial = observation.payload.get('schema') == 'grid-placement-v1'
     snapshot = services.snapshot(observation)
     areas = []
@@ -32,7 +32,7 @@ def _inventory(observation):
                       capacity=b.capacity) for b in snapshot.bays]
     for area in areas:
         area['label'] = presentation.get(area['id'], {}).get('label', area['id'])
-        area['role'] = '임시 장치' if area['id'] in temporary else '반출대' if area['id'] == outbound else '보관'
+        area['role'] = '임시 장치' if area['id'] in temporary else '반출대' if area['id'] in outbound else '보관'
     occupied, capacity = sum(a['occupied'] for a in areas), sum(a['capacity'] for a in areas)
     return dict(known=True, spatial=spatial, cargo_count=sum(a['cargo_count'] for a in areas),
         occupied=occupied, capacity=capacity,
