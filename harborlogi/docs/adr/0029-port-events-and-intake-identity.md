@@ -40,6 +40,6 @@ ADR 0005는 S를 플랫폼 밖 단계로 두고, Harbor가 S 퇴피를 사람 �
 
 ## 결과
 
-- 이송 제안(`POST /api/fleet/trip-proposals`)에 선택 필드 `object_ref`를 싣는다. ROSY는 `object_ref`가 있을 때만 그것을 `request_digest`에 넣을 예정이다(정확한 직렬화는 미정). Harbor의 digest 계산은 `harbor/fleet_contract.py:trip_digest` 한 곳이다. ROSY 쪽 필드와 R 조회 경로가 착지하기 전에는 Harbor 소비기가 빈 결과 또는 연결 실패로 기다리기만 한다.
+- 이송 제안(`POST /api/fleet/trip-proposals`)에 선택 필드 `object_ref`를 싣는다. ROSY는 `object_ref`가 있을 때만 그것을 `request_digest` 본문에 넣는다(키 정렬·공백 없는 JSON, ROSY 161957814a). 같은 key에 다른 `object_ref`면 ROSY가 409로 거절한다. Harbor의 digest 계산은 `harbor/fleet_contract.py:trip_digest` 한 곳이다. ROSY 쪽 필드와 R 조회 경로가 착지하기 전에는 Harbor 소비기가 빈 결과 또는 연결 실패로 기다리기만 한다.
 - `harbor/port_events.py`가 사건 모델·화물별 상태·커서를 갖고, `harbor/departure.py`는 `vehicle.release_permitted`로만 출발을 허용한다.
 - 바뀌지 않는 것: 반출·재취급 업무 완료 조건(ADR 0005 결정 6의 A·B 부분), 사람 확인 출처 분리(ADR 0023), Fleet 승인 경계(ADR 0012·0015).

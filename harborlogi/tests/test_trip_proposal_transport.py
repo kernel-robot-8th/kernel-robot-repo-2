@@ -1,4 +1,5 @@
 """D-908 / API v1.329: Harbor proposes once, never admits, reconciles by the original key."""
+from hashlib import sha256
 from pathlib import Path
 import tempfile
 import unittest
@@ -28,7 +29,8 @@ class ProposalFleet:
             key = body["request_key"]
             if key not in self.proposals:
                 step = body["steps"][0]
-                digest = TripIntent(key, tuple(body["candidate_robot_ids"]), step["to"], tuple(step["via"])).digest
+                digest = TripIntent(key, tuple(body["candidate_robot_ids"]), step["to"], tuple(step["via"]),
+                                    body.get("object_ref", "")).digest
                 self.proposals[key] = {"proposal_id": "p-1", "proposal_principal_id": PRINCIPAL, "request_key": key,
                     "request_digest": digest, "proposal_digest": "a" * 64, "status": "PROPOSED",
                     "candidate_robot_ids": body["candidate_robot_ids"], "steps": body["steps"],
@@ -130,8 +132,12 @@ class TripProposalTests(unittest.TestCase):
         self.ledger.prepare(intent)
         self.ledger.propose(intent.request_key, self.client)
         self.assertEqual(self.fleet.bodies[-1]["object_ref"], "C-1")
-        # The digest stays over candidates and steps, so ROSY's existing request_digest still matches.
-        self.assertEqual(intent.digest, TripIntent("x", ("robot-1",), "dest").digest)
+        # object_ref joins the digest only when declared (ROSY 161957814a); without it the bytes are unchanged.
+        self.assertNotEqual(intent.digest, TripIntent("x", ("robot-1",), "dest").digest)
+        self.assertEqual(TripIntent("x", ("robot-1",), "dest").digest, sha256(
+            b'{"candidates":["robot-1"],"steps":[{"to":"dest","via":[]}]}').hexdigest())
+        self.assertEqual(TripIntent("k", ("rosy_01",), "B", object_ref="CNTR-0001").digest, sha256(
+            b'{"candidates":["rosy_01"],"object_ref":"CNTR-0001","steps":[{"to":"B","via":[]}]}').hexdigest())
         self.assertEqual(self.ledger._intent(self.ledger.read(intent.request_key)).object_ref, "C-1")
         with self.assertRaises(ValueError):  # the same key cannot later declare another cargo
             self.ledger.prepare(TripIntent("harbor-trip:2", ("robot-1",), "dest", object_ref="C-2"))

@@ -77,7 +77,7 @@ Harbor 서비스 신원은 `POST /api/fleet/trip-jobs`(named operator 전용)를
 
 **웹 반입 이송(ADR 0029).** `HARBOR_TRIP_DESTINATION`(반입 장소 ID)과 `HARBOR_LEDGER_PATH`가 있으면 `prepare_departure`가 출발 의도와 함께 `harbor-trip:<출발 key>` 이송 의도를 PLANNED로 저장하고, 화물 코드를 `object_ref`로 선언해 반입 명단(`IntakeLedger`)에 올린다. 웹 요청은 Fleet에 아무것도 보내지 않는다. 업무 실행기가 tick마다 `harbor_web/intake_loop.py`로 PLANNED 이송을 한 번 제안하고, 원래 key로 대조해 Fleet이 도착을 확인하면 TRIP_ARRIVED로 올린 뒤, R의 항만 사건 한 쪽을 읽는다. 설정이 없으면 예전처럼 출발 의도만 남는다.
 
-`RosyClient.trip_job(id)`와 `trip_request(key)`는 공정 문서 없는 수행 snapshot을 읽는다. 이송 후보·장소와, ADR 0029부터는 해석되지 않는 화물 코드 `object_ref` 하나만 wire로 보낸다. `request_digest`는 지금 후보·step만 덮는다. ROSY는 `object_ref`가 있을 때만 그것을 digest에 넣을 예정이며(형식 미정), Harbor 쪽 계산은 `fleet_contract.trip_digest` 한 곳이다. recipe·pallet/layer는 새 요청에 넣지 않는다. typed 동작의 추가·도달 사전 검증·중립 팔 동작은 후속 계약이다.
+`RosyClient.trip_job(id)`와 `trip_request(key)`는 공정 문서 없는 수행 snapshot을 읽는다. 이송 후보·장소와, ADR 0029부터는 해석되지 않는 화물 코드 `object_ref` 하나만 wire로 보낸다. `request_digest`는 후보·step에 더해, `object_ref`가 있을 때만 그것까지 덮는다(ROSY 161957814a와 같은 바이트). Harbor 쪽 계산은 `fleet_contract.trip_digest` 한 곳이다. recipe·pallet/layer는 새 요청에 넣지 않는다. typed 동작의 추가·도달 사전 검증·중립 팔 동작은 후속 계약이다.
 
 공정 compiler 없는 실제 Fleet simulation HTTP 검증은 아래와 같이 명시 실행한다. 일반 단독 시험의 integration skip과 별개다.
 

@@ -32,7 +32,8 @@ class Fleet:
             key, step = body['request_key'], body['steps'][0]
             self.proposals.setdefault(key, dict(
                 proposal_id='p-1', proposal_principal_id=PRINCIPAL, request_key=key, status='PROPOSED',
-                request_digest=TripIntent(key, tuple(body['candidate_robot_ids']), step['to'], tuple(step['via'])).digest,
+                request_digest=TripIntent(key, tuple(body['candidate_robot_ids']), step['to'], tuple(step['via']),
+                                          body.get('object_ref', '')).digest,
                 candidate_robot_ids=body['candidate_robot_ids'], steps=body['steps'], object_ref=body.get('object_ref'),
                 dispatch_generation=None, approved_by=None, mission_id=None))
             return {'proposal': self.proposals[key]}
