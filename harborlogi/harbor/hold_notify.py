@@ -15,7 +15,6 @@ from urllib.parse import urlsplit
 from harbor.model import aware_time, identifier
 
 CLASSIFICATION = "INTERVENTION_REQUIRED"
-BODY_FIELDS = ("business_id", "classification", "expires_at", "occurrence_id", "occurred_at", "screen_url")
 
 OUTBOX_SCHEMA = """
     CREATE TABLE IF NOT EXISTS hold_outbox (
