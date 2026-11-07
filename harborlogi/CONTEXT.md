@@ -55,6 +55,8 @@
 
 ## 이름으로 굳은 말
 
+구성요소·계정·호스트의 책임은 [Harbor와 ROSY의 책임](docs/responsibilities.md)과 [ADR0028](docs/adr/0028-control-units-device-owners-and-hosts.md)을 따른다. `owner`는 자원·상태·명령의 소프트웨어 책임 주체이며 공용 사람 계정이 아니다. R·CELL-x는 논리 관제 단위, N100 미니 PC·OMX 노트북은 물리 호스트, Rosy Fleet은 프로그램 이름이다.
+
 인증 경계에서 **Harbor 사용자**는 앱에 로그인해 업무를 결정하는 사람이고, **Harbor 서비스 신원**은 Fleet이 발급한 전용 principal·service 역할의 기계 주체다. 두 신원의 계정·세션·권한을 공유하지 않는다. **셀 관제 기명 운영자**의 승인과 **독립 관측 producer**의 자격도 별도다. 책임·교환 계약의 정본은 [설계27](docs/design/27-independent-integration-and-service-trust.md)이다.
 
 - **Rosy Fleet · 통합관제 R · 셀 관제 CELL-A:** Rosy Fleet은 ROSY 관제 프로그램의 이름이고 개수를 세지 않는다. Harbor는 **통합관제 R** 하나로 들어오고, 팔 작업 승인·정지 해제는 그 팔을 가진 **셀 관제 CELL-A**의 기명 운영자가 그 화면에서 한다. 「Fleet 승인」처럼 단위 없이 쓰지 않는다. 근거는 ROSY D-965·D-974다.
