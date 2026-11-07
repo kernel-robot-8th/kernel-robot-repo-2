@@ -1,5 +1,7 @@
 # 플랫폼 연결 기준
 
+전체 책임 구분은 [Harbor와 ROSY의 책임](responsibilities.md)과 [ADR0028](adr/0028-control-units-device-owners-and-hosts.md)을 따른다. Harbor 업무·R/셀의 원장/admission·CORE/OMX 최종 실행·공통 서비스·호스트는 별개다. 이 문서의 고정 플랫폼 SHA·API 버전·당시 시험 근거는 이번 책임 안내 갱신으로 바꾸지 않는다. ARM 증거·재검사의 직계 자식 제한과 주행 위임/셀 ARM 승인 구분도 위 책임 안내에서 확인한다.
+
 2026-10-29 경계 분리의 코드 소유권과 고정 HTTP·설치 검증은
 [완료 기록](validation/2026-10-29-complete-application-boundaries.md)을 따른다.
 업무 장부·명령 서비스·화면은 어댑터의 정규화 결과를 소비하며, Fleet wire 검증은
