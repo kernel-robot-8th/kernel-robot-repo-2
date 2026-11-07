@@ -32,4 +32,6 @@ ADR 0015는 Harbor와 Fleet이 각자 로그인·세션·역할을 갖고, 공�
 
 ## 검증
 
-`harbor_web/tests/test_rosy_account.py`: capability→그룹 대응, `harbor.*` 없음 거부와 회수, 위조 state·다른 site 토큰 거부, 허브 회수 뒤 세션 종료, 허브 장애 때 만료까지만 유지, 로그아웃 회수, 설정 파일 검사, 설정이 없을 때 로컬 로그인만. 실제 허브와의 연결과 현장 사용은 아직 확인하지 않았다.
+`harbor_web/tests/test_rosy_account.py`: capability→그룹 대응, `harbor.*` 없음 거부와 회수, 위조 state·다른 site 토큰 거부, 허브 회수 뒤 세션 종료, 허브 장애 때 만료까지만 유지, 로그아웃 회수, 설정 파일 검사, 설정이 없을 때 로컬 로그인만.
+
+2026-11-07 교차 확인: rosy-platform `0aa9ffc8b8`의 실제 허브 라우트(`AccountAuthority`와 `/api/fleet/auth/*`)를 같은 프로세스에 띄우고, Harbor를 가짜 허브 없이 연결해 6건이 통과했다. 확인한 것은 `site:*` grant로 로그인과 역할 대응, 300초 만료 뒤 refresh 회전, 허브에서 바꾼 권한이 회전 때 반영되는 것(관리자 승격 포함), 권한이 사라졌을 때와 허브가 회수했을 때 세션 종료, `harbor.*` 없음 거부와 회수, 로그아웃 회수다. 이 시험은 ROSY 코드를 import하므로 Harbor 저장소에 넣지 않았다. 네트워크를 거친 실제 배치와 현장 사용은 아직 확인하지 않았다.
