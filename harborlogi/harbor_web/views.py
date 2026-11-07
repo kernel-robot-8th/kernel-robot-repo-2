@@ -167,7 +167,7 @@ def cargo_footprint(request, pk):
         from django.core.exceptions import PermissionDenied
         raise PermissionDenied
     current_footprint = CargoFootprint.objects.filter(cargo=cargo).order_by('-pk').first()
-    form = forms.FootprintForm(request.POST or None, initial={'length_cells': current_footprint.length_cells if current_footprint else 1})
+    form = forms.FootprintForm(request.POST or None, initial={'length_cells': current_footprint.length_cells if current_footprint else 3})
     if request.method == 'POST' and form.is_valid():
         try:
             services.register_footprint(request.user, cargo_id=pk, **form.cleaned_data)

@@ -24,10 +24,16 @@ def _role(cargo, targets, rehandles):
 
 
 def _spatial(observation, targets, rehandles):
-    snapshot = services.spatial_snapshot(observation)
     policy = observation.condition.payload
-    presentation = services.area_presentation(policy)
-    temporary, outbound = set(policy['temporary_bays']), policy['outbound_stand']
+    labels = {area_id: value.get('label', area_id) for area_id, value in services.area_presentation(policy).items()}
+    return rows_from_snapshot(services.spatial_snapshot(observation), labels=labels, temporary=policy['temporary_bays'],
+                              outbound=policy['outbound_stand'], targets=targets, rehandles=rehandles)
+
+
+def rows_from_snapshot(snapshot, *, labels=None, temporary=(), outbound=None, targets=(), rehandles=()):
+    """Row view of one spatial snapshot; yard first, then the auxiliary areas in snapshot order."""
+    labels, temporary = labels or {}, set(temporary)
+    targets, rehandles = set(targets), set(rehandles) - set(targets)
     occupied = snapshot.occupied()
     areas = []
     for area in snapshot.areas:
@@ -51,7 +57,7 @@ def _spatial(observation, targets, rehandles):
                              height=height, levels=levels, cargo=cargo))
         free = sum(1 for row in rows for entry in row['levels'] if entry['empty'])
         role = '임시 장치' if area.area_id in temporary else '반출대' if area.area_id == outbound else AREA_ROLES.get(area.area_id, '보관')
-        areas.append(dict(id=area.area_id, label=presentation.get(area.area_id, {}).get('label', area.area_id), role=role,
+        areas.append(dict(id=area.area_id, label=labels.get(area.area_id, area.area_id), role=role,
                           rows=rows, columns=area.columns, levels=area.levels, free=free,
                           cargo=sorted({c for row in rows for c in row['cargo']})))
     yard = next(area for area in areas if area['id'] == 'yard')
