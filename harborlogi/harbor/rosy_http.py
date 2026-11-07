@@ -86,10 +86,11 @@ class RosyClient:
             "candidate_robot_ids": list(candidates), "request_key": request_key, "steps": list(steps),
         })
 
-    def trip_propose(self, candidates, steps, *, request_key):
+    def trip_propose(self, candidates, steps, *, request_key, object_ref=None):
         # D-908: the app only proposes; a different named operator admits outside Harbor.
+        cargo = {} if object_ref is None else {"object_ref": object_ref}  # ADR 0029 optional field
         return self._call("POST", "/api/fleet/trip-proposals", {
-            "candidate_robot_ids": list(candidates), "request_key": request_key, "steps": list(steps),
+            "candidate_robot_ids": list(candidates), "request_key": request_key, "steps": list(steps), **cargo,
         })
 
     def trip_proposal_request(self, request_key):

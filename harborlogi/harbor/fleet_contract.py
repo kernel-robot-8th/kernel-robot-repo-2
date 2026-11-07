@@ -101,7 +101,8 @@ def validate_trip_proposal(intent, proposal, principal=None):
             or proposal.get("request_digest") != intent.digest
             or proposal.get("candidate_robot_ids") != list(intent.candidates)
             or proposal.get("steps") != intent.steps
-            or proposal.get("status") not in {"PROPOSED", "ADMITTED"}):
+            or proposal.get("status") not in {"PROPOSED", "ADMITTED"}
+            or proposal.get("object_ref", intent.object_ref or None) != (intent.object_ref or None)):
         raise ValueError("Fleet trip proposal does not match the saved intent")
     proposer = proposal.get("proposal_principal_id")
     if not isinstance(proposer, str) or not proposer or principal is not None and proposer != principal:

@@ -32,7 +32,9 @@ class ProposalFleet:
                 self.proposals[key] = {"proposal_id": "p-1", "proposal_principal_id": PRINCIPAL, "request_key": key,
                     "request_digest": digest, "proposal_digest": "a" * 64, "status": "PROPOSED",
                     "candidate_robot_ids": body["candidate_robot_ids"], "steps": body["steps"],
-                    "dispatch_generation": None, "approved_by": None, "mission_id": None}
+                    "dispatch_generation": None, "approved_by": None, "mission_id": None,
+                    **({"object_ref": body["object_ref"]} if "object_ref" in body else {})}
+                self.bodies = getattr(self, "bodies", []) + [body]
             if self.lose_response:
                 raise TimeoutError("response lost after commit")
             return {"proposal": self.proposals[key]}
@@ -122,6 +124,22 @@ class TripProposalTests(unittest.TestCase):
         sent = []
         RosyClient(transport=lambda m, p, b: sent.append(b)).trip_propose(("robot-1",), self.intent.steps, request_key="k")
         self.assertEqual(set(sent[0]), {"candidate_robot_ids", "request_key", "steps"})
+
+    def test_declared_cargo_rides_the_proposal_unread(self):
+        intent = TripIntent("harbor-trip:2", ("robot-1",), "dest", object_ref="C-1")
+        self.ledger.prepare(intent)
+        self.ledger.propose(intent.request_key, self.client)
+        self.assertEqual(self.fleet.bodies[-1]["object_ref"], "C-1")
+        # The digest stays over candidates and steps, so ROSY's existing request_digest still matches.
+        self.assertEqual(intent.digest, TripIntent("x", ("robot-1",), "dest").digest)
+        self.assertEqual(self.ledger._intent(self.ledger.read(intent.request_key)).object_ref, "C-1")
+        with self.assertRaises(ValueError):  # the same key cannot later declare another cargo
+            self.ledger.prepare(TripIntent("harbor-trip:2", ("robot-1",), "dest", object_ref="C-2"))
+        self.fleet.proposals[intent.request_key]["object_ref"] = "C-2"
+        with self.assertRaises(ValueError):  # an echo naming another cargo is refused
+            self.ledger.reconcile_proposal(intent.request_key, self.client)
+        with self.assertRaises(ValueError):
+            TripIntent("harbor-trip:3", ("robot-1",), "dest", object_ref=" C-1")
 
 
 if __name__ == "__main__":
