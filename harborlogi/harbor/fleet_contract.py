@@ -53,7 +53,8 @@ def validate_arm_job(binding, job, request_key):
 def validate_arm_receipt(binding, job, receipt):
     if not isinstance(receipt, dict):
         raise ValueError("A physical receipt is required")
-    expected = dict(mission_id=job["mission_id"], workcell_id=binding.workcell_id, instance_id=binding.instance_id,
+    # No instance_id: Fleet may switch to a fallback arm, so the receipt's arm is Fleet's fact (ADR 0029, D3).
+    expected = dict(mission_id=job["mission_id"], workcell_id=binding.workcell_id,
         object_ref=binding.object_ref, source=binding.source_ref, target=binding.target_ref,
         policy_digest=job["resource_policy_digest"], authority_epoch=job["authority_epoch"],
         dispatch_generation=job["dispatch_generation"], physical_status="AT_TARGET_AND_CLEAR")

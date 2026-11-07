@@ -9,7 +9,6 @@
     "temporary_bays": ["temp"],
     "outbound_stand": "stand"
   },
-  "conveyor": {"capacity": 1, "occupancy_evidence": "camera"},
   "waiting_positions": ["wait"],
   "allowed_moves": [["conveyor", "yard"], ["yard", "temp"], ["temp", "yard"], ["yard", "stand"]],
   "charging_positions": 1,
