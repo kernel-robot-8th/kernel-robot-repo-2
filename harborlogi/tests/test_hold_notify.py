@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from harbor.hold_notify import (DefiniteDeliveryFailure, HoldNotifier, UnknownDeliveryFailure,
-                                business_ref, occurrence_id, pre_send_check)
+                                occurrence_id, pre_send_check)
 from harbor.ledger import ReadOnlyLedger
 from harbor.process import ArmTransferBinding
 from harbor.rosy_http import RosyClient
@@ -137,6 +137,47 @@ class HoldNotificationTests(unittest.TestCase):
             self.assertEqual(ledger.read('request')['state'], 'HOLD')
             self.assertEqual([r['occurrence_id'] for r in self.outbox(ledger)], ['request#hold-1'])
 
+    def test_first_draft_outbox_schema_migrates_and_keeps_settled_deliveries(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'ledger.db'
+            with closing(sqlite3.connect(path)) as direct:  # Shapes from earlier unmerged commits.
+                with direct:
+                    direct.execute("CREATE TABLE business (request_key TEXT PRIMARY KEY, digest TEXT NOT NULL, "
+                                   "payload TEXT NOT NULL, state TEXT NOT NULL, step_index INTEGER NOT NULL DEFAULT 0, "
+                                   "row_version INTEGER NOT NULL DEFAULT 0, mission_id TEXT, attempt_id TEXT, "
+                                   "goal_confirmed INTEGER NOT NULL DEFAULT 0, outbound_mission_id TEXT, "
+                                   "outbound_attempt_id TEXT, hold_sequence INTEGER NOT NULL DEFAULT 0)")
+                    direct.execute("INSERT INTO business(request_key,digest,payload,state) "
+                                   "VALUES('request','d','{}','HOLD')")
+                    direct.execute("CREATE TABLE hold_outbox (occurrence_id TEXT PRIMARY KEY, "
+                                   "request_key TEXT NOT NULL, hold_sequence INTEGER NOT NULL, "
+                                   "occurred_at TEXT NOT NULL, expires_at TEXT NOT NULL, payload TEXT NOT NULL, "
+                                   "delivery_state TEXT NOT NULL DEFAULT 'PENDING', delivery_note TEXT)")
+                    direct.execute("INSERT INTO hold_outbox VALUES(?,?,?,?,?,?,?,?)",
+                                   ('request#hold-1', 'request', 1, '', '9999-01-01T00:00:00+00:00', '{}',
+                                    'SENT', None))
+                    direct.execute("CREATE TABLE hold_delivery (occurrence_id TEXT NOT NULL, "
+                                   "channel TEXT NOT NULL, state TEXT NOT NULL, note TEXT, "
+                                   "PRIMARY KEY(occurrence_id,channel))")
+                    direct.execute("INSERT INTO hold_delivery VALUES(?,?,?,?)",
+                                   ('request#hold-1', 'ops', 'SENT', None))
+            ledger = self.ledger(directory)
+            migrated = self.outbox(ledger)[0]
+            self.assertTrue(migrated['notification_id'])  # Backfilled opaque ids stay unique.
+            sent = []
+            notifier = HoldNotifier(ledger, channels=('ops',),
+                                    client=lambda channel, body: sent.append(body))
+            self.assertEqual(notifier.deliver_pending(now=FIXED), [])  # SENT stays settled, no resend.
+            self.assertEqual(sent, [])
+            ledger.hold('request')  # HOLD → HOLD keeps the single occurrence.
+            self.assertEqual([r['occurrence_id'] for r in self.outbox(ledger)], ['request#hold-1'])
+            with self.assertRaises(sqlite3.IntegrityError):  # The unique id index is in force.
+                with closing(sqlite3.connect(path)) as direct:
+                    with direct:
+                        direct.execute("INSERT INTO hold_outbox(occurrence_id,notification_id,request_key,"
+                                       "hold_sequence,occurred_at,expires_at,payload) VALUES(?,?,?,?,?,?,?)",
+                                       ('other#hold-1', migrated['notification_id'], 'other', 1, '', '', '{}'))
+
     def test_body_carries_only_opaque_fields(self):
         with TemporaryDirectory() as directory:
             ledger, binding, job = self.prepared(directory, screen_base='https://harbor.invalid')
@@ -145,7 +186,7 @@ class HoldNotificationTests(unittest.TestCase):
             payload = json.loads(row['payload'])
             self.assertEqual(payload, {
                 'classification': 'INTERVENTION_REQUIRED', 'notification_id': row['notification_id'],
-                'business_ref': business_ref('request'), 'occurred_at': FIXED.isoformat(),
+                'occurred_at': FIXED.isoformat(),
                 'expires_at': (FIXED + timedelta(hours=1)).isoformat(),
                 'screen_url': f'https://harbor.invalid/work/{row["notification_id"]}'})
             self.assertNotIn('?', payload['screen_url'])
@@ -162,9 +203,9 @@ class HoldNotificationTests(unittest.TestCase):
             with self.assertRaises(KeyError):
                 reader.read('0' * 32)
 
-    def test_screen_base_must_be_a_protected_origin(self):
+    def test_screen_base_must_be_a_protected_https_origin(self):
         with TemporaryDirectory() as directory:
-            for base in ('http://fleet.example/', 'https://harbor.invalid/ops?token=1',
+            for base in ('http://fleet.example/', 'http://localhost:8040/', 'https://harbor.invalid/ops?token=1',
                          'https://user:pw@harbor.invalid/', 'https://harbor.invalid/#frag'):
                 with self.subTest(base=base):
                     with self.assertRaises(ValueError):
@@ -204,10 +245,30 @@ class HoldNotificationTests(unittest.TestCase):
                                     client=lambda channel, body: sent.append((channel, body)))
             self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=5)), ['request#hold-1'])
             self.assertEqual([channel for channel, _ in sent], ['ops'])
-            self.assertEqual(sent[0][1]['business_ref'], business_ref('request'))
+            self.assertEqual(sent[0][1]['notification_id'], self.outbox(ledger)[0]['notification_id'])
             self.assertEqual(self.deliveries(ledger)[0]['state'], 'SENT')
             self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=6)), [])
             self.assertEqual(len(sent), 1)
+
+    def test_final_channel_state_never_hides_or_overwrites_another_channel(self):
+        with TemporaryDirectory() as directory:
+            ledger, binding, job = self.prepared(directory)
+            ledger.hold('request')
+            first = HoldNotifier(ledger, channels=('a',), client=lambda channel, body: None)
+            self.assertEqual(first.deliver_pending(now=FIXED + timedelta(minutes=5)), ['request#hold-1'])
+            sent = []
+            wider = HoldNotifier(ledger, channels=('a', 'b'),
+                                 client=lambda channel, body: sent.append(channel))
+            self.assertEqual(wider.deliver_pending(now=FIXED + timedelta(minutes=6)), ['request#hold-1'])
+            self.assertEqual(sent, ['b'])  # The missing b attempt runs; settled a is not resent.
+            ledger.resume_arm('request', self.client(job), now=FIXED)  # HOLD ends afterwards.
+            sent.clear()
+            after = HoldNotifier(ledger, channels=('a', 'c'),
+                                 client=lambda channel, body: sent.append(channel))
+            self.assertEqual(after.deliver_pending(now=FIXED + timedelta(minutes=7)), [])
+            self.assertEqual(sent, [])  # a stays final; the late c only settles as rejected.
+            states = {d['channel']: d['state'] for d in self.deliveries(ledger)}
+            self.assertEqual(states, {'a': 'SENT', 'b': 'SENT', 'c': 'REJECTED'})
 
     def test_later_failure_does_not_resend_an_already_sent_occurrence(self):
         with TemporaryDirectory() as directory:
@@ -232,6 +293,26 @@ class HoldNotificationTests(unittest.TestCase):
             notifier.client = lambda channel, body: sent.append(body['notification_id'])
             self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=6)), ['second#hold-1'])
             self.assertEqual(sent, [notifications['request'], notifications['second']])  # No resend.
+
+    def test_definite_failure_retries_only_after_the_interval(self):
+        with TemporaryDirectory() as directory:
+            ledger, binding, job = self.prepared(directory)
+            ledger.hold('request')
+            calls = []
+
+            def client(channel, body):
+                calls.append(1)
+                if len(calls) == 1:
+                    raise DefiniteDeliveryFailure('refused before the connection')
+            notifier = HoldNotifier(ledger, channels=('ops',), client=client)
+            start = FIXED + timedelta(minutes=5)
+            self.assertEqual(notifier.deliver_pending(now=start), [])
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(notifier.deliver_pending(now=start + timedelta(seconds=30)), [])
+            self.assertEqual(len(calls), 1)  # Spacing: the retry waits out the interval.
+            self.assertEqual(notifier.deliver_pending(now=start + timedelta(seconds=60)), ['request#hold-1'])
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(self.deliveries(ledger)[0]['state'], 'SENT')
 
     def test_timeout_on_one_channel_is_unknown_while_the_other_is_sent(self):
         with TemporaryDirectory() as directory:
@@ -272,14 +353,31 @@ class HoldNotificationTests(unittest.TestCase):
             ledger.hold('request')
             with closing(sqlite3.connect(Path(directory) / 'ledger.db')) as direct:  # A crashed send.
                 with direct:
-                    direct.execute("INSERT INTO hold_delivery VALUES(?,?,?,?)",
-                                   ('request#hold-1', 'ops', 'SENDING', None))
+                    direct.execute("INSERT INTO hold_delivery VALUES(?,?,?,?,?)",
+                                   ('request#hold-1', 'ops', 'SENDING', None, None))
             sent = []
             notifier = HoldNotifier(ledger, channels=('ops',),
                                     client=lambda channel, body: sent.append(body['notification_id']))
             self.assertEqual(notifier.deliver_pending(now=FIXED + timedelta(minutes=5)), [])
             self.assertEqual(sent, [])
             self.assertEqual(self.deliveries(ledger)[0]['state'], 'UNKNOWN')
+
+    def test_second_notifier_during_a_send_leaves_it_unknown_and_unclaimed(self):
+        with TemporaryDirectory() as directory:
+            ledger, binding, job = self.prepared(directory)
+            ledger.hold('request')
+            late = []
+
+            def client(channel, body):
+                # A restart racing the in-flight send settles SENDING before the result lands.
+                HoldNotifier(ledger, channels=('ops',), client=lambda c, b: late.append(c))
+                late.append('first-send-done')
+            first = HoldNotifier(ledger, channels=('ops',), client=client)
+            self.assertEqual(first.deliver_pending(now=FIXED + timedelta(minutes=5)), [])  # Not claimed.
+            delivery = self.deliveries(ledger)[0]
+            self.assertEqual(delivery['state'], 'UNKNOWN')
+            self.assertIn('Interrupted send', delivery['note'])
+            self.assertEqual(late, ['first-send-done'])  # The racing notifier sent nothing either.
 
     def test_expired_occurrence_is_rejected_without_sending(self):
         with TemporaryDirectory() as directory:

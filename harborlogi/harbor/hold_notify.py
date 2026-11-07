@@ -1,18 +1,16 @@
 """Business HOLD notification outbox (ROSY D-997 Decision 6, Harbor row).
 
 Each non-HOLD → HOLD transition of the business ledger records one occurrence
-in the same SQLite transaction. Notification bodies carry only opaque
-identifiers — never the business request key — and the screen link resolves
-through the outbox notification id. Delivery attempts hold per-(occurrence,
+in the same SQLite transaction. Notification bodies carry only the opaque
+notification id — never the business request key — and the screen link points
+at the HTTPS-protected work screen. Delivery attempts hold per-(occurrence,
 channel) state, send outside any SQLite write lock, and treat an unclear
-submission (timeout, ambiguous failure, restart) as UNKNOWN with no automatic
-resend. The platform notification delivery service itself is still a target of
-ROSY D-997, not an existing dependency.
+submission (timeout, ambiguous failure, interrupted send) as UNKNOWN with no
+automatic resend. The platform notification delivery service itself is still
+a target of ROSY D-997, not an existing dependency.
 """
 from contextlib import closing
-from datetime import datetime, timezone
-import hashlib
-import ipaddress
+from datetime import datetime, timedelta, timezone
 import json
 import secrets
 from urllib.parse import urlsplit
@@ -20,6 +18,7 @@ from urllib.parse import urlsplit
 from harbor.model import aware_time, identifier
 
 CLASSIFICATION = "INTERVENTION_REQUIRED"
+RETRY_INTERVAL = timedelta(seconds=60)
 
 OUTBOX_SCHEMA = """
     CREATE TABLE IF NOT EXISTS hold_outbox (
@@ -28,9 +27,22 @@ OUTBOX_SCHEMA = """
         occurred_at TEXT NOT NULL, expires_at TEXT NOT NULL, payload TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS hold_delivery (
         occurrence_id TEXT NOT NULL, channel TEXT NOT NULL,
-        state TEXT NOT NULL, note TEXT,
+        state TEXT NOT NULL, note TEXT, attempted_at TEXT,
         PRIMARY KEY(occurrence_id,channel));
 """
+
+
+def migrate_outbox(c):
+    """Bring an earlier unmerged outbox shape up to the notification-id and attempt-time schema."""
+    columns = {r[1] for r in c.execute("PRAGMA table_info(hold_outbox)")}
+    if "notification_id" not in columns:
+        c.execute("ALTER TABLE hold_outbox ADD COLUMN notification_id TEXT")
+        for row in c.execute("SELECT occurrence_id FROM hold_outbox").fetchall():
+            c.execute("UPDATE hold_outbox SET notification_id=? WHERE occurrence_id=?",
+                      (new_notification_id(), row[0]))
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS hold_outbox_notification ON hold_outbox(notification_id)")
+    if "attempted_at" not in {r[1] for r in c.execute("PRAGMA table_info(hold_delivery)")}:
+        c.execute("ALTER TABLE hold_delivery ADD COLUMN attempted_at TEXT")
 
 
 class DefiniteDeliveryFailure(Exception):
@@ -50,23 +62,16 @@ def new_notification_id():
     return secrets.token_hex(16)
 
 
-def business_ref(key):
-    return hashlib.sha256(key.encode()).hexdigest()[:16]
-
-
 def validated_screen_base(value):
-    """HTTPS (or loopback HTTP) work-screen base without credentials, query, or fragment."""
+    """HTTPS-only base for the protected (login) work screen; the link must not point at a
+    local-only surface, so plain HTTP — loopback included — is rejected."""
     if value is None:
         return None
     parsed = urlsplit(value)
-    try:
-        local = parsed.hostname == 'localhost' or ipaddress.ip_address(parsed.hostname).is_loopback
-    except ValueError:
-        local = False
-    if (not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment
-            or parsed.scheme not in {'https', 'http'} or (parsed.scheme == 'http' and not local)
-            or parsed.path not in ('', '/') or any(ord(c) <= 32 for c in value) or '\\' in value):
-        raise ValueError("Expected an HTTPS (or loopback HTTP) work screen base without credentials or query")
+    if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or parsed.path not in ('', '/')
+            or any(ord(c) <= 32 for c in value) or '\\' in value):
+        raise ValueError("Expected an HTTPS work screen base without credentials or query")
     parsed.port  # Reject malformed ports before emitting any link.
     return value.rstrip('/')
 
@@ -81,9 +86,9 @@ def record_hold(c, key, sequence, *, notification_id, now, expires_at, screen_ur
     aware_time(now)
     aware_time(expires_at)
     occurrence = occurrence_id(key, sequence)
-    # Only the D-997 fields: classification, opaque ids, times, and the tokenless link.
+    # Only the D-997 fields: classification, the opaque occurrence id, times, and the
+    # tokenless link. Business correlation happens on the protected screen, not here.
     payload = json.dumps({"classification": CLASSIFICATION, "notification_id": notification_id,
-                          "business_ref": business_ref(key),
                           "occurred_at": now.isoformat(), "expires_at": expires_at.isoformat(),
                           "screen_url": screen_url},
                          sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -117,11 +122,18 @@ def pre_send_check(c, occurrence, *, channel, channels, now):
     return dict(row)
 
 
+def _retry_ready(attempted_at, now):
+    return attempted_at is None or now - datetime.fromisoformat(attempted_at) >= RETRY_INTERVAL
+
+
 class HoldNotifier:
     """Delivery-side gate; without approved channels and a client nothing is sent (D-997 default).
 
     One attempt is: a short transaction marking SENDING, the network call with no
-    SQLite lock held, then a short transaction recording SENT / retry / UNKNOWN.
+    SQLite lock held, then a short transaction recording the outcome. A leftover
+    SENDING row from an interrupted send is settled to UNKNOWN once, at notifier
+    start; concurrent notifiers in one process are out of scope (the executor is
+    the single writer).
     """
 
     def __init__(self, ledger, *, channels=(), client=None):
@@ -132,6 +144,7 @@ class HoldNotifier:
             raise ValueError("Duplicate receiving channel")
         if self.client is not None and not self.channels:
             raise ValueError("A delivery client needs at least one approved receiving channel")
+        self._settle_inflight()
 
     def outbox(self):
         with closing(self.ledger._connect()) as c:
@@ -149,45 +162,58 @@ class HoldNotifier:
         aware_time(now)
         if not self.channels or self.client is None:
             return []  # External sending is off by default; the local HOLD and outbox stay untouched.
-        self._settle_inflight()
         sent = []
-        for occurrence in self._waiting():
+        for occurrence in self._waiting(now):
             for channel in self.channels:
-                if self._attempt(occurrence, channel, now) == "SENT":
+                if self._attempt(occurrence, channel, now):
                     sent.append(occurrence)
         return sent
 
     def _settle_inflight(self):
-        """A leftover SENDING row means the previous send's outcome is unknown (restart/crash)."""
+        """Once per notifier start: a leftover SENDING row means the send's outcome is unknown."""
         with closing(self.ledger._connect()) as c, c:
             c.execute("BEGIN IMMEDIATE")
             c.execute("UPDATE hold_delivery SET state='UNKNOWN',note=? WHERE state='SENDING'",
                       ("Interrupted send left the submission unclear",))
 
-    def _waiting(self):
+    def _waiting(self, now):
+        """Occurrences with at least one configured channel that has no row yet or a
+        retry-ready PENDING row; a final row on one channel never hides another
+        channel's missing attempt."""
         with closing(self.ledger._connect()) as c:
-            return [row[0] for row in c.execute(
-                "SELECT o.occurrence_id FROM hold_outbox o LEFT JOIN hold_delivery d "
-                "ON d.occurrence_id=o.occurrence_id "
-                "WHERE d.occurrence_id IS NULL OR d.state='PENDING' "
-                "GROUP BY o.occurrence_id ORDER BY o.occurred_at, o.occurrence_id")]
+            states = {(r[0], r[1]): (r[2], r[3]) for r in c.execute(
+                "SELECT occurrence_id, channel, state, attempted_at FROM hold_delivery")}
+            waiting = []
+            for row in c.execute("SELECT occurrence_id FROM hold_outbox "
+                                 "ORDER BY occurred_at, occurrence_id"):
+                for channel in self.channels:
+                    state, attempted_at = states.get((row[0], channel), (None, None))
+                    if state is None or (state == 'PENDING' and _retry_ready(attempted_at, now)):
+                        waiting.append(row[0])
+                        break
+            return waiting
 
     def _attempt(self, occurrence, channel, now):
+        """Run one attempt; True only when this call itself completed a send."""
         with closing(self.ledger._connect()) as c, c:
             c.execute("BEGIN IMMEDIATE")
+            settled = c.execute("SELECT state,attempted_at FROM hold_delivery "
+                                "WHERE occurrence_id=? AND channel=?", (occurrence, channel)).fetchone()
+            if settled is not None and settled["state"] != "PENDING":
+                return False  # SENT/UNKNOWN/REJECTED are final and stay untouched.
+            if settled is not None and not _retry_ready(settled["attempted_at"], now):
+                return False  # Retry spacing: leave the PENDING row for a later pass.
             try:
                 pre_send_check(c, occurrence, channel=channel, channels=self.channels, now=now)
             except ValueError as reason:
-                c.execute("INSERT INTO hold_delivery VALUES(?,?,?,?) ON CONFLICT(occurrence_id,channel) "
+                # The row is absent or PENDING here, so the settle cannot overwrite a final state.
+                c.execute("INSERT INTO hold_delivery VALUES(?,?,?,?,?) ON CONFLICT(occurrence_id,channel) "
                           "DO UPDATE SET state=excluded.state,note=excluded.note",
-                          (occurrence, channel, "REJECTED", str(reason)))
-                return "REJECTED"
-            settled = c.execute("SELECT state FROM hold_delivery WHERE occurrence_id=? AND channel=?",
-                                (occurrence, channel)).fetchone()
-            if settled is not None and settled["state"] != "PENDING":
-                return settled["state"]  # SENT/UNKNOWN/REJECTED are final.
-            c.execute("INSERT INTO hold_delivery VALUES(?,?,?,?) ON CONFLICT(occurrence_id,channel) "
-                      "DO UPDATE SET state='SENDING',note=NULL", (occurrence, channel, "SENDING", None))
+                          (occurrence, channel, "REJECTED", str(reason), now.isoformat()))
+                return False
+            c.execute("INSERT INTO hold_delivery VALUES(?,?,?,?,?) ON CONFLICT(occurrence_id,channel) "
+                      "DO UPDATE SET state='SENDING',note=NULL,attempted_at=excluded.attempted_at",
+                      (occurrence, channel, "SENDING", None, now.isoformat()))
             body = json.loads(c.execute("SELECT payload FROM hold_outbox WHERE occurrence_id=?",
                                         (occurrence,)).fetchone()[0])
         try:
@@ -199,6 +225,8 @@ class HoldNotifier:
         else:
             state, note = "SENT", None
         with closing(self.ledger._connect()) as c, c:
-            c.execute("UPDATE hold_delivery SET state=?,note=? WHERE occurrence_id=? AND channel=? "
-                      "AND state='SENDING'", (state, note, occurrence, channel))
-        return state
+            moved = c.execute("UPDATE hold_delivery SET state=?,note=? WHERE occurrence_id=? AND channel=? "
+                              "AND state='SENDING'", (state, note, occurrence, channel)).rowcount
+        # With moved==0 another notifier start settled the in-flight row; whatever it stored,
+        # this call did not complete its own recorded send.
+        return bool(moved and state == "SENT")
