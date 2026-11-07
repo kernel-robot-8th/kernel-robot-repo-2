@@ -32,19 +32,6 @@ OUTBOX_SCHEMA = """
 """
 
 
-def migrate_outbox(c):
-    """Bring an earlier unmerged outbox shape up to the notification-id and attempt-time schema."""
-    columns = {r[1] for r in c.execute("PRAGMA table_info(hold_outbox)")}
-    if "notification_id" not in columns:
-        c.execute("ALTER TABLE hold_outbox ADD COLUMN notification_id TEXT")
-        for row in c.execute("SELECT occurrence_id FROM hold_outbox").fetchall():
-            c.execute("UPDATE hold_outbox SET notification_id=? WHERE occurrence_id=?",
-                      (new_notification_id(), row[0]))
-        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS hold_outbox_notification ON hold_outbox(notification_id)")
-    if "attempted_at" not in {r[1] for r in c.execute("PRAGMA table_info(hold_delivery)")}:
-        c.execute("ALTER TABLE hold_delivery ADD COLUMN attempted_at TEXT")
-
-
 class DefiniteDeliveryFailure(Exception):
     """The channel refused the delivery before any ambiguity; a later retry is allowed."""
 
@@ -130,10 +117,9 @@ class HoldNotifier:
     """Delivery-side gate; without approved channels and a client nothing is sent (D-997 default).
 
     One attempt is: a short transaction marking SENDING, the network call with no
-    SQLite lock held, then a short transaction recording the outcome. A leftover
-    SENDING row from an interrupted send is settled to UNKNOWN once, at notifier
-    start; concurrent notifiers in one process are out of scope (the executor is
-    the single writer).
+    SQLite lock held, then a short transaction recording the outcome. The delivery
+    loop calls settle_interrupted() once at start to close rows an interrupted
+    send left in SENDING; reads and test helpers never write.
     """
 
     def __init__(self, ledger, *, channels=(), client=None):
@@ -144,7 +130,19 @@ class HoldNotifier:
             raise ValueError("Duplicate receiving channel")
         if self.client is not None and not self.channels:
             raise ValueError("A delivery client needs at least one approved receiving channel")
-        self._settle_inflight()
+
+    def settle_interrupted(self):
+        """Call once when the delivery loop starts: a leftover SENDING row means the send's
+        outcome is unknown (interrupted process). Reads and test helpers never settle."""
+        with closing(self.ledger._connect()) as c, c:
+            c.execute("BEGIN IMMEDIATE")
+            c.execute("UPDATE hold_delivery SET state='UNKNOWN',note=? WHERE state='SENDING'",
+                      ("Interrupted send left the submission unclear",))
+
+    def interrupted(self):
+        """In-flight rows another start left behind; visible only, never auto-resent."""
+        with closing(self.ledger._connect()) as c:
+            return c.execute("SELECT COUNT(*) FROM hold_delivery WHERE state='SENDING'").fetchone()[0]
 
     def outbox(self):
         with closing(self.ledger._connect()) as c:
@@ -168,13 +166,6 @@ class HoldNotifier:
                 if self._attempt(occurrence, channel, now):
                     sent.append(occurrence)
         return sent
-
-    def _settle_inflight(self):
-        """Once per notifier start: a leftover SENDING row means the send's outcome is unknown."""
-        with closing(self.ledger._connect()) as c, c:
-            c.execute("BEGIN IMMEDIATE")
-            c.execute("UPDATE hold_delivery SET state='UNKNOWN',note=? WHERE state='SENDING'",
-                      ("Interrupted send left the submission unclear",))
 
     def _waiting(self, now):
         """Occurrences with at least one configured channel that has no row yet or a

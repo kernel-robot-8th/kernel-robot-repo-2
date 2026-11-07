@@ -7,8 +7,8 @@ import math
 import sqlite3
 
 from harbor.ledger import business_row, plan_payload as _payload
-from harbor.hold_notify import (OUTBOX_SCHEMA, migrate_outbox, new_notification_id, record_hold,
-                                screen_url, validated_screen_base)
+from harbor.hold_notify import (OUTBOX_SCHEMA, new_notification_id, record_hold, screen_url,
+                                validated_screen_base)
 from harbor.model import YARD_ARMS, aware_time, identifier, identifiers, revision
 from harbor.process import ArmTransferBinding, ProcessBinding
 from harbor.execution import read_arm_execution, prepare_execution, submit_execution, read_cell_execution
@@ -148,7 +148,6 @@ class BusinessLedger:
                     PRIMARY KEY(source_id,evidence_id));
             """ + OUTBOX_SCHEMA)
             c.execute("BEGIN IMMEDIATE")
-            migrate_outbox(c)
             columns = {r[1] for r in c.execute("PRAGMA table_info(business)")}
             if "row_version" not in columns:
                 c.execute("ALTER TABLE business ADD COLUMN row_version INTEGER NOT NULL DEFAULT 0")
