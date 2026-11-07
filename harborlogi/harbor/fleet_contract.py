@@ -11,6 +11,11 @@ def trip_steps(intent):
 
 
 def trip_digest(intent):
+    """The only place Harbor computes a trip request_digest (ROSY D-908/D-996 must hash the same bytes).
+
+    ROSY will add object_ref to this body only when it is non-null; the exact form is pending, so the
+    change lands on the `value` line below and nowhere else.
+    """
     value = {"candidates": list(intent.candidates), "steps": trip_steps(intent)}
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
                                     ensure_ascii=True, allow_nan=False).encode()).hexdigest()

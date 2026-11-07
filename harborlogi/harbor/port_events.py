@@ -3,8 +3,9 @@
 Harbor reads R's `GET /api/fleet/port-events` with an opaque cursor it stores per Fleet connection
 and never parses. Each `event_id` is consumed once, and a cargo only moves forward:
 EXPECTED (declared on a trip) -> TRIP_ARRIVED -> RECEIVED_AT_INTAKE -> STORING -> COMPLETED.
-HOLD reasons are MISMATCH, UNKNOWN and LOST. Identity is only what ROSY read (`observed`) or a named
-person confirmed (`attested`); an UNREADABLE cargo waits for that person. Storing runs through the
+HOLD reasons are MISMATCH, UNKNOWN, LOST and DAMAGED. Identity is only what ROSY read (`observed`) or a
+named person confirmed (`attested`); an UNREADABLE cargo waits for that person. The LOST timeout only
+runs once R has answered on the connection, so a missing endpoint never ages cargo into LOST. Storing runs through the
 existing business ledger and a ROSY ARM proposal that a named operator approves.
 """
 from contextlib import closing
@@ -171,12 +172,12 @@ class IntakeLedger:
                                  intake_point=event["intake_point"], attention=None)
         elif kind == "container.stored":
             done = self._advance(c, row, "COMPLETED", now, identity=event["identity"], slot_ref=event["slot_ref"])
-        elif event["reason"] in ("MISMATCH", "LOST"):
+        elif event["reason"] != "UNREADABLE":  # handling_failed means a person must handle it (MISMATCH, LOST, DAMAGED)
             done = row["state"] not in ("HOLD", "COMPLETED")
             if done:
                 c.execute("UPDATE intake SET state='HOLD',hold_reason=?,updated_at=?,version=version+1 "
                           "WHERE object_ref=?", (event["reason"], now.isoformat(), ref))
-        else:  # UNREADABLE waits for a named person; DAMAGED is flagged for people, not a Harbor HOLD reason.
+        else:  # UNREADABLE waits for a named person's attestation instead of a HOLD.
             done = row["state"] not in ("HOLD", "COMPLETED")
             if done:
                 c.execute("UPDATE intake SET attention=?,version=version+1 WHERE object_ref=?", (event["reason"], ref))
@@ -201,11 +202,17 @@ class IntakeLedger:
                           (connection, cursor))
         return outcomes
 
-    def expire(self, *, now):
-        """HOLD LOST every cargo that waited on ROSY longer than the timeout; returns their refs."""
+    def expire(self, *, now, connection):
+        """HOLD LOST every cargo that waited on ROSY longer than the timeout; returns their refs.
+
+        Only after R has answered at least once on this connection (a stored cursor): before that the
+        endpoint may be missing or unreachable, and silence says nothing about the cargo.
+        """
         aware_time(now)
         with closing(self._connect()) as c, c:
             c.execute("BEGIN IMMEDIATE")
+            if c.execute("SELECT 1 FROM port_cursor WHERE connection=?", (connection,)).fetchone() is None:
+                return []
             rows = c.execute(f"SELECT object_ref, updated_at FROM intake WHERE state IN {WAITING_ON_ROSY}").fetchall()
             lost = [r["object_ref"] for r in rows
                     if now - datetime.fromisoformat(r["updated_at"]) > self.lost_after]
@@ -226,4 +233,4 @@ class IntakeLedger:
             raise ValueError("Unexpected port event page")
         events = [parse_event(e) for e in body["events"]]  # One bad event refuses the page; the cursor stays.
         outcomes = self.consume(events, now=now, connection=connection, cursor=body["cursor"])
-        return dict(outcomes=outcomes, complete=body["complete"], lost=self.expire(now=now))
+        return dict(outcomes=outcomes, complete=body["complete"], lost=self.expire(now=now, connection=connection))

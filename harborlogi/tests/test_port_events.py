@@ -4,6 +4,7 @@ from hashlib import sha256
 from pathlib import Path
 import tempfile
 import unittest
+from urllib.error import HTTPError
 
 from harbor.departure import DepartureLedger
 from harbor.port_events import IntakeLedger, parse_event
@@ -106,6 +107,23 @@ class PortEventTests(unittest.TestCase):
 
     def test_rosy_lost_report_holds_lost(self):
         self.poll(failed('LOST', 'C-1'))
+        self.assertEqual(self.state(), ('HOLD', 'LOST'))
+
+    def test_damaged_report_holds_for_a_person(self):
+        self.poll(received('C-1'), failed('DAMAGED', 'C-1'))
+        self.assertEqual(self.state(), ('HOLD', 'DAMAGED'))
+
+    def test_silent_endpoint_never_ages_cargo_into_lost(self):
+        def missing(method, path, body):
+            raise HTTPError(path, 404, 'Not Found', {}, None)
+        later = NOW + timedelta(hours=2)
+        with self.assertRaises(HTTPError):
+            self.ledger.poll(RosyClient(transport=missing), connection='fleet-r', now=later)
+        self.assertEqual(self.ledger.expire(now=later, connection='fleet-r'), [])
+        self.assertEqual(self.state(), ('TRIP_ARRIVED', None))
+        # Once R has answered on this connection, silence counts toward LOST.
+        result, _ = self.poll(complete=False, now=later)
+        self.assertEqual(result['lost'], ['C-1'])
         self.assertEqual(self.state(), ('HOLD', 'LOST'))
 
     def test_unreadable_waits_for_a_named_person(self):

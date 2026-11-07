@@ -53,5 +53,5 @@ def tick(registry, *, now):
                     intake.arrive(cargo, now=now)
         except Exception:
             continue  # One trip's failure never blocks the others; the original key is reconciled next tick.
-    intake.expire(now=now)  # An unreachable R still times cargo out as LOST.
+    intake.expire(now=now, connection=registry.config['origin'])  # An R that answered before, then went silent.
     return intake.poll(client, connection=registry.config['origin'], now=now)

@@ -29,8 +29,8 @@ ADR 0005는 S를 플랫폼 밖 단계로 두고, Harbor가 S 퇴피를 사람 �
 4. **소비 규칙.**
    - `event_id`는 한 번만 소비한다. 다시 오면 무시한다.
    - 화물 상태는 `TRIP_ARRIVED → RECEIVED_AT_INTAKE → STORING → COMPLETED`로 단조 전이만 한다. 늦게 온 사건이 상태를 되돌리지 않는다. 새로 생긴 업무 상태는 `RECEIVED_AT_INTAKE` 하나이고, 보관 단계는 기존 업무 장부(`BusinessLedger`)와 Fleet ARM 승인 경로가 맡는다.
-   - HOLD 사유는 `MISMATCH`(선언과 판독 불일치), `UNKNOWN`(이송에 선언되지 않은 화물이거나 화물 코드가 없음), `LOST`(시간 초과, 또는 ROSY가 `LOST`로 보고)다.
-   - `complete:false`는 닿지 않은 셀이 있다는 뜻이다. 진행 중인 화물을 HOLD하지 않고 다음 조회까지 기다린다. 정해진 시간 동안 사건이 없으면 `LOST`로 HOLD한다.
+   - HOLD 사유는 `MISMATCH`(선언과 판독 불일치), `UNKNOWN`(이송에 선언되지 않은 화물이거나 화물 코드가 없음), `LOST`(시간 초과, 또는 ROSY가 `LOST`로 보고), `DAMAGED`(ROSY가 손상으로 보고)다. `container.handling_failed`는 늘 사람 처리가 필요하다는 뜻이므로 `UNREADABLE`을 뺀 모든 사유는 HOLD다.
+   - `complete:false`는 닿지 않은 셀이 있다는 뜻이다. 진행 중인 화물을 HOLD하지 않고 다음 조회까지 기다린다. 정해진 시간 동안 사건이 없으면 `LOST`로 HOLD한다. 시간 초과는 그 연결에서 R이 한 번이라도 응답해 cursor가 저장된 뒤에만 센다. 엔드포인트가 아직 없거나(404) 닿지 않으면 화물을 `LOST`로 만들지 않는다.
 5. **신원 규칙.**
    - 개체 신원은 판독한 값(`identity: observed`) 또는 기명 사람 확인(`identity: attested`, ADR 0023 방식)으로만 맞춘다. 순서(FIFO)나 추정으로 완료까지 가지 않는다.
    - `object_ref`는 Harbor가 이송에 선언한 화물 코드(`Cargo.code`)다. ROSY는 해석하지 않고 그대로 나른다. 마커 번호와 `object_ref`의 짝은 ROSY marker-profile이 갖고, Harbor는 `marker_id`를 저장하지 않는다.
@@ -40,6 +40,6 @@ ADR 0005는 S를 플랫폼 밖 단계로 두고, Harbor가 S 퇴피를 사람 �
 
 ## 결과
 
-- 이송 제안(`POST /api/fleet/trip-proposals`)에 선택 필드 `object_ref`를 싣는다. ROSY 쪽 필드와 R 조회 경로가 착지하기 전에는 Harbor 소비기가 빈 결과 또는 연결 실패로 기다리기만 한다.
+- 이송 제안(`POST /api/fleet/trip-proposals`)에 선택 필드 `object_ref`를 싣는다. ROSY는 `object_ref`가 있을 때만 그것을 `request_digest`에 넣을 예정이다(정확한 직렬화는 미정). Harbor의 digest 계산은 `harbor/fleet_contract.py:trip_digest` 한 곳이다. ROSY 쪽 필드와 R 조회 경로가 착지하기 전에는 Harbor 소비기가 빈 결과 또는 연결 실패로 기다리기만 한다.
 - `harbor/port_events.py`가 사건 모델·화물별 상태·커서를 갖고, `harbor/departure.py`는 `vehicle.release_permitted`로만 출발을 허용한다.
 - 바뀌지 않는 것: 반출·재취급 업무 완료 조건(ADR 0005 결정 6의 A·B 부분), 사람 확인 출처 분리(ADR 0023), Fleet 승인 경계(ADR 0012·0015).
