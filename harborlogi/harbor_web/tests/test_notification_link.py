@@ -59,7 +59,7 @@ class NotificationLinkTests(TestCase):
     order = fixtures.ServicesTests.order
 
     def test_anonymous_gets_the_login_redirect_without_id_disclosure(self):
-        for url in (self.url, f"/work/n{'0' * 32}/", '/work/not-an-id/'):
+        for url in (self.url, f"/work/n{'0' * 32}/"):
             with self.subTest(url=url):
                 response = self.client.get(url)
                 self.assertEqual(response.status_code, 302)
@@ -85,3 +85,12 @@ class NotificationLinkTests(TestCase):
         for url in (f"/work/n{'0' * 32}/", '/work/not-an-id/', '/work/12345/'):
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url).status_code, 404)
+
+    def test_missing_ledger_setting_is_reported_not_folded_into_not_found(self):
+        self.client.force_login(self.viewer)
+        with patch.dict(os.environ, {'HARBOR_LEDGER_PATH': ''}):
+            self.assertEqual(self.client.get(self.url).status_code, 503)
+
+    def test_pre_prefix_hex_ids_are_not_links(self):
+        self.client.force_login(self.viewer)
+        self.assertEqual(self.client.get(f"/work/{self.notification[1:]}/").status_code, 404)

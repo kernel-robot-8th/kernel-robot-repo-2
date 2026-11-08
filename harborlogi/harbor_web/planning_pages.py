@@ -9,7 +9,6 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.http import Http404
 from django.views.decorators.http import require_http_methods
 
-from harbor.hold_notify import is_notification_id
 from harbor.ledger import ReadOnlyLedger
 from harbor_web import commands, human_evidence, services
 from harbor_web.auth import has_role, require_roles
@@ -137,10 +136,10 @@ def notification_work(request, notification_id):
     The opaque outbox id resolves through the same read-only ledger the workbench
     uses; authenticated operators land on the command's existing work screen.
     """
-    if not is_notification_id(notification_id):
-        raise Http404('통지 링크의 형식이 다릅니다.')
+    path = os.environ.get('HARBOR_LEDGER_PATH', '')
+    if not path:  # A deployment gap must not look like a bad link.
+        return render(request, 'error.html', dict(heading='업무 장부가 설정되지 않았습니다', reason='배포 설정(HARBOR_LEDGER_PATH)이 없어 통지가 가리키는 업무를 열 수 없습니다. 설정·연동 담당자가 확인해야 합니다.', return_url='/work/'), status=503)
     try:
-        path = os.environ['HARBOR_LEDGER_PATH']
         row = ReadOnlyLedger(path).read(notification_id)
     except (KeyError, ValueError, OSError, sqlite3.Error):
         raise Http404('통지가 가리키는 업무를 찾지 못했습니다.')
