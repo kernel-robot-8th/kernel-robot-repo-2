@@ -217,13 +217,11 @@ class SiteTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             cells.business_location("wait")
 
-    def test_conveyor_is_capacity_one_with_sensor_or_camera_evidence(self):
-        for conveyor in ({"capacity": 2, "occupancy_evidence": "camera"},
-                         {"capacity": 1, "occupancy_evidence": "planner"}):
-            data = self.site_data()
-            data["conveyor"] = conveyor
-            with self.subTest(conveyor=conveyor), self.assertRaises(ValueError):
-                Site.from_dict(data)
+    def test_conveyor_mechanics_are_not_harbor_configuration(self):
+        data = self.site_data()
+        data["conveyor"] = {"capacity": 1, "occupancy_evidence": "camera"}
+        with self.assertRaisesRegex(ValueError, "ADR 0029"):
+            Site.from_dict(data)
 
     def test_yard_arms_never_move_cargo_onto_the_conveyor_or_supply_bench(self):
         for edge in (["yard", "conveyor"], ["yard", "supply-bench"], ["supply-bench", "yard"]):

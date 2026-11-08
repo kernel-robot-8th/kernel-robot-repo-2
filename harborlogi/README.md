@@ -60,7 +60,7 @@ Harbor는 ROSY 코드를 import하지 않고 ROSY 계층 꼭대기 관제(현장
 |---|---|
 | `harbor/model.py` | 장치 칸·관측 시각·물리 보유·계획 기준 버전의 불변 값 |
 | `harbor/outbound.py` | 재취급·반출·복귀 순서의 결정적 제안 |
-| `harbor/site.py` | 적층암 A/B 2대(공급암 S는 외부 단계로 관측만), 이송 차량 3대, 컨베이어(용량 1), 업무 위치·셀 위치 두 층, 충전 한 자리, 직렬 이동 제약 |
+| `harbor/site.py` | 적층암 A/B 2대(S와 컨베이어 기구는 ROSY 셀 몫, ADR 0029), 이송 차량 3대, 업무 위치·셀 위치 두 층, 충전 한 자리, 직렬 이동 제약 |
 | `harbor/availability.py` | 수동 충전·대기·적재·정비·불명 이송 차량의 후보 제외 |
 | `harbor/process.py` | 기존 공정 문서 binding과 중립 ARM 물리 참조 binding, 반출 계획의 이동별 대응 |
 | `harbor/rosy_http.py` | 기존 Cell·TRIP와 중립 ARM 제안/조회·physical receipt의 HTTP 클라이언트. 승인·관측 제출은 제공하지 않음 |
