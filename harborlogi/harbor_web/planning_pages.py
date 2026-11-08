@@ -6,11 +6,16 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.http import Http404
 from django.views.decorators.http import require_http_methods
 
+from harbor.hold_notify import is_notification_id
+from harbor.ledger import ReadOnlyLedger
 from harbor_web import commands, human_evidence, services
 from harbor_web.auth import has_role, require_roles
 from harbor_web.models import Command, Plan
 from harbor_web.pipeline import COMMAND_LABELS, pipeline_for
 from harbor_web.views import page, paginate, reason_text, selected_observation
+
+import os
+import sqlite3
 
 
 class CommandForm(forms.Form):
@@ -122,6 +127,28 @@ def work_list(request):
     for command in context['page']:
         command.display_state = COMMAND_LABELS.get(command.state, '원래 실행 대조 필요')
     return page(request, 'work.html', section='work', q=q, state=state, **context)
+
+
+@require_roles('viewer', 'operator', 'admin')
+@require_http_methods(['GET'])
+def notification_work(request, notification_id):
+    """Open a HOLD notification link on the protected business screen (ADR 0029).
+
+    The opaque outbox id resolves through the same read-only ledger the workbench
+    uses; authenticated operators land on the command's existing work screen.
+    """
+    if not is_notification_id(notification_id):
+        raise Http404('통지 링크의 형식이 다릅니다.')
+    try:
+        path = os.environ['HARBOR_LEDGER_PATH']
+        row = ReadOnlyLedger(path).read(notification_id)
+    except (KeyError, ValueError, OSError, sqlite3.Error):
+        raise Http404('통지가 가리키는 업무를 찾지 못했습니다.')
+    command = (Command.objects.filter(key=row['request_key'][len('harbor:'):]).first()
+               if row['request_key'].startswith('harbor:') else None)
+    if command is None:
+        raise Http404('통지가 가리키는 업무를 찾지 못했습니다.')
+    return redirect(f'/work/{command.pk}/')
 
 
 @require_roles('viewer', 'operator', 'admin', 'field')

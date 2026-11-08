@@ -28,6 +28,7 @@ urlpatterns = [
     path('plans/<int:pk>/candidates/<int:rank>/', planning_pages.candidate_preview, name='candidate_preview'),
     path('work/', planning_pages.work_list, name='work'),
     path('work/<int:pk>/', planning_pages.work_detail, name='work_detail'),
+    path('work/<str:notification_id>/', planning_pages.notification_work, name='notification_work'),
     path('rearrangement/', rearrangement_pages.rearrangement_page, name='rearrangement'),
     path('field/', field_pages.field_list, name='field'),
     path('field/new/', field_pages.field_new, name='field_new'),
