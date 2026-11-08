@@ -114,3 +114,21 @@ class MultiOutboundMapTests(SimpleTestCase):
             area['role'] = 'storage' if area['id'] != 'yard' else area['role']
         with self.assertRaises(ValidationError):
             build_map(payload, draft)
+
+    def test_stack_rules_apply_to_resolved_areas_and_are_validated(self):
+        from harbor_web.map_config import build_map, editor_draft
+        payload = self.example()
+        rules = {a.area_id: a.stack_rule for a in services.map_areas(payload)}
+        self.assertEqual((rules['a_tmp'], rules['yard']), ('same', 'any'))
+        del payload['stack_rules']
+        self.assertEqual({a.stack_rule for a in services.map_areas(payload)}, {'any'})
+        for bad in ({'a_tmp': 'sometimes'}, {'ghost': 'same'}, ['a_tmp']):
+            payload['stack_rules'] = bad
+            with self.subTest(bad=bad), self.assertRaises(ValidationError):
+                services.constraints(payload)
+        payload = self.example()
+        draft = editor_draft(payload)
+        draft['areas'] = [a for a in draft['areas'] if a['id'] != 'b_sto']
+        rebuilt = build_map(payload, draft)['payload']
+        self.assertNotIn('b_sto', rebuilt['stack_rules'])
+        self.assertEqual(rebuilt['stack_rules']['a_sto'], 'same')

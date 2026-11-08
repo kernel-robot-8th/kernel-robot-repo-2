@@ -241,5 +241,13 @@
       "x": 4.2,
       "y": 4.4
     }
+  },
+  "stack_rules": {
+    "a_tmp": "same",
+    "a_sto": "same",
+    "a_out": "same",
+    "b_tmp": "same",
+    "b_sto": "same",
+    "b_out": "same"
   }
 }

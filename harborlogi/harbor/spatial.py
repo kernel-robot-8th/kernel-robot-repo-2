@@ -53,11 +53,42 @@ class Area:
     rows: int
     columns: int
     levels: int
+    # Design 33: 'any' keeps full-support-only stacking; 'same' accepts support only from cargo of
+    # equal length, orientation and anchor; 'same_1x1_on_wide' also lets a 1x1 sit on a wider cargo.
+    stack_rule: str = 'any'
 
     def __post_init__(self):
         identifier(self.area_id)
         for n, limit in ((self.rows, 12), (self.columns, 12), (self.levels, 6)):
             _integer(n, 1, limit)
+        if self.stack_rule not in STACK_RULES:
+            raise ValueError('Unknown stack rule')
+
+
+STACK_RULES = ('any', 'same', 'same_1x1_on_wide')
+
+
+def stack_ok(area, upper, n, lengths, by_id, occupied):
+    """The one place that decides whether the cargo below may support `upper` (design 33).
+
+    `occupied` maps (area, row, column, level) to cargo ids, `by_id` cargo ids to placements.
+    Full-support geometry is checked elsewhere; this only applies the area's size-mixing rule.
+    """
+    if area.stack_rule == 'any' or upper.level == 1:
+        return True
+    for cargo in {occupied.get((upper.area_id, r, c, level - 1)) for _, r, c, level in _cells(upper, n)} - {None}:
+        below = by_id[cargo]
+        if (lengths[cargo], below.orientation, below.row, below.column) == (n, upper.orientation, upper.row, upper.column):
+            continue
+        if area.stack_rule == 'same_1x1_on_wide' and n == 1:
+            continue
+        return False
+    return True
+
+
+def _cells(p, n):
+    return tuple((p.area_id, p.row + (i if p.orientation == 90 else 0),
+                  p.column + (i if p.orientation == 0 else 0), p.level) for i in range(n))
 
 
 @dataclass(frozen=True)
@@ -111,6 +142,10 @@ class SpatialSnapshot:
         if any(level > 1 and (area, row, column, level-1) not in occupied
                for area, row, column, level in occupied):
             raise ValueError('Cargo footprint requires full support')
+        by_id = {p.cargo_id: p for p in self.placements}
+        lengths = {s.cargo_id: s.length_cells for s in self.shapes}
+        if not all(stack_ok(areas[p.area_id], p, lengths[p.cargo_id], lengths, by_id, occupied) for p in self.placements):
+            raise ValueError('Cargo sizes may not be mixed in this area')
 
     def shape(self, cargo_id):
         return next(s for s in self.shapes if s.cargo_id == cargo_id)
@@ -533,9 +568,10 @@ def plan_rearrangement(snapshot: SpatialSnapshot, policy: SpatialPolicy,
         return tuple((p.area_id, p.row + (i if p.orientation == 90 else 0),
                       p.column + (i if p.orientation == 0 else 0), p.level) for i in range(n))
 
-    def fits(cells, occupied):
+    def fits(cells, occupied, upper=None, by_id=None):
         area = areas[cells[0][0]]
-        return all(r <= area.rows and c <= area.columns and l <= area.levels
+        return (upper is None or stack_ok(area, upper, len(cells), lengths, by_id, occupied)) and all(
+            r <= area.rows and c <= area.columns and l <= area.levels
                    and (a, r, c, l) not in occupied and (a, r, c, l) not in reserved
                    and (l == 1 or (a, r, c, l-1) in occupied) for a, r, c, l in cells)
 
@@ -547,7 +583,7 @@ def plan_rearrangement(snapshot: SpatialSnapshot, policy: SpatialPolicy,
         return any(n <= (max(o.rows, o.columns) if (p.area_id, o.area_id) in rotation_moves else
                          o.rows if p.orientation == 90 else o.columns) for o in outbound_lines)
 
-    def free_positions(occupied, n):
+    def free_positions(occupied, n, by_id):
         total = 0
         for area_id in policy.storage_areas:
             area = areas[area_id]
@@ -556,7 +592,7 @@ def plan_rearrangement(snapshot: SpatialSnapshot, policy: SpatialPolicy,
                     for row in range(1, area.rows+1):
                         for column in range(1, area.columns+1):
                             probe = Placement('probe', area_id, row, column, level, orientation)
-                            total += fits(footprint(probe, n), occupied)
+                            total += fits(footprint(probe, n), occupied, probe, by_id)
         return total
 
     def metrics(placements):
@@ -579,7 +615,7 @@ def plan_rearrangement(snapshot: SpatialSnapshot, policy: SpatialPolicy,
                 relation = order_relation(schedule.get(other), schedule.get(p.cargo_id))
                 blocked += relation == 'blocked'
                 unknown += relation == 'unknown'
-        free = {n: free_positions(occupied, n) for n in (1, 2, 3)}
+        free = {n: free_positions(occupied, n, by_id) for n in (1, 2, 3)}
         return (sum(not fits_outbound(p) for p in stored), sum(free[n] == 0 for n in pending_inbound),
                 blocked, unknown, cross, min(free.values()))
 
@@ -612,6 +648,7 @@ def plan_rearrangement(snapshot: SpatialSnapshot, policy: SpatialPolicy,
     def children(placements):
         nonlocal rotation_skipped
         occupied = occupancy(placements)
+        by_id = {p.cargo_id: p for p in placements}
         for origin in placements:
             n = lengths[origin.cargo_id]
             if (origin.area_id not in storage | temporary
@@ -630,7 +667,7 @@ def plan_rearrangement(snapshot: SpatialSnapshot, policy: SpatialPolicy,
                         for row in range(1, area.rows+1):
                             for column in range(1, area.columns+1):
                                 destination = Placement(origin.cargo_id, area_id, row, column, level, orientation)
-                                if destination == origin or not fits(footprint(destination, n), rest):
+                                if destination == origin or not fits(footprint(destination, n), rest, destination, by_id):
                                     continue
                                 arms = tuple(a for a in YARD_ARMS if all(
                                     (a, loc) in policy.arm_reach for loc in reach(origin) | reach(destination)))

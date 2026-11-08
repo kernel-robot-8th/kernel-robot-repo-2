@@ -50,6 +50,36 @@ L5의 후보가 여럿이면(두 팔 모두 야드 칸에 닿고 각자 반출 �
 | 창고 outbound staging lane | 출고 순서대로 줄에 모아 둔다. L3·L4와 같은 생각이다 |
 | pre-marshalling(Lee & Chao 2009, EJOR 196) | 반출 순서에 맞춰 미리 쌓는 순서를 바꾼다. L2·L3·설계32의 재배치와 같은 문제다 |
 
+## 크기를 섞어 쌓지 않는 규칙
+
+컨테이너의 쌓기 돌기와 바닥 오목은 30 mm 간격이고, 판의 1x1 칸은 32 mm 간격이다. 그래서 크기를 섞어 쌓으면 실물이 맞지 않는다.
+
+| 쌓기 | 계산 결과 |
+|---|---|
+| 1x1 셋 위 1x3 | 1.75 mm 떠서 앉지 못한다 |
+| 1x1 셋 위 1x2 | 0.85 mm 뜬다 |
+| 1x3 위 1x1 셋 | 앉기는 하지만 끝 칸이 1.8 mm 끌려간다 |
+| 같은 종류끼리 | 맞는다 |
+
+근거는 `Rosy/docs/workspace-records/2026-11-08/temp-slot-review/`의 `q3_*.py`, `q3_out30.txt`, `q3_out32.txt`다(ROSY 작업 공간 기록).
+
+영역마다 쌓기 규칙을 고른다. 규칙이 없으면 기존 동작(빈틈 없는 지지만 요구)과 같다.
+
+| 규칙 | 지지로 인정하는 경우 |
+|---|---|
+| `any`(기본) | 아래가 빈틈 없이 받치면 된다 |
+| `same` | 아래 화물이 위 화물과 `length_cells`·방향·앵커(행·열)가 모두 같을 때만 |
+| `same_1x1_on_wide` | `same`에 더해 1x1이 더 긴 화물 위에 앉는 경우. 끝 칸이 끌려가는 것을 감수하는 설정이다 |
+
+- 조건 payload의 선택 키 `stack_rules`에 `{영역 ID: 규칙}`으로 둔다. 예시 설정은 판 영역(`a_*`·`b_*`)에 `same`을 켜고 야드는 두지 않는다. 야드에 켤지는 설정으로 정한다.
+- 판정은 `harbor/spatial.py`의 `stack_ok` 한 곳이다. 관측 검증(`SpatialSnapshot`), `plan_spatial`의 목적지 투영, `plan_rearrangement`의 후보와 빈자리 계산, 자동 배치(`harbor/placement.py`, 관측 검증기를 최종 권한으로 쓴다), 지도 편집기의 payload 재구성이 이것을 거친다.
+- 1x3 위 1x1 허용 여부는 팀 결정이다. 기본은 거절한다.
+- 지도 편집기는 지운 영역의 규칙을 payload에서 함께 지운다. 편집 화면에서 규칙을 바꾸는 입력은 후속이다.
+
+### 층별 실물 위치 보정(후속)
+
+층이 올라가면 같은 칸이라도 실물 좌표가 달라진다. 쌓기 돌기와 칸 간격 차이, 컨테이너 높이 때문이다. 이 보정은 논리 지도가 아니라 설치 binding 쪽에서 층마다 가진다(설계29의 이동별 칸 대응). 이 문서의 구현은 보정값을 만들지 않고, 측정은 판이 설치된 뒤 한다.
+
 ## 구현 범위와 후속
 
 바꾼 것(코드는 `harborlogi/` 안):
@@ -60,7 +90,8 @@ L5의 후보가 여럿이면(두 팔 모두 야드 칸에 닿고 각자 반출 �
 - `site_config.py`가 `extra_outbound_stands`를 받아 검증한다(유일, 텍스트, 공간 영역 필요, 역할 겹침 금지).
 - 지도 편집기(`map_config.py`)는 반출 영역을 하나 이상 받는다. 하나만 있으면 `extra_outbound_stands` 키를 만들지 않아 기존 payload와 같다.
 - 화면 표시(`yard_view.py`, `operations.py`)는 모든 반출 영역을 "반출대"로 표시한다.
-- 시험: `tests/test_spatial_outbound_lines.py`, `harbor_web/tests/test_map_domain.py`의 `MultiOutboundMapTests`.
+- `Area.stack_rule`과 `stack_ok`로 영역별 쌓기 규칙을 넣었다(위 절).
+- 시험: `tests/test_spatial_outbound_lines.py`(`OutboundLineTests`, `StackRuleTests`), `harbor_web/tests/test_map_domain.py`의 `MultiOutboundMapTests`.
 
 ### 반출 영역이 하나라고 가정하는 곳(조사 목록)
 
@@ -93,3 +124,4 @@ L5의 후보가 여럿이면(두 팔 모두 야드 칸에 닿고 각자 반출 �
 2. 반출 줄 후보가 여럿일 때 고르는 기준.
 3. 보관 역할 줄(`a_sto`·`b_sto`)을 계획의 복귀 대상으로 쓸지.
 4. 반출 줄을 바꾸는 절차(새 지도 버전과 전체 재관측)를 운영 규칙으로 받아들일지.
+5. 판 영역의 쌓기 규칙을 `same`으로 둘지, 1x3 위 1x1(`same_1x1_on_wide`)을 허용할지, 야드에 켤지.

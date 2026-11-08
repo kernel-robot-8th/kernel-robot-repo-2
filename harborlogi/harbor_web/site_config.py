@@ -13,7 +13,7 @@ from harbor_web.service_common import _domain
 def constraints(payload, *, _validate_spatial=True):
     def build():
         required = {'outbound_stand', 'temporary_bays', 'allowed_moves', 'max_observation_age_seconds', 'conveyor', 'arm_reach'}
-        if not isinstance(payload, dict) or not required <= set(payload) <= required | {'yard_layout', 'spatial_areas', 'spatial_moves', 'storage_areas', 'area_presentation', 'extra_outbound_stands'}:
+        if not isinstance(payload, dict) or not required <= set(payload) <= required | {'yard_layout', 'spatial_areas', 'spatial_moves', 'storage_areas', 'area_presentation', 'extra_outbound_stands', 'stack_rules'}:
             raise ValueError('Condition requires exactly the documented keys.')
         for name in ('temporary_bays', 'allowed_moves', 'arm_reach'):
             if not isinstance(payload[name], list):
@@ -47,7 +47,7 @@ def constraints(payload, *, _validate_spatial=True):
             referenced = {p for edge in payload['allowed_moves'] for p in edge} | {edge[1] for edge in payload['arm_reach']}
             if not referenced <= known:
                 raise ValueError('Moves and reach must reference configured grid or auxiliary locations.')
-        if _validate_spatial and any(k in payload for k in ('spatial_areas', 'spatial_moves', 'storage_areas', 'area_presentation', 'extra_outbound_stands')):
+        if _validate_spatial and any(k in payload for k in ('spatial_areas', 'spatial_moves', 'storage_areas', 'area_presentation', 'extra_outbound_stands', 'stack_rules')):
             spatial_policy(payload)
             area_presentation(payload)
         return PortConstraints(payload['outbound_stand'], tuple(payload['temporary_bays']),
@@ -105,7 +105,14 @@ def _map_areas(payload):
     if not isinstance(items, list) or len(items) > 15 or any(not isinstance(a, dict) or
             set(a) != {'area_id', 'rows', 'columns', 'levels'} for a in items):
         raise ValueError('Spatial areas require explicit dimensions.')
-    areas = (Area('yard', layout.rows, layout.columns, layout.levels), *(Area(**a) for a in items))
+    from harbor.spatial import STACK_RULES
+    rules = payload.get('stack_rules', {})
+    if not isinstance(rules, dict) or any(not isinstance(v, str) or v not in STACK_RULES for v in rules.values()):
+        raise ValueError('Stack rules map area identifiers to known rules.')
+    areas = (Area('yard', layout.rows, layout.columns, layout.levels, rules.get('yard', 'any')),
+             *(Area(**a, stack_rule=rules.get(a['area_id'], 'any')) for a in items))
+    if not rules.keys() <= {a.area_id for a in areas}:
+        raise ValueError('Stack rules must reference configured areas.')
     identifiers = [a.area_id for a in areas]
     if len(set(identifiers)) != len(identifiers):
         raise ValueError('Spatial areas must be unique; yard is configured by yard_layout.')

@@ -52,5 +52,50 @@ class OutboundLineTests(unittest.TestCase):
         self.assertEqual(base.outbound_areas, ('a_out', 'b_out'))
 
 
+class StackRuleTests(unittest.TestCase):
+    """Design 33: 30 mm studs vs 32 mm plate pitch, so sizes are not mixed on plate areas."""
+
+    def stack(self, rule, below, above):
+        # below/above: (cargo_id, length, row, column, orientation)
+        def build(rule):
+            areas = (Area('yard', 3, 3, 3), Area('a_tmp', 1, 3, 3, rule))
+            cargo = [(*below, 1), (*above, 2)]
+            shapes = tuple(CargoShape(c[0], c[1], i + 1) for i, c in enumerate(cargo))
+            placements = tuple(Placement(c[0], 'a_tmp', c[2], c[3], c[5], c[4]) for c in cargo)
+            return SpatialSnapshot(4, NOW, LAYOUT, areas, shapes, placements)
+        return build(rule)
+
+    def test_same_size_stacks_and_mixed_sizes_are_refused(self):
+        self.stack('same', ('lo', 3, 1, 1, 0), ('hi', 3, 1, 1, 0))
+        self.stack('same', ('lo', 1, 1, 1, 0), ('hi', 1, 1, 1, 0))
+        for below, above in ((('lo', 3, 1, 1, 0), ('hi', 1, 1, 1, 0)), (('lo', 3, 1, 1, 0), ('hi', 2, 1, 1, 0)),
+                             (('lo', 2, 1, 1, 0), ('hi', 1, 1, 1, 0))):
+            with self.assertRaises(ValueError):
+                self.stack('same', below, above)
+
+    def test_default_rule_keeps_existing_behaviour(self):
+        self.stack('any', ('lo', 3, 1, 1, 0), ('hi', 1, 1, 1, 0))
+
+    def test_small_on_wide_only_when_configured(self):
+        self.stack('same_1x1_on_wide', ('lo', 3, 1, 1, 0), ('hi', 1, 1, 2, 0))
+        with self.assertRaises(ValueError):
+            self.stack('same_1x1_on_wide', ('lo', 1, 1, 1, 0), ('hi', 3, 1, 1, 0))
+
+    def plan_over_wide(self, rule):
+        # The only temporary spot is on top of a 1x3 cargo; the blocker is 1x1.
+        areas = (Area('yard', 3, 3, 3), Area('a_tmp', 1, 3, 2, rule), Area('a_out', 1, 3, 1))
+        shapes = (CargoShape('t', 1, 1), CargoShape('b', 1, 2), CargoShape('w', 3, 3))
+        source = SpatialSnapshot(4, NOW, LAYOUT, areas, shapes,
+                                 (Placement('t', 'yard', 1, 1, 1), Placement('b', 'yard', 1, 1, 2),
+                                  Placement('w', 'a_tmp', 1, 1, 1)))
+        pol = SpatialPolicy('a_out', ('a_tmp',), frozenset({('yard', 'a_tmp'), ('a_tmp', 'yard'), ('yard', 'a_out')}),
+                            frozenset(('A', c) for c in (*CELLS, 'a_tmp', 'a_out')), timedelta(minutes=1))
+        return plan_spatial(source, OutboundRequest('t', 4), pol, now=NOW)
+
+    def test_planner_does_not_stack_mixed_sizes_in_a_ruled_temporary_area(self):
+        self.assertEqual(self.plan_over_wide('any').status, 'READY')
+        self.assertEqual(self.plan_over_wide('same').status, 'HOLD')
+        self.assertEqual(self.plan_over_wide('same_1x1_on_wide').status, 'READY')
+
 if __name__ == '__main__':
     unittest.main()

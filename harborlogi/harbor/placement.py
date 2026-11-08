@@ -106,8 +106,11 @@ def plan_placement(snapshot: SpatialSnapshot, incoming: CargoShape, policy: Spat
                             continue
                         destination = Placement(incoming.cargo_id, area_id, row, column, level, orientation)
                         # Use the observation validator as the final geometry/support authority.
-                        replace(snapshot, shapes=snapshot.shapes+(incoming,),
-                                placements=snapshot.placements+(destination,))
+                        try:
+                            replace(snapshot, shapes=snapshot.shapes+(incoming,),
+                                    placements=snapshot.placements+(destination,))
+                        except ValueError:  # e.g. the area's stack rule (design 33)
+                            continue
                         lower = set()
                         pending = [occupied[a, r, c, level-1] for a, r, c, level in cells if level > 1]
                         # A crossing support can obstruct cargo outside the incoming footprint.

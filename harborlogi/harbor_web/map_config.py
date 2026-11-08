@@ -121,6 +121,10 @@ def build_map(source_payload, dto, *, source_id=None):
             temporary_bays=[a['id'] for a in normalized['areas'] if a['role'] == 'temporary'],
             outbound_stand=outbound[0], extra_outbound_stands=outbound[1:],
             area_presentation={a['id']: {k: a[k] for k in ('label', 'x', 'y')} for a in normalized['areas']})
+        rules = {k: v for k, v in payload.get('stack_rules', {}).items() if k in current}
+        payload.pop('stack_rules', None)
+        if rules:
+            payload['stack_rules'] = rules
         if not outbound[1:]:
             payload.pop('extra_outbound_stands')  # keep single-stand payloads byte-compatible
         unchanged_areas = {key for key, a in current.items() if key in previous and
