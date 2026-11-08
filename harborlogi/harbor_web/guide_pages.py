@@ -121,7 +121,7 @@ def integration(request):
         action = request.POST.get('action')
         form = ConnectionForm(request.POST, origins=origins) if action == 'save' else form
         command = form if action == 'save' else ConnectionVersionForm(request.POST)
-        if action not in {'save', 'check', 'producer'}:
+        if action not in {'save', 'check', 'producer', 'discover'}:
             from django.http import HttpResponseBadRequest
             return HttpResponseBadRequest('Unknown connection action.')
         if command.is_valid():
@@ -133,7 +133,7 @@ def integration(request):
                     bridge.set_human_confirmation(request.user, enabled=request.POST.get('enabled') == '1',
                                                   expected_version=command.cleaned_data['expected_version'])
                     messages.success(request, '사람 확인 생산자 설정을 저장했습니다.')
-                else:
+                elif action == 'check':
                     bridge.check_connection(request.user, **command.cleaned_data)
                 else:
                     discovered = bridge.discover_connections(request.user, **command.cleaned_data)
