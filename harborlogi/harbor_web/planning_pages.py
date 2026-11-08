@@ -1,3 +1,6 @@
+import os
+import sqlite3
+
 from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
@@ -13,9 +16,6 @@ from harbor_web.auth import has_role, require_roles
 from harbor_web.models import Command, Plan
 from harbor_web.pipeline import COMMAND_LABELS, pipeline_for
 from harbor_web.views import page, paginate, reason_text, selected_observation
-
-import os
-import sqlite3
 
 
 class CommandForm(forms.Form):
@@ -129,7 +129,7 @@ def work_list(request):
     return page(request, 'work.html', section='work', q=q, state=state, **context)
 
 
-@require_roles('viewer', 'operator', 'admin')
+@require_roles('viewer', 'operator', 'admin', 'field')  # same roles as work_detail, which narrows field staff
 @require_http_methods(['GET'])
 def notification_work(request, notification_id):
     """Open a HOLD notification link on the protected business screen (ADR 0029).

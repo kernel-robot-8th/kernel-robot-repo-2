@@ -74,6 +74,12 @@ class NotificationLinkTests(TestCase):
         response = self.client.get(self.url)
         self.assertRedirects(response, f'/work/{self.command.pk}/', fetch_redirect_response=False)
 
+    def test_field_staff_follow_the_link_like_the_work_screen(self):
+        # Same roles as /work/<pk>/: the work screen itself decides what field staff may see.
+        self.client.force_login(self.field)
+        response = self.client.get(self.url)
+        self.assertRedirects(response, f'/work/{self.command.pk}/', fetch_redirect_response=False)
+
     def test_unknown_or_malformed_ids_are_not_found_after_login(self):
         self.client.force_login(self.viewer)
         for url in (f"/work/n{'0' * 32}/", '/work/not-an-id/', '/work/12345/'):
