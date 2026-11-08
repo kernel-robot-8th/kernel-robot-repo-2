@@ -32,7 +32,7 @@ def scene_for(stages):
     right, y = first['layout']['columns'] + 1.2, 0
     for source in first.get('auxiliary_areas', []):
         area_id = source['area_id']
-        areas.append(dict(id=area_id, label={'temp': '임시 장치', 'temp_a': '임시 장치 A', 'temp_b': '임시 장치 B', 'stand': '반출대'}.get(area_id, area_id),
+        areas.append(dict(id=area_id, label={'temp': '임시 장치', 'stand': '반출대'}.get(area_id, area_id),
             x=right, y=y, **source['layout']))
         y += source['layout']['rows'] + 1.2
     for bay in first.get('auxiliary_bays', []):

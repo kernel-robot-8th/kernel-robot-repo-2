@@ -133,7 +133,7 @@ def area_presentation(payload):
             result = {'yard': dict(label='장치 야드', x=0, y=0)}
             right, y = areas[0].columns + 1.2, 0
             for area in areas[1:]:
-                result[area.area_id] = dict(label={'temp': '임시 장치', 'temp_a': '임시 장치 A', 'temp_b': '임시 장치 B', 'stand': '반출대'}.get(area.area_id, area.area_id), x=right, y=y)
+                result[area.area_id] = dict(label={'temp': '임시 장치', 'stand': '반출대'}.get(area.area_id, area.area_id), x=right, y=y)
                 y += area.rows + 1.2
             return result
         source = payload['area_presentation']
