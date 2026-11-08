@@ -41,6 +41,8 @@ python -m harbor
 
 ## Harbor와 ROSY의 경계
 
+Harbor·통합관제 R·셀 관제·CORE/OMX owner·공통 Account/Monitoring/Media·학습·호스트의 상세 책임은 [Harbor와 ROSY의 책임](docs/responsibilities.md)에 정리한다([ADR0028](docs/adr/0028-control-units-device-owners-and-hosts.md)). 같은 PC에서 실행하는 것, 공통 사람 로그인, 작업 승인, 최종 장치 명령은 서로 다른 경계다. N100은 R의 목표이며 실제 이전·처리 용량·현장 수용 완료를 뜻하지 않는다.
+
 제품 웹은 저장된 요청·관측 revision으로 기존 계획 엔진의 재취급→반출→복귀 또는 공간/관측 HOLD를 계산한다. 기존 preview의 `/planning`은 고정 합성 입력이다. 실제 인증 관측 producer·입고 planner·전체 공정/현장 수용은 미완료이며 물리 receipt만으로 전체 업무를 완료하지 않는다.
 
 | Harbor가 하는 일 | ROSY가 하는 일 |
