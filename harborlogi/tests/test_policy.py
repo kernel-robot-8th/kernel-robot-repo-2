@@ -122,6 +122,19 @@ class OutboundTests(unittest.TestCase):
                 proposal = self.plan(rules=replace(constraints(), arm_reach=reach))
                 self.assertEqual((proposal.status, proposal.reason, proposal.moves), ("HOLD", reason, ()))
 
+    def test_per_arm_temporary_bays_pick_one_an_arm_can_serve(self):
+        # A plate per arm: temp_a only A reaches, temp_b only B; the yard row here only B reaches.
+        snapshot = YardSnapshot(3, NOW, (Bay("yard", ("outbound", "rehandle"), 3), Bay("temp_a", (), 3),
+                                         Bay("temp_b", (), 3), Bay("stand", (), 1)))
+        rules = PortConstraints("stand", ("temp_a", "temp_b"), frozenset({
+            ("yard", "temp_a"), ("temp_a", "yard"), ("yard", "temp_b"), ("temp_b", "yard"), ("yard", "stand"),
+        }), timedelta(seconds=5), "conveyor",
+            frozenset({("A", "temp_a"), ("B", "yard"), ("B", "temp_b"), ("B", "stand")}))
+        proposal = self.plan(snapshot, rules)
+        self.assertEqual(proposal.status, "READY")
+        self.assertEqual([(m.cargo_id, m.source, m.destination, m.primary_arm) for m in proposal.moves], [
+            ("rehandle", "yard", "temp_b", "B"), ("outbound", "yard", "stand", "B"), ("rehandle", "temp_b", "yard", "B")])
+
     def test_supply_arm_s_cannot_be_in_the_reach_table(self):
         with self.assertRaises(ValueError):
             replace(constraints(), arm_reach=REACH | {("S", "yard")})
@@ -199,8 +212,8 @@ class SiteTests(unittest.TestCase):
 
     def test_two_location_layers(self):
         cells = Site.from_dict(self.site_data()).cell_locations
-        self.assertEqual([cells.business_location(c) for c in ("yard", "temp", "stand", "conveyor", "supply-bench")],
-                         ["yard", "yard", "outbound_point", None, None])
+        self.assertEqual([cells.business_location(c) for c in ("yard", "temp_a", "temp_b", "stand", "conveyor", "supply-bench")],
+                         ["yard", "yard", "yard", "outbound_point", None, None])
         with self.assertRaises(ValueError):
             cells.business_location("wait")
 
