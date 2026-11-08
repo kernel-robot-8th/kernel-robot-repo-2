@@ -25,6 +25,8 @@ D-856 첫 중립 이송 흐름은 API reference **v1.298**의 `GET /api/fleet/tr
 
 D-908 이송 제안은 API reference **v1.329**의 `/api/fleet/trip-proposals`(제안 POST·`request_key` 조회, 시뮬레이션 프로필 전용, 아니면 503)를 소비한다. 서비스 신원이 제안만 하고 승인은 다른 named operator가 한다. 앱 측 규칙은 [이송 제안 경로](execution.md#이송-제안-경로-d-908-api-v1329)에 있다. 실제 Fleet 대상 시험은 **미검증**이다.
 
+ADR 0029의 반입 사건은 R의 `GET /api/fleet/port-events?after=<cursor>&limit=<1..200>`(ROSY D-996)을 소비한다. Harbor는 불투명 cursor를 Fleet 연결마다 저장해 그대로 돌려보내고, 사건 4개를 `harbor/port_events.py`에서 화물별 단조 상태로 바꾼다. 이송 제안에는 선택 필드 `object_ref`(화물 코드)를 싣는다. 두 필드 모두 ROSY 착지 전이며 실제 Fleet 대상 시험은 **미검증**이다.
+
 기준 플랫폼: `647223ec39b8d68b5ad724faf7f070e30aa0f283`(공개 main, 2026-11-05), API reference 문서 **v1.361**. R이 물리 근거·재확인을 셀로 중계하는 v1.356을 포함한다. 이 커밋으로 `--full-flow`, `--arm-only`, R을 거친 `--arm-via-r`와 `--full-flow --via-r` 각 5회를 통과했다([2026-11-06 기록](validation/2026-11-06-evidence-through-r.md)). D-908 이송 제안 경로(PR #26)는 가짜 Fleet 단위 시험만 거쳤다. 이전 기준은 `ed455ea03af48100085c32487ba11a56ce80c085`(v1.355, [2026-11-04 기록](validation/2026-11-04-pinned-full-flow.md))다. 이 기준은 시뮬레이션 Fleet 계약이며, 운영 R의 설치 버전과는 다르다(운영 R은 [경계 점검](validation/2026-11-04-rosy-boundary-audit.md) 참조).
 
 - 앱 모델·계획·배치·수동 후보 제외는 내부 업무 값이다. ROSY wire 타입·실행 원장·관측 원장을 복제하지 않는다.
