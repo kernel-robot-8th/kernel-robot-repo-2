@@ -34,4 +34,4 @@ Harbor 제품 코드와 ROSY 게이트는 틀리지 않았다. 낡은 것은 시
 - ROSY 기준 커밋을 올리거나 "호환된다"고 판단할 때 경로·필드 비교로 끝내지 않는다. `real_fleet_http`를 새 기준에 실제로 돌린다.
 - 야간 작업이 실패하면 첫 `hold`의 `reason`을 먼저 읽는다. 하나를 고친 뒤 다음 이유가 나올 수 있으니 통과할 때까지 다시 돌린다.
 - 야간 실패는 지금 아무에게도 알리지 않는다. 결과를 보는 사람이나 알림을 정하기 전에는 주기적으로 `systemctl --user status rosy-harbor-nightly`를 확인한다.
-- Harbor 제품 코드는 Fleet 이송의 `HOLD` 이유를 화면에 옮기지 않는다(`harbor_web/intake_loop.py`). 현장에서 같은 보류가 나면 이유 없이 기다리다 만료로 보일 수 있다. 별도 작업이다.
+- Harbor 제품 코드는 Fleet 이송의 `HOLD` 이유를 화면에 옮기지 않는다(`harbor_web/intake_loop.py`). 입고·이송 상태를 보여 주는 화면도 아직 없다. 현장에서 같은 보류가 나면 화물이 `EXPECTED`에 이유 없이 계속 남는다(만료는 `TRIP_ARRIVED`·`STORING`만 본다). 어디에 보일지는 팀 결정이 필요한 별도 작업이다.
