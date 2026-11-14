@@ -95,6 +95,8 @@ def documents(root: Path) -> dict:
 class Drive:
     """로봇 자세: 마지막으로 받은 goal 쪽으로 speed m/s로 간다. Fleet의 map_pose_port · lane_junction(임대 포함)."""
 
+    poses_in_robot_frame = True  # ROSY v1.383+(D-1010): 자세와 목표가 한 좌표계라고 선언하지 않으면 map_frame HOLD
+
     def __init__(self, MapPose, start=(0.0, 0.0), speed=0.5):
         self.MapPose = MapPose
         self.x, self.y, self.yaw, self.speed = start[0], start[1], 0.0, speed
@@ -346,6 +348,8 @@ class RealFleet:
                 return await super().navigation_goal(x, y, yaw, correlation_id=correlation_id)
 
         self.robot = SimRobot(ROBOT)
+        if hasattr(fakes, "fresh_power_health"):  # ROSY v1.365+: 배터리 근거 없으면 TRIP_BATTERY_UNCONFIRMED HOLD. 옛 기준엔 없다.
+            self.robot.power_health_value = fakes.fresh_power_health()
         console = FleetConsole([RobotEndpoint(ROBOT, "http://127.0.0.1:9", "robot-token")], [self.robot])
         tasks = FleetTaskService(FleetTaskStore(self.db), robot_ids=(ROBOT,))
         maps = SiteMapStore(self.db)
