@@ -39,14 +39,14 @@
 
 사람 신원은 공통 Account로 연동하고 Harbor는 자기 업무 역할·감사를 유지하는 방향이다. 사람 로그인, Harbor 서비스 principal, 셀 기명 승인, 독립 관측 producer 자격은 구별한다. 사람 비밀번호·operator 토큰·쿠키나 계정 DB를 앱끼리 복제해 연결하지 않는다.
 
-2026-11-08 확인: Rosy Account 로그인 수신기와 ADR0027은 [팀 PR #46](https://github.com/robotics-team-1213/harborlogi/pull/46)에서 검토 중이며 팀 main에 병합되지 않았다. 현재 팀 main의 Django 로그인과 목표 공통 Account 연동을 구별한다. 이 문서 갱신은 로그인 연동 구현·설치·운영 수용 완료를 뜻하지 않는다.
+2026-11-14 확인: Rosy Account 로그인 수신기와 [ADR0027](adr/0027-rosy-account-sign-in.md)은 팀 main에 병합되어 있다(커밋 3aac47f, 2026-11-08 [PR #46](https://github.com/robotics-team-1213/harborlogi/pull/46)). 로컬 계정 로그인은 복구용으로 남는다. 수신기는 `HARBOR_ROSY_ACCOUNT_FILE`이 있을 때만 켜지며, 이 시점 운영 Harbor에는 그 파일이 없고 ROSY 계정 등록부에 Harbor client도 없다(2026-11-14 읽기 전용 점검). 따라서 병합은 로그인 연동의 설치·운영 수용 완료를 뜻하지 않는다.
 
-## N100 목표와 실제 배치
+## 통합관제 R 호스트와 실제 배치
 
-N100·16GB / Ubuntu Server 24.04 LTS amd64는 통합관제 R의 목표 호스트다(2026-11-08 사용자 결정). Harbor의 모델 PC 임시 배치와 R 동거 방향은 [ADR0021의 2026-11-06 개정](adr/0021-harbor-runs-beside-integrated-control-r.md)을 따른다. 이번 기록으로 Harbor·셀·장치 서비스를 옮기지 않는다.
+통합관제 R의 호스트는 N100급 소형 컴퓨터(Intel N150·16GB·256GB)다. 2026-11-09 R이 기존 OMX 관제 PC(robttt)에서 이 호스트로 옮겨졌고, robttt는 팔 셀 호스트로 남는다. Harbor는 2026-11-12 모델 PC에서 이 R 호스트로 옮겨졌다(ROSY 운영 기록 기준. 2026-11-14 읽기 전용 점검에서 R 호스트의 Compose project `harbor`가 9443 포트로 도는 것과 모델 PC에 Harbor 포트·갱신 타이머가 없는 것을 확인했다). 이전 경과는 [ADR0021의 2026-11-14 개정](adr/0021-harbor-runs-beside-integrated-control-r.md)에 있다. 이 기록으로 Harbor·셀·장치 서비스를 옮기지 않는다.
 
 동거할 때도 Harbor의 Compose project·DB·TLS·서비스 자격을 구별한다. R은 ROSY의 기존 서명 site candidate, Harbor는 팀 CI가 만든 이미지 digest와 기존 갱신·백업·복원 절차를 따른다. 한쪽 이미지를 갱신했다고 다른 쪽의 배포·계약 수용이 확인되지는 않는다. 역할 격리는 같은 전원·OS의 장애 격리도 아니다.
 
-N100 설치 전에 실제 Fleet·Account·Monitoring·Harbor·영상·DB 서비스 집합과 동시 사용자/장치 수를 정하고 부하·발열·디스크 증가·관측 신선도·백업/복원·단절 복구를 확인한다. 기존 site 묶음 전체가 가볍다고 가정하지 않는다. R 단절 중 셀·장치의 기존 정지·복구 경계를 유지하며 재접속이나 DB 복원으로 자동 재실행·정지 해제·재무장하지 않는다.
+R 호스트의 처리 용량을 말하기 전에 실제 Fleet·Account·Monitoring·Harbor·영상·DB 서비스 집합과 동시 사용자/장치 수를 정하고 부하·발열·디스크 증가·관측 신선도·백업/복원·단절 복구를 확인한다. 기존 site 묶음 전체가 가볍다고 가정하지 않는다. R 단절 중 셀·장치의 기존 정지·복구 경계를 유지하며 재접속이나 DB 복원으로 자동 재실행·정지 해제·재무장하지 않는다.
 
-ROSY 쪽 실제 관제 배치의 정본은 [관제 단위 배포 안내](https://github.com/robotics-team-1213/rosy-platform/blob/main/docs/deployment/control-units.md), 공통 서비스의 소유·분류는 [공통 서비스 카탈로그](https://github.com/robotics-team-1213/rosy-platform/blob/main/docs/reference/common-services.md)다. 플랫폼의 N100·책임 정리 ADR D-994·D-995는 별도 게시 절차 중이므로 공개 반영과 실물 수용을 확인해서 사용한다.
+ROSY 쪽 실제 관제 배치의 정본은 [관제 단위 배포 안내](https://github.com/robotics-team-1213/rosy-platform/blob/main/docs/deployment/control-units.md), 공통 서비스의 소유·분류는 [공통 서비스 카탈로그](https://github.com/robotics-team-1213/rosy-platform/blob/main/docs/reference/common-services.md)다. 플랫폼의 통합관제 호스트·책임 정리 ADR D-994·D-995는 플랫폼 공개 저장소 main에 있다(2026-11-14 확인). 실물 수용은 ROSY의 검증 기록으로 따로 확인해서 사용한다.

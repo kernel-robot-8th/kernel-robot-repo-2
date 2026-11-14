@@ -34,7 +34,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     ports:
-      - "${HARBOR_HTTPS_PORT:-9443}:443"  # robttt 2026-11-04: 443·8443 rosy-site(R), 8543 CELL-A
+      - "${HARBOR_HTTPS_PORT:-9443}:443"  # R 호스트: 443·8443은 rosy-site(R)가 쓴다
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8060), 3).close()"]
       interval: 30s

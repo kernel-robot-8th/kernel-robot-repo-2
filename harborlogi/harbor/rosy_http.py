@@ -134,7 +134,7 @@ class RosyClient:
         return self._call("GET", "/api/fleet/port-events" + query, None)
 
     def execution_profile(self):
-        # Proposed read-only platform signal (ADR0022); no platform route exists yet, so every answer is unmet.
+        # Read-only platform signal (ADR0022). The platform route exists since v1.361; a build without it answers 404, which stays unmet.
         return self._call("GET", "/api/fleet/execution-profile", None)
 
     def request_recheck(self, mission_id, recheck_key):
