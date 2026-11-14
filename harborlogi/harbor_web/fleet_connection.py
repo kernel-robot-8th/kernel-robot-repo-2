@@ -10,7 +10,7 @@ from urllib.error import HTTPError, URLError
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from harbor.rosy_http import RosyClient
+from harbor.rosy_http import RosyClient, open_arm_incident_holds
 from harbor_web.coordination import queue_lock, serialized
 from harbor_web.models import Audit, Command, FleetConnection
 from harbor_web.services import _role
@@ -135,16 +135,31 @@ def _platform_signal(client):
                 isinstance(row, dict) and row.get('authenticated') is True for row in rows) for rows in lists) else 'UNMET')
 
 
+def _workcell_incident_probe(client):
+    """D-971 open arm incidents -> (arm_clear, arm_holds). Missing/unavailable routes stay UNMET."""
+    try:
+        holds = open_arm_incident_holds(client.workcell_observations())
+        return ('UNMET' if holds else 'MET'), holds
+    except HTTPError as error:
+        return ('UNMET' if _error_code(error)[0] in {404, 503} else 'UNKNOWN'), []
+    except (URLError, TimeoutError, OSError, ValueError, TypeError, AttributeError):
+        return 'UNKNOWN', []
+
+
 def probe_conditions(client, result):
     """Per-condition outcome of read-only GETs on keys that do not exist (ADR0022); nothing is created."""
     mission, key = 'harbor-probe-' + uuid.uuid4().hex, 'harbor-probe-' + uuid.uuid4().hex
     reason = result['reason']
+    arm_clear, arm_holds = _workcell_incident_probe(client)
+    if arm_holds:
+        result['arm_holds'] = arm_holds
     return dict(
         session='MET',
         arm='MET' if result['arm'] == 'READABLE' else 'UNMET' if reason == 'ARM_NOT_INSTALLED' else 'UNKNOWN',
         evidence=_probe(lambda: client.physical_evidence(mission), 'ARM_TRANSFER_JOB_NOT_FOUND'),
         recheck=_probe(lambda: client.recheck_read(mission, key), 'ARM_TRANSFER_JOB_NOT_FOUND'),
         proposal=_probe(lambda: client.trip_proposal_request(key), 'TRIP_PROPOSAL_NOT_FOUND'),
+        arm_clear=arm_clear,
         **dict(zip(('arm_live', 'auto_producer'), _platform_signal(client))))
 
 
