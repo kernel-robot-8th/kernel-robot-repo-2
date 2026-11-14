@@ -42,8 +42,8 @@ class FleetConnectionTests(TransactionTestCase):
                          io.BytesIO(json.dumps({'detail': {'code': code}}).encode()))
 
     def rest(self, code=None):
-        # evidence, recheck, proposal, execution-profile probes; a generic 404 means the route is absent
-        return [self.missing(code) for _ in range(4)]
+        # workcell-observations, evidence, recheck, proposal, execution-profile probes
+        return [self.missing(code) for _ in range(5)]
 
     def test_saved_connection_feeds_existing_execution_and_contains_no_token(self):
         self.save()
@@ -85,7 +85,7 @@ class FleetConnectionTests(TransactionTestCase):
                     result = bridge.check_connection(self.admin, expected_version=1)
                 self.assertEqual(result['reason'], expected)
                 self.assertNotEqual(result['status'], 'VERIFIED')
-                self.assertEqual(http.call_count, 6 if error else 1)
+                self.assertEqual(http.call_count, 7 if error else 1)
 
     def test_get_is_read_only_and_only_admin_can_change_or_probe(self):
         self.save()
@@ -213,3 +213,25 @@ class FleetConnectionTests(TransactionTestCase):
             with self.assertRaisesMessage(ValidationError, 'CONNECTION_CHANGED'):
                 bridge.check_connection(self.admin, expected_version=1)
         self.assertFalse(Audit.objects.filter(action='fleet.check').exists())
+
+    def test_workcell_observations_surfaces_d971_arm_holds_without_allowing_harbor_clear(self):
+        self.save()
+        held_snapshot = {'workcells': [{'workcell_id': 'cell-1', 'arms': [
+            {'source_id': 'arm_b', 'arm_id': 'arm-2', 'incidents': [
+                {'incident_id': 'inc-1', 'state': 'explained', 'decision': {'hold': True, 'reason': 'overload stall'},
+                 'explanation': {'assessment': {'type': 'overload', 'direction': 'stalled'}}},
+            ]},
+        ]}]}
+        with patch('harbor.rosy_http.RosyClient._http', side_effect=[
+            {'principal_id': 'harbor-service', 'role': 'service'}, self.missing(),
+            held_snapshot, *[self.missing() for _ in range(4)],
+        ]):
+            result = bridge.check_connection(self.admin, expected_version=1)
+        self.assertEqual(result['conditions']['arm_clear'], 'UNMET')
+        self.assertEqual(len(result['arm_holds']), 1)
+        self.client.force_login(self.admin)
+        with patch('harbor.rosy_http.RosyClient._http', side_effect=AssertionError('GET contacted Fleet')):
+            response = self.client.get('/settings/integration/')
+        self.assertContains(response, 'ROSY 작업셀 팔 사건 보류 중 (D-971)')
+        self.assertContains(response, 'overload stall')
+        self.assertContains(response, 'arm-2')
