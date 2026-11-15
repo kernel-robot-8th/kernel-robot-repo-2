@@ -50,11 +50,15 @@ def _write_access(path, values):
     """Replace the private access file atomically, keeping mode 0600."""
     descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix='.access-')
     try:
-        os.fchmod(descriptor, 0o600)
+        if hasattr(os, 'fchmod'):
+            os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
+            descriptor = None
             json.dump(values, stream)
         os.replace(temporary, path)
     except BaseException:
+        if descriptor is not None:
+            os.close(descriptor)
         if os.path.exists(temporary):
             os.unlink(temporary)
         raise

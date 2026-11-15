@@ -80,3 +80,21 @@ class EnsureFieldEpisodeTests(TestCase):
         result = product_preview.ensure_field_episode(self.actor, self.inbound)
         self.assertEqual(result.pk, episode.pk)
         self.assertEqual(before, list(FieldEpisode.objects.values_list('pk', 'version', 'state', 'assigned_to_id')))
+
+
+class WriteAccessTests(TestCase):
+    def test_replaces_access_file_atomically_and_cleans_up_on_error(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / 'access.json'
+            product_preview._write_access(target, {'username': 'first'})
+            self.assertEqual(json.loads(target.read_text(encoding='utf-8')), {'username': 'first'})
+            product_preview._write_access(target, {'username': 'second'})
+            self.assertEqual(json.loads(target.read_text(encoding='utf-8')), {'username': 'second'})
+            with patch('os.fdopen', side_effect=RuntimeError('boom')), self.assertRaises(RuntimeError):
+                product_preview._write_access(target, {'username': 'third'})
+            self.assertEqual(json.loads(target.read_text(encoding='utf-8')), {'username': 'second'})
+            self.assertEqual([p.name for p in Path(folder).iterdir()], ['access.json'])
