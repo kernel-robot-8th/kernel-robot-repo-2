@@ -150,8 +150,12 @@ class RosyClient:
         return self._call("GET", "/api/fleet/port-events" + query, None)
 
     def execution_profile(self):
-        # Proposed read-only platform signal (ADR0022); no platform route exists yet, so every answer is unmet.
+        # Read-only platform signal (ADR0022). The platform route exists since v1.361; a build without it answers 404, which stays unmet.
         return self._call("GET", "/api/fleet/execution-profile", None)
+
+    def workcell_observations(self):
+        """Read-only D-971 workcell observation and open arm incident status."""
+        return self._call("GET", "/api/fleet/workcell-observations", None)
 
     def request_recheck(self, mission_id, recheck_key):
         return self._call("POST", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/rechecks",
@@ -161,3 +165,55 @@ class RosyClient:
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 192 or any(ord(c) < 32 for c in reason):
             raise ValueError('Expected a short cancellation reason')
         return self._call('POST', '/api/fleet/arm-transfers/jobs/' + quote(mission_id, safe='') + '/cancel', {'reason': reason})
+
+
+def _clean_text(value, limit=200):
+    if not isinstance(value, str):
+        return ""
+    return " ".join("".join(" " if ord(c) < 32 or ord(c) == 127 else c for c in value).split())[:limit]
+
+
+def open_arm_incident_holds(snapshot):
+    """Extract held D-971 arm incidents from GET /api/fleet/workcell-observations; raises ValueError if malformed."""
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("workcells"), list):
+        raise ValueError("Invalid workcell observations payload")
+    holds = []
+    for cell in snapshot["workcells"]:
+        if not isinstance(cell, dict) or not isinstance(cell.get("arms"), list):
+            raise ValueError("Invalid workcell entry")
+        cell_id = _clean_text(cell.get("workcell_id") or "", 96)
+        for arm in cell["arms"]:
+            if not isinstance(arm, dict):
+                raise ValueError("Invalid arm entry")
+            incidents = arm.get("incidents", [])
+            if not isinstance(incidents, list):
+                raise ValueError("Invalid arm incidents entry")
+            held = []
+            for inc in incidents:
+                if not isinstance(inc, dict):
+                    raise ValueError("Invalid arm incident entry")
+                if inc.get("state") == "cleared":
+                    continue
+                decision = inc.get("decision")
+                # Fail closed like Fleet's ArmIncidentStore._holds: missing or malformed decision stays held.
+                if not isinstance(decision, dict) or decision.get("hold") is not False:
+                    held.append(inc)
+            if held:
+                first_decision = held[0].get("decision") if isinstance(held[0].get("decision"), dict) else {}
+                reason = _clean_text(first_decision.get("reason")) or "arm incident not cleared"
+                explanation = held[0].get("explanation") if isinstance(held[0].get("explanation"), dict) else None
+                assessment = explanation.get("assessment") if explanation and isinstance(explanation.get("assessment"), dict) else None
+                entry = {
+                    "workcell_id": cell_id,
+                    "source_id": _clean_text(arm.get("source_id") or "", 96),
+                    "arm_id": _clean_text(arm.get("arm_id") or "", 96),
+                    "incident_ids": [_clean_text(inc.get("incident_id") or "", 64) for inc in held[:16] if inc.get("incident_id")],
+                    "reason": reason,
+                }
+                if assessment and isinstance(assessment.get("type"), str):
+                    entry["assessment"] = {"type": _clean_text(assessment["type"], 64),
+                                           "direction": _clean_text(assessment.get("direction") or "", 64)}
+                holds.append(entry)
+                if len(holds) >= 16:
+                    return holds
+    return holds

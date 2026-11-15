@@ -56,6 +56,8 @@ def main():
             if parsed.path == '/api/fleet/session' and not parsed.query:
                 self.reply(200, dict(principal_id=principal if state['mode'] != 'mismatch' else 'synthetic-other-service',
                     role='operator' if state['mode'] == 'human-role' else 'service'))
+            elif parsed.path == '/api/fleet/workcell-observations' and not parsed.query:
+                self.reply(200, dict(workcells=[]))
             elif parsed.path == '/api/fleet/arm-transfers/jobs' and set(parse_qs(parsed.query)) == {'request_key'} and parse_qs(parsed.query)['request_key'][0].startswith('harbor-probe-'):
                 if state['mode'] == 'not-installed':
                     self.reply(503, dict(detail=dict(code='ARM_TRANSFER_JOB_UNAVAILABLE')))
@@ -142,8 +144,8 @@ def main():
             def safe_page():
                 assert token not in page.content(), 'Service token leaked into rendered HTML'
 
-            # A matched session also runs the ADR0022 readiness GETs: evidence, recheck, trip proposal, platform signal.
-            READINESS_PROBES = 4
+            # A matched session also runs the ADR0022 readiness GETs: workcell observations, evidence, recheck, trip proposal, platform signal.
+            READINESS_PROBES = 5
 
             def check(mode, reason, expected_requests):
                 state['mode'] = mode

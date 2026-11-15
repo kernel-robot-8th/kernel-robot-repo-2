@@ -1,6 +1,6 @@
 # Harbor 운영 설치 (Docker Compose)
 
-Harbor는 OMX 관제 PC에서 돌리지 않는다. 지금은 모델 PC에 임시로 두고, R 전용 PC가 준비되면 함께 옮긴다. 이미지는 CI가 만들고 PC는 받아서 실행만 한다. 결정과 아직 수용되지 않은 조건은 [ADR 0021](../../docs/adr/0021-harbor-runs-beside-integrated-control-r.md)에 있다.
+Harbor는 OMX 관제 PC(팔 셀 호스트)에서 돌리지 않는다. 2026-11-12부터 통합관제 R 호스트에서 R 옆에 둔다(ROSY 운영 기록 기준, 2026-11-14 점검으로 확인. 그 전에는 모델 PC에 임시로 있었다). 이미지는 CI가 만들고 PC는 받아서 실행만 한다. 결정과 아직 수용되지 않은 조건은 [ADR 0021](../../docs/adr/0021-harbor-runs-beside-integrated-control-r.md)에 있다.
 
 이 폴더의 구성은 R·CELL-A와 섞이지 않는다. Compose project 이름(`harbor`), 공개 포트, 데이터 volume(`harbor_harbor-data`), TLS 인증서, R이 발급한 서비스 principal을 각자 따로 둔다.
 
@@ -12,13 +12,13 @@ Harbor는 OMX 관제 PC에서 돌리지 않는다. 지금은 모델 PC에 임시
 
 ## 처음 설치
 
-R 호스트에서 이 저장소의 고정 커밋을 체크아웃한 뒤 실행한다. 비밀 값은 저장소 밖에 둔다.
+R 호스트(R과 같은 호스트)에서 이 저장소의 고정 커밋을 체크아웃한 뒤 실행한다. 비밀 값은 저장소 밖에 둔다.
 
 1. `harbor.env.example`을 저장소 밖(예: `~/.config/harbor/harbor.env`, 권한 600)에 복사하고 채운다. R origin·principal·token은 R 설치 담당자에게 받는다.
 2. 저장소 밖 폴더 두 개를 준비한다.
    - 설정 폴더: 설치 binding `bindings.json`을 넣는다. R 인증서가 사설 CA이면 `r-ca.pem`도 넣는다.
    - TLS 폴더: Harbor 자기 인증서 `fullchain.pem`과 `private-key.pem`을 넣는다. R 인증서를 빌려 쓰지 않는다.
-3. 환경 변수를 지정한다: `HARBOR_ENV_FILE`, `HARBOR_CONFIG_DIR`, `HARBOR_TLS_DIR`, `HARBOR_HOSTNAME`, `HARBOR_BACKUP_DIR`, 그리고 R·CELL-A와 겹치지 않는 `HARBOR_HTTPS_PORT`(기본 9443. 2026-11-04 robttt에서 443·8443은 rosy-site, 8543은 CELL-A가 쓴다. 설치 전에 `ss -ltn`으로 다시 확인한다).
+3. 환경 변수를 지정한다: `HARBOR_ENV_FILE`, `HARBOR_CONFIG_DIR`, `HARBOR_TLS_DIR`, `HARBOR_HOSTNAME`, `HARBOR_BACKUP_DIR`, 그리고 R·CELL-A와 겹치지 않는 `HARBOR_HTTPS_PORT`(기본 9443. R 호스트에서 443·8443은 rosy-site가 쓴다. 옛 robttt 설치 때는 8543도 CELL-A가 썼다. 설치 전에 `ss -ltn`으로 다시 확인한다).
 4. 다음 순서로 실행한다.
 
 ```bash
@@ -78,6 +78,17 @@ sudo systemctl enable --now harbor-autoupdate.timer
 ```
 
 `/opt/harbor/current`는 `/opt/harbor/releases/<digest 앞 12자>`를 가리키고, 그 안에 이미지의 `/app/deploy/compose`가 풀려 있어야 한다.
+
+## Rosy 계정 로그인 연결
+
+Rosy 계정으로 로그인하는 수신기는 팀 main에 병합되어 있다([ADR 0027](../../docs/adr/0027-rosy-account-sign-in.md)). 켜지 않으면 로컬 계정 로그인만 쓴다. 켜려면 다음을 한다.
+
+1. Account 등록부에 Harbor client를 만든다. callback은 `https://<Harbor 주소>/accounts/rosy/callback/`와 글자 그대로 같아야 하고, resource는 `site:<id>`다. 등록은 Account 관리자가 한다.
+2. 설정 폴더(`HARBOR_CONFIG_DIR`, 컨테이너 안 `/config`)에 JSON 파일을 둔다. 키는 `issuer`, `client_id`, `resource`, `callback` 네 개뿐이고 비밀 값은 넣지 않는다. 하나라도 틀리면 Harbor가 시작하지 않는다.
+3. env 파일에 `HARBOR_ROSY_ACCOUNT_FILE=/config/rosy-account.json`을 적고 `harbor`를 다시 띄운다.
+4. 팀원의 Harbor 권한(`harbor.*`)은 Rosy 계정 화면에서 준다.
+
+설치 상태(2026-11-14 읽기 전용 점검): R 호스트의 Harbor에는 `HARBOR_ROSY_ACCOUNT_FILE`이 없고 설정 폴더에도 해당 파일이 없으며, Account 등록부에 Harbor client도 없다. 즉 이 로그인은 아직 설치되지 않았다. Harbor 컨테이너에서 Account issuer의 `/api/fleet/auth/keys`에는 닿는다.
 
 ## 백업
 
