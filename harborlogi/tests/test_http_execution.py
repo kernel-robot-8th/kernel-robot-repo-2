@@ -137,6 +137,31 @@ class HttpTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "predates the ADR 0005 names"):
                 recovered.confirm("old", None, now=NOW)
 
+    def test_workcell_observations_extracts_open_arm_incident_holds_and_rejects_malformed(self):
+        from harbor.rosy_http import open_arm_incident_holds
+        payload = {"workcells": [{"workcell_id": "bench", "arms": [
+            {"source_id": "arm_a", "arm_id": "A", "incidents": [
+                {"incident_id": "c1", "state": "cleared", "decision": {"hold": True, "reason": "old"}},
+                {"incident_id": "g1", "state": "open", "decision": {"hold": False, "reason": "guard stop"}},
+            ]},
+            {"source_id": "arm_b", "arm_id": "B", "incidents": [
+                {"incident_id": "h1", "state": "explained", "decision": {"hold": True, "reason": "overload\nstop"},
+                 "explanation": {"assessment": {"type": "contact_or_collision", "direction": "negative", "verification": "unverified"}}},
+            ]},
+        ]}]}
+        seen_calls = []
+        client = RosyClient(transport=lambda m, p, b: (seen_calls.append((m, p, b)), payload)[1])
+        self.assertEqual(client.workcell_observations(), payload)
+        self.assertEqual(seen_calls, [("GET", "/api/fleet/workcell-observations", None)])
+        holds = open_arm_incident_holds(payload)
+        self.assertEqual(holds, [{
+            "workcell_id": "bench", "source_id": "arm_b", "arm_id": "B", "incident_ids": ["h1"],
+            "reason": "overload stop", "assessment": {"type": "contact_or_collision", "direction": "negative"},
+        }])
+        for bad in ({}, {"workcells": "bad"}, {"workcells": [{"arms": [{"incidents": "bad"}]}]}):
+            with self.assertRaises(ValueError):
+                open_arm_incident_holds(bad)
+
 
 if __name__ == "__main__":
     unittest.main()
