@@ -14,7 +14,8 @@ from harbor_web import commands, human_evidence, services
 from harbor_web.auth import has_role, require_roles
 from harbor_web.models import Command, Plan
 from harbor_web.pipeline import COMMAND_LABELS, pipeline_for
-from harbor_web.views import page, paginate, reason_text, selected_observation
+from harbor_web.presentation import reason_text
+from harbor_web.views import page, paginate, selected_observation
 
 
 class CommandForm(forms.Form):

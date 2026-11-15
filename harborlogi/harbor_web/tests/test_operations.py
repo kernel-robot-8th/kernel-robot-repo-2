@@ -212,6 +212,25 @@ class OperationsTests(TestCase):
         self.assertEqual((cancelled['status_label'], cancelled['action']), ('취소됨', '최신 기준으로 검토'))
         self.assertTrue(cancelled['href'].startswith(f'/requests/{other.pk}/'))
 
+    def test_overview_prefetches_inbound_episodes_without_n_plus_one_queries(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        orders = []
+        for idx in range(5):
+            order = self.order(self.cargo(f'IN-{idx}'), kind='INBOUND', sequence=idx + 1)
+            orders.append(order)
+            services.assign_episode(self.operator, order_id=order.pk, vehicle_id=f'veh-{idx}', assigned_to=self.field)
+        self.client.force_login(self.operator)
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        episode_queries = [q['sql'] for q in queries if 'harbor_web_fieldepisode' in q['sql'].lower()]
+        self.assertLessEqual(len(episode_queries), 2, f'Expected bulk prefetch + open count, got {len(episode_queries)}')
+        inbound_rows = [r for r in response.context['rows'] if r['order'].pk in {o.pk for o in orders}]
+        self.assertEqual(len(inbound_rows), 5)
+        self.assertTrue(all(r['status'] == 'OPEN' for r in inbound_rows))
+
     def completed_at(self, *ages):
         """One completed order per age, each saved through the real path so its audit row has that time."""
         from harbor_web.commands import _save
