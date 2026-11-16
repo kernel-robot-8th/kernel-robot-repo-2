@@ -151,3 +151,13 @@ class ConfigTests(TestCase):
         self.assertEqual(self.client.get('/accounts/rosy/').status_code, 404)
         self.assertEqual(self.client.get('/accounts/rosy/callback/').status_code, 404)
         self.assertEqual(self.client.get('/accounts/rosy/session/').status_code, 404)
+
+    def test_load_config_imports_before_django_apps_are_ready(self):
+        import importlib
+        from django.apps import apps
+        from django.core.exceptions import AppRegistryNotReady
+        path = self.write(CONFIG)
+        with mock.patch.object(apps, 'check_apps_ready', side_effect=AppRegistryNotReady):
+            reloaded = importlib.reload(rosy_account)
+            self.assertEqual(reloaded.load_config(path)['client_id'], 'harbor')
+        importlib.reload(rosy_account)
