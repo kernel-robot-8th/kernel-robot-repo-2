@@ -19,8 +19,6 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login, logout, user_logged_out
-from django.contrib.auth import views as auth_views
-from django.contrib.auth.models import Group, User
 from django.core.exceptions import ImproperlyConfigured
 from django.dispatch import receiver
 from django.http import Http404, JsonResponse
@@ -128,6 +126,7 @@ def _tokens(body):
 
 
 def _sync(user, names):
+    from django.contrib.auth.models import Group
     user.groups.remove(*user.groups.filter(name__in=ROLES))
     user.groups.add(*Group.objects.filter(name__in=names))
     if user.is_staff != ('admin' in names):
@@ -135,10 +134,18 @@ def _sync(user, names):
         user.save(update_fields=['is_staff'])
 
 
-class LoginView(auth_views.LoginView):
-    """The local form stays for recovery accounts; it offers the Rosy path when configured."""
-    def get_context_data(self, **kwargs):
-        return {**super().get_context_data(**kwargs), 'rosy_account': bool(settings.ROSY_ACCOUNT)}
+def __getattr__(name):
+    if name == 'LoginView':
+        from django.contrib.auth import views as auth_views
+
+        class LoginView(auth_views.LoginView):
+            """The local form stays for recovery accounts; it offers the Rosy path when configured."""
+            def get_context_data(self, **kwargs):
+                return {**super().get_context_data(**kwargs), 'rosy_account': bool(settings.ROSY_ACCOUNT)}
+
+        globals()['LoginView'] = LoginView
+        return LoginView
+    raise AttributeError(name)
 
 
 def start(request):
@@ -186,6 +193,7 @@ def callback(request):
     if not names:
         _revoke(tokens['refresh'])
         return _refuse(request, 'Rosy 계정에 Harbor 권한이 없습니다. 계정 관리자에게 harbor 권한을 요청하세요.')
+    from django.contrib.auth.models import User
     user, created = User.objects.get_or_create(username='rosy-' + claims['sub'])
     if created:
         user.set_unusable_password()
