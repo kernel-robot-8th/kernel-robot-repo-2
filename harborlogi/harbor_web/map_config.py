@@ -11,13 +11,22 @@ from harbor_web import services
 from harbor_web.models import clean_text
 
 
+def _grid(rows, columns, levels):
+    return dict(rows=rows, columns=columns, levels=levels, cells=[
+        dict(bay_id=f'Y{r}{c}', row=r, column=c) for r in range(1, rows + 1) for c in range(1, columns + 1)])
+
+
 def _fresh_payload():
-    return dict(outbound_stand='stand', temporary_bays=['temp'], conveyor='conveyor',
-        allowed_moves=[], arm_reach=[], spatial_moves=[], max_observation_age_seconds=60,
-        yard_layout=dict(rows=3, columns=3, levels=3, cells=[
-            dict(bay_id=f'Y{r}{c}', row=r, column=c) for r in range(1, 4) for c in range(1, 4)]),
-        spatial_areas=[dict(area_id='temp', rows=1, columns=1, levels=3),
-                       dict(area_id='stand', rows=1, columns=1, levels=1)], storage_areas=['yard'])
+    """The cell site map (2026-11-17 panel): ship yard 3x6x3, one 3x3x3 temp plate per arm, a 1x3 stand; 1x3 slots.
+    Reach is left empty: a new draft grants no arm until the site's reach is registered."""
+    return dict(outbound_stand='stand', temporary_bays=['temp_a', 'temp_b'], conveyor='conveyor',
+        allowed_moves=[], arm_reach=[], spatial_moves=[], max_observation_age_seconds=60, slot_cells=3,
+        yard_layout=_grid(3, 6, 3),
+        spatial_areas=[dict(area_id='temp_a', rows=3, columns=3, levels=3), dict(area_id='temp_b', rows=3, columns=3, levels=3),
+                       dict(area_id='stand', rows=1, columns=3, levels=1)], storage_areas=['yard'],
+        # as the cell stands: plate A and B beside the ship, the stand past the stern on arm A's side
+        area_presentation=dict(yard=dict(label='장치 야드(배)', x=0, y=0), temp_a=dict(label='임시 장치 A', x=0, y=-4.2),
+                               temp_b=dict(label='임시 장치 B', x=0, y=4.2), stand=dict(label='반출대', x=7.2, y=-4.2)))
 
 
 def editor_draft(source_payload=None):
@@ -26,7 +35,7 @@ def editor_draft(source_payload=None):
         # Legacy bay names carry no measured row/column mapping.
         if 'yard' in {payload['outbound_stand'], payload['conveyor'], *payload['temporary_bays']}:
             raise ValidationError('Legacy auxiliary ID yard conflicts with the reserved primary area.')
-        payload['yard_layout'] = _fresh_payload()['yard_layout']
+        payload['yard_layout'] = _grid(3, 3, 3)  # legacy bay payloads keep the old 3x3 default
     if 'spatial_areas' not in payload:
         payload['spatial_areas'] = [dict(area_id=key, rows=1, columns=1, levels=3)
             for key in payload['temporary_bays']]
