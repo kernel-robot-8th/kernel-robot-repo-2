@@ -3,6 +3,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from harbor.layout import YardLayout
+from harbor.stacking import STACK_RULES, _cells, stack_ok  # re-exported: callers import them from here
 from harbor.model import (YARD_ARMS, CargoHolding, OutboundRequest, aware_time,
                           identifier, identifiers, revision)
 
@@ -63,32 +64,6 @@ class Area:
             _integer(n, 1, limit)
         if self.stack_rule not in STACK_RULES:
             raise ValueError('Unknown stack rule')
-
-
-STACK_RULES = ('any', 'same', 'same_1x1_on_wide')
-
-
-def stack_ok(area, upper, n, lengths, by_id, occupied):
-    """The one place that decides whether the cargo below may support `upper` (design 33).
-
-    `occupied` maps (area, row, column, level) to cargo ids, `by_id` cargo ids to placements.
-    Full-support geometry is checked elsewhere; this only applies the area's size-mixing rule.
-    """
-    if area.stack_rule == 'any' or upper.level == 1:
-        return True
-    for cargo in {occupied.get((upper.area_id, r, c, level - 1)) for _, r, c, level in _cells(upper, n)} - {None}:
-        below = by_id[cargo]
-        if (lengths[cargo], below.orientation, below.row, below.column) == (n, upper.orientation, upper.row, upper.column):
-            continue
-        if area.stack_rule == 'same_1x1_on_wide' and n == 1:
-            continue
-        return False
-    return True
-
-
-def _cells(p, n):
-    return tuple((p.area_id, p.row + (i if p.orientation == 90 else 0),
-                  p.column + (i if p.orientation == 0 else 0), p.level) for i in range(n))
 
 
 @dataclass(frozen=True)
@@ -180,12 +155,22 @@ class SpatialPolicy:
     storage_areas: tuple[str, ...] = ('yard',)
     # Design 33: one outbound line per arm plate; outbound_area stays the primary (legacy) one.
     extra_outbound_areas: tuple[str, ...] = ()
+    slot_cells: int | None = None  # fixed container slots: cargo starts only at a slot boundary (site map 3x6)
 
     @property
     def outbound_areas(self):
         return (self.outbound_area, *self.extra_outbound_areas)
 
+    def aligned(self, row, column, orientation):
+        """Whether a footprint anchored here fills a slot: slots run along the columns, so a site with fixed
+        slots takes 0 degrees from a slot's first column only. Without slots any cell and turn may anchor."""
+        if self.slot_cells is None:
+            return True
+        return orientation == 0 and (column - 1) % self.slot_cells == 0
+
     def __post_init__(self):
+        if self.slot_cells is not None:
+            _integer(self.slot_cells, 1, 6)
         identifiers(self.outbound_areas)
         identifiers(self.temporary_areas)
         identifiers(self.storage_areas)
@@ -370,6 +355,8 @@ def plan_spatial(snapshot: SpatialSnapshot, request: OutboundRequest, policy: Sp
                         for orientation in ((origin.orientation,) if snapshot.shape(cargo).length_cells == 1
                                             or (origin.area_id, area_id) not in rotation_moves
                                             else (origin.orientation, 90-origin.orientation)):
+                            if not policy.aligned(row, column, orientation):
+                                continue
                             candidates += 1
                             choices.append(Placement(cargo, area_id, row, column, level, orientation))
         if restore:
@@ -591,6 +578,8 @@ def plan_rearrangement(snapshot: SpatialSnapshot, policy: SpatialPolicy,
                 for level in range(1, area.levels+1):
                     for row in range(1, area.rows+1):
                         for column in range(1, area.columns+1):
+                            if not policy.aligned(row, column, orientation):
+                                continue
                             probe = Placement('probe', area_id, row, column, level, orientation)
                             total += fits(footprint(probe, n), occupied, probe, by_id)
         return total
@@ -666,6 +655,8 @@ def plan_rearrangement(snapshot: SpatialSnapshot, policy: SpatialPolicy,
                     for level in range(1, area.levels+1):
                         for row in range(1, area.rows+1):
                             for column in range(1, area.columns+1):
+                                if not policy.aligned(row, column, orientation):
+                                    continue
                                 destination = Placement(origin.cargo_id, area_id, row, column, level, orientation)
                                 if destination == origin or not fits(footprint(destination, n), rest, destination, by_id):
                                     continue
