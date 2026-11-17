@@ -60,3 +60,19 @@ class ModuleBoundaryTests(unittest.TestCase):
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                     self.assertNotIn(node.func.attr, ('propose_arm', 'arm_request', 'arm_job', 'physical_receipt',
                                                       'trip', 'trip_request', 'trip_propose', 'trip_proposal_request', 'compile', 'cancel_arm'), name)
+
+    def test_commands_internal_import_fanout_does_not_grow(self):
+        tree = ast.parse((ROOT / 'harbor_web/commands.py').read_text(encoding='utf8'))
+        modules = {
+            node.module for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith(('harbor.', 'harbor_web.'))
+        } | {
+            alias.name for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names if alias.name.startswith(('harbor.', 'harbor_web.'))
+        }
+        self.assertLessEqual(len(modules), 15, f'commands.py internal fan-out grew: {sorted(modules)}')
+
+    def test_spatial_module_does_not_grow_past_ratchet(self):
+        lines = (ROOT / 'harbor/spatial.py').read_text(encoding='utf8').splitlines()
+        self.assertLessEqual(len(lines), 725)
