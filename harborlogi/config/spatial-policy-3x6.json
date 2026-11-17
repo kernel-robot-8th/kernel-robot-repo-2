@@ -15,8 +15,8 @@
     ["B", "temp_b"]
   ],
   "spatial_areas": [
-    {"area_id": "temp_a", "rows": 3, "columns": 3, "levels": 1},
-    {"area_id": "temp_b", "rows": 3, "columns": 3, "levels": 1},
+    {"area_id": "temp_a", "rows": 3, "columns": 3, "levels": 3},
+    {"area_id": "temp_b", "rows": 3, "columns": 3, "levels": 3},
     {"area_id": "stand", "rows": 1, "columns": 3, "levels": 1}
   ],
   "spatial_moves": [["yard", "yard"], ["yard", "temp_a"], ["temp_a", "yard"], ["yard", "temp_b"], ["temp_b", "yard"], ["yard", "stand"]],
