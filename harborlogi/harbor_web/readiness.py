@@ -19,6 +19,8 @@ CONDITIONS = [
      'R 중계의 physical-evidence·rechecks 경로 착지를 기다리세요.'),
     ('arm_live', '플랫폼이 운영 프로필에서 실물 ARM 실행을 공개', True, 'READINESS_ARM_EXECUTION_UNANNOUNCED', 'ROSY',
      '플랫폼 공개 신호를 요청합니다(ADR0022 「플랫폼에 요청」).'),
+    ('arm_clear', 'ROSY 작업셀 팔 사건 보류 없음 (D-971)', True, 'READINESS_WORKCELL_INCIDENT_HOLD', 'ROSY',
+     'ROSY 셀 관측 화면에서 열린 팔 사건을 확인·해제한 뒤 연결을 다시 확인하세요.'),
     ('producer', '근거 생산자: 사람 확인 켜짐+현장 확인자 1명 이상, 또는 인증된 자동 생산자 공개', True,
      'READINESS_EVIDENCE_PRODUCER_REQUIRED', 'Harbor 관리자',
      '관리자가 사람 확인 생산자를 켜고 현장 확인 권한 사용자를 지정하세요.'),
@@ -27,6 +29,8 @@ CONDITIONS = [
      '합성 관측으로는 운영 실행하지 않습니다. 사람 선언 관측은 사람 확인 생산자를 켠 동안에만 씁니다(2026-11-04 사용자 결정).'),
     ('proposal', 'R 이송 제안 경로 설치', False, 'READINESS_PROPOSAL_UNMET', 'ROSY',
      '표시 전용입니다. 웹 실행기는 ARM만 쓰므로 이송 단계가 생길 때 관문에 넣습니다.'),
+    ('port_events', 'R 항만 이벤트 조회 경로 설치', False, 'READINESS_PORT_EVENTS_UNMET', 'ROSY',
+     '표시 전용입니다. 이 경로가 없는 R에서는 입고 도착·하역 기록이 자동으로 들어오지 않습니다.'),
 ]
 REASONS = {code for _, _, _, code, _, _ in CONDITIONS if code} | {'READINESS_CHECK_REQUIRED', 'READINESS_CHECK_STALE'}
 
@@ -72,7 +76,7 @@ def states(plan, check):
         # confirmation is the evidence producer (user decision 2026-11-04); other provenances are authenticated.
         observation='UNKNOWN' if plan is None else _observation_state(plan.observation.provenance))
     value['producer'] = 'MET' if found.get('auto_producer') == 'MET' or human_confirmation_ready() else 'UNMET'
-    for key in ('arm', 'arm_live', 'proposal'):
+    for key in ('arm', 'arm_live', 'arm_clear', 'proposal', 'port_events'):
         value[key] = found.get(key) if found.get(key) in {'MET', 'UNMET'} else 'UNKNOWN'
     return value
 
@@ -101,6 +105,7 @@ def table(check):
     age = timezone.now() - check.created_at if check else None
     stale = age is None or not timedelta(0) <= age <= MAX_AGE
     return dict(stale=stale, checked_at=check.created_at if check else None, max_minutes=int(MAX_AGE.total_seconds() // 60),
+        arm_holds=(check.detail.get('arm_holds') or []) if check else [],
         rows=[dict(label=label, gating=gating, state=value[key], owner=owner, action=action)
               for key, label, gating, _, owner, action in CONDITIONS])
 
