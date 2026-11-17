@@ -97,7 +97,7 @@ def spatial_stages(order, source, moves):
 
 
 def workspace_context(order, plan=None, *, priority_form=None, plan_form=None, review_observation=None):
-    from harbor_web.views import reason_text
+    from harbor_web.presentation import reason_text
     from harbor_web.plan_explanation import explain_plan
     from harbor_web.planning_pages import gate_text
 

@@ -7,7 +7,7 @@ from harbor_web.yard_scene import present_stage, scene_for
 
 def placement_context(plan):
     from harbor_web.workspace import plan_changes
-    from harbor_web.views import reason_text
+    from harbor_web.presentation import reason_text
     from harbor_web.plan_explanation import explain_plan
     from harbor_web.yard_rows import place_context, placement_text
     source = services.spatial_snapshot(plan.observation)
