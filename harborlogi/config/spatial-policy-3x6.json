@@ -12,7 +12,7 @@
     ["B", "Y11"], ["B", "Y12"], ["B", "Y13"], ["B", "Y14"], ["B", "Y15"], ["B", "Y16"],
     ["B", "Y21"], ["B", "Y22"], ["B", "Y23"], ["B", "Y24"], ["B", "Y25"], ["B", "Y26"],
     ["B", "Y31"], ["B", "Y32"], ["B", "Y33"], ["B", "Y34"], ["B", "Y35"], ["B", "Y36"],
-    ["B", "temp_b"], ["B", "stand"]
+    ["B", "temp_b"]
   ],
   "spatial_areas": [
     {"area_id": "temp_a", "rows": 3, "columns": 3, "levels": 1},
@@ -22,9 +22,9 @@
   "spatial_moves": [["yard", "yard"], ["yard", "temp_a"], ["temp_a", "yard"], ["yard", "temp_b"], ["temp_b", "yard"], ["yard", "stand"]],
   "area_presentation": {
     "yard": {"label": "장치 야드(배)", "x": 0, "y": 0},
-    "temp_a": {"label": "임시 적재(왼쪽)", "x": 0, "y": -4.2},
-    "temp_b": {"label": "임시 적재(오른쪽)", "x": 0, "y": 4.2},
-    "stand": {"label": "컨베이어(반출)", "x": 7.2, "y": 1}
+    "temp_a": {"label": "임시 장치 A(왼쪽)", "x": 0, "y": -4.2},
+    "temp_b": {"label": "임시 장치 B(오른쪽)", "x": 0, "y": 4.2},
+    "stand": {"label": "반출대", "x": 7.2, "y": 1}
   },
   "slot_cells": 3
 }
