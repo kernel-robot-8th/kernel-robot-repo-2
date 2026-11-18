@@ -76,3 +76,201 @@ class ModuleBoundaryTests(unittest.TestCase):
     def test_spatial_module_does_not_grow_past_ratchet(self):
         lines = (ROOT / 'harbor/spatial.py').read_text(encoding='utf8').splitlines()
         self.assertLessEqual(len(lines), 725)
+
+
+def _module_graph():
+    """Internal import edges of harbor and harbor_web, any depth (lazy imports included), like the SRP measurement."""
+    mods = {}
+    for package in ('harbor', 'harbor_web'):
+        for path in (ROOT / package).rglob('*.py'):
+            if 'migrations' in path.parts or '__pycache__' in path.parts:
+                continue
+            name = '.'.join(path.relative_to(ROOT).with_suffix('').parts)
+            mods[name.removesuffix('.__init__')] = path
+    graph = {name: set() for name in mods}
+    for name, path in mods.items():
+        package = name if path.name == '__init__.py' else name.rpartition('.')[0]
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8-sig'))):
+            if isinstance(node, ast.Import):
+                targets = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                base = node.module or ''
+                if node.level:
+                    parts = package.split('.')[:len(package.split('.')) - (node.level - 1)]
+                    base = '.'.join(parts + ([base] if base else []))
+                targets = [base] + [f'{base}.{a.name}' for a in node.names]
+            else:
+                continue
+            for target in targets:
+                while target and target not in mods:
+                    target = target.rpartition('.')[0]
+                if target and target != name:
+                    graph[name].add(target)
+    return graph
+
+
+def _cycle_edges(graph):
+    """Edges whose two ends lie in one strongly connected component (Tarjan)."""
+    index, low, stack, on_stack, comp_of = {}, {}, [], set(), {}
+
+    def visit(v):
+        index[v] = low[v] = len(index)
+        stack.append(v)
+        on_stack.add(v)
+        for w in graph[v]:
+            if w not in index:
+                visit(w)
+                low[v] = min(low[v], low[w])
+            elif w in on_stack:
+                low[v] = min(low[v], index[w])
+        if low[v] == index[v]:
+            members = []
+            while True:
+                w = stack.pop()
+                on_stack.discard(w)
+                members.append(w)
+                if w == v:
+                    break
+            for w in members:
+                comp_of[w] = v
+
+    for v in graph:
+        if v not in index:
+            visit(v)
+    return {(a, b) for a in graph for b in graph[a] if comp_of[a] == comp_of[b]}
+
+
+# Import edges inside today's cycles (SCC), one block per cycle. Each refactor PR deletes the lines it breaks.
+# Adding an edge that closes or joins a cycle fails; so does leaving a line that is no longer a cycle edge.
+ALLOWED_CYCLE_EDGES = {
+    # fleet_discovery, rosy_http
+    ('harbor.fleet_discovery', 'harbor.rosy_http'),
+    ('harbor.rosy_http', 'harbor.fleet_discovery'),
+    # alert_pages, autoplanning, board, cargo_history, command_binding, commands, evidence, field_pages, fleet_connection, human_evidence, inbound_decision, intake_pages, map_config, operations, order_queue, order_timeline, pipeline, placement_view, plan_explanation, plan_service, planning_pages, readiness, rearrangement, services, tier_simulation, views, work_hub, work_state, workspace, yard_pages, yard_rows, yard_scene
+    ('harbor_web.alert_pages', 'harbor_web.intake_pages'),
+    ('harbor_web.alert_pages', 'harbor_web.operations'),
+    ('harbor_web.alert_pages', 'harbor_web.views'),
+    ('harbor_web.alert_pages', 'harbor_web.work_state'),
+    ('harbor_web.autoplanning', 'harbor_web.inbound_decision'),
+    ('harbor_web.autoplanning', 'harbor_web.services'),
+    ('harbor_web.board', 'harbor_web.alert_pages'),
+    ('harbor_web.board', 'harbor_web.order_queue'),
+    ('harbor_web.board', 'harbor_web.work_state'),
+    ('harbor_web.board', 'harbor_web.yard_rows'),
+    ('harbor_web.cargo_history', 'harbor_web.services'),
+    ('harbor_web.cargo_history', 'harbor_web.workspace'),
+    ('harbor_web.command_binding', 'harbor_web.evidence'),
+    ('harbor_web.command_binding', 'harbor_web.fleet_connection'),
+    ('harbor_web.commands', 'harbor_web.command_binding'),
+    ('harbor_web.commands', 'harbor_web.evidence'),
+    ('harbor_web.commands', 'harbor_web.fleet_connection'),
+    ('harbor_web.commands', 'harbor_web.human_evidence'),
+    ('harbor_web.commands', 'harbor_web.readiness'),
+    ('harbor_web.commands', 'harbor_web.rearrangement'),
+    ('harbor_web.commands', 'harbor_web.services'),
+    ('harbor_web.evidence', 'harbor_web.commands'),
+    ('harbor_web.evidence', 'harbor_web.services'),
+    ('harbor_web.field_pages', 'harbor_web.services'),
+    ('harbor_web.field_pages', 'harbor_web.views'),
+    ('harbor_web.fleet_connection', 'harbor_web.commands'),
+    ('harbor_web.fleet_connection', 'harbor_web.services'),
+    ('harbor_web.human_evidence', 'harbor_web.commands'),
+    ('harbor_web.inbound_decision', 'harbor_web.services'),
+    ('harbor_web.inbound_decision', 'harbor_web.workspace'),
+    ('harbor_web.intake_pages', 'harbor_web.yard_rows'),
+    ('harbor_web.map_config', 'harbor_web.services'),
+    ('harbor_web.map_config', 'harbor_web.yard_scene'),
+    ('harbor_web.operations', 'harbor_web.human_evidence'),
+    ('harbor_web.operations', 'harbor_web.services'),
+    ('harbor_web.operations', 'harbor_web.workspace'),
+    ('harbor_web.operations', 'harbor_web.yard_rows'),
+    ('harbor_web.operations', 'harbor_web.yard_scene'),
+    ('harbor_web.order_queue', 'harbor_web.autoplanning'),
+    ('harbor_web.order_timeline', 'harbor_web.operations'),
+    ('harbor_web.order_timeline', 'harbor_web.workspace'),
+    ('harbor_web.pipeline', 'harbor_web.fleet_connection'),
+    ('harbor_web.placement_view', 'harbor_web.inbound_decision'),
+    ('harbor_web.placement_view', 'harbor_web.plan_explanation'),
+    ('harbor_web.placement_view', 'harbor_web.services'),
+    ('harbor_web.placement_view', 'harbor_web.workspace'),
+    ('harbor_web.placement_view', 'harbor_web.yard_rows'),
+    ('harbor_web.placement_view', 'harbor_web.yard_scene'),
+    ('harbor_web.plan_explanation', 'harbor_web.yard_rows'),
+    ('harbor_web.plan_service', 'harbor_web.autoplanning'),
+    ('harbor_web.plan_service', 'harbor_web.order_queue'),
+    ('harbor_web.plan_service', 'harbor_web.rearrangement'),
+    ('harbor_web.planning_pages', 'harbor_web.commands'),
+    ('harbor_web.planning_pages', 'harbor_web.human_evidence'),
+    ('harbor_web.planning_pages', 'harbor_web.inbound_decision'),
+    ('harbor_web.planning_pages', 'harbor_web.pipeline'),
+    ('harbor_web.planning_pages', 'harbor_web.placement_view'),
+    ('harbor_web.planning_pages', 'harbor_web.services'),
+    ('harbor_web.planning_pages', 'harbor_web.views'),
+    ('harbor_web.planning_pages', 'harbor_web.work_hub'),
+    ('harbor_web.planning_pages', 'harbor_web.workspace'),
+    ('harbor_web.planning_pages', 'harbor_web.yard_rows'),
+    ('harbor_web.planning_pages', 'harbor_web.yard_scene'),
+    ('harbor_web.readiness', 'harbor_web.command_binding'),
+    ('harbor_web.readiness', 'harbor_web.fleet_connection'),
+    ('harbor_web.rearrangement', 'harbor_web.commands'),
+    ('harbor_web.rearrangement', 'harbor_web.order_queue'),
+    ('harbor_web.rearrangement', 'harbor_web.services'),
+    ('harbor_web.services', 'harbor_web.autoplanning'),
+    ('harbor_web.services', 'harbor_web.order_queue'),
+    ('harbor_web.services', 'harbor_web.plan_service'),
+    ('harbor_web.tier_simulation', 'harbor_web.order_queue'),
+    ('harbor_web.tier_simulation', 'harbor_web.plan_service'),
+    ('harbor_web.views', 'harbor_web.board'),
+    ('harbor_web.views', 'harbor_web.cargo_history'),
+    ('harbor_web.views', 'harbor_web.field_pages'),
+    ('harbor_web.views', 'harbor_web.inbound_decision'),
+    ('harbor_web.views', 'harbor_web.map_config'),
+    ('harbor_web.views', 'harbor_web.operations'),
+    ('harbor_web.views', 'harbor_web.order_timeline'),
+    ('harbor_web.views', 'harbor_web.services'),
+    ('harbor_web.views', 'harbor_web.tier_simulation'),
+    ('harbor_web.views', 'harbor_web.workspace'),
+    ('harbor_web.views', 'harbor_web.yard_pages'),
+    ('harbor_web.views', 'harbor_web.yard_rows'),
+    ('harbor_web.views', 'harbor_web.yard_scene'),
+    ('harbor_web.work_hub', 'harbor_web.order_queue'),
+    ('harbor_web.work_hub', 'harbor_web.rearrangement'),
+    ('harbor_web.work_hub', 'harbor_web.views'),
+    ('harbor_web.work_hub', 'harbor_web.work_state'),
+    ('harbor_web.work_hub', 'harbor_web.yard_rows'),
+    ('harbor_web.work_state', 'harbor_web.order_queue'),
+    ('harbor_web.workspace', 'harbor_web.commands'),
+    ('harbor_web.workspace', 'harbor_web.pipeline'),
+    ('harbor_web.workspace', 'harbor_web.plan_explanation'),
+    ('harbor_web.workspace', 'harbor_web.planning_pages'),
+    ('harbor_web.workspace', 'harbor_web.services'),
+    ('harbor_web.workspace', 'harbor_web.yard_rows'),
+    ('harbor_web.workspace', 'harbor_web.yard_scene'),
+    ('harbor_web.yard_pages', 'harbor_web.inbound_decision'),
+    ('harbor_web.yard_pages', 'harbor_web.order_queue'),
+    ('harbor_web.yard_pages', 'harbor_web.plan_service'),
+    ('harbor_web.yard_pages', 'harbor_web.services'),
+    ('harbor_web.yard_pages', 'harbor_web.tier_simulation'),
+    ('harbor_web.yard_pages', 'harbor_web.workspace'),
+    ('harbor_web.yard_pages', 'harbor_web.yard_rows'),
+    ('harbor_web.yard_pages', 'harbor_web.yard_scene'),
+    ('harbor_web.yard_rows', 'harbor_web.services'),
+    ('harbor_web.yard_rows', 'harbor_web.yard_scene'),
+    ('harbor_web.yard_scene', 'harbor_web.services'),
+    ('harbor_web.yard_scene', 'harbor_web.yard_rows'),
+    # command_models, models
+    ('harbor_web.command_models', 'harbor_web.models'),
+    ('harbor_web.models', 'harbor_web.command_models'),
+    # field_episodes, intake_loop
+    ('harbor_web.field_episodes', 'harbor_web.intake_loop'),
+    ('harbor_web.intake_loop', 'harbor_web.field_episodes'),
+}
+
+
+class ImportCycleRatchetTests(unittest.TestCase):
+    def test_import_cycle_edges_match_allow_list(self):
+        edges = _cycle_edges(_module_graph())
+        new = sorted(edges - ALLOWED_CYCLE_EDGES)
+        stale = sorted(ALLOWED_CYCLE_EDGES - edges)
+        self.assertFalse(new, f'new import cycle edges (break the cycle instead of listing them): {new}')
+        self.assertFalse(stale, f'edges no longer in a cycle; delete these lines from ALLOWED_CYCLE_EDGES: {stale}')
