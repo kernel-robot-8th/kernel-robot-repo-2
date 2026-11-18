@@ -143,9 +143,6 @@ def _cycle_edges(graph):
 # Import edges inside today's cycles (SCC), one block per cycle. Each refactor PR deletes the lines it breaks.
 # Adding an edge that closes or joins a cycle fails; so does leaving a line that is no longer a cycle edge.
 ALLOWED_CYCLE_EDGES = {
-    # fleet_discovery, rosy_http
-    ('harbor.fleet_discovery', 'harbor.rosy_http'),
-    ('harbor.rosy_http', 'harbor.fleet_discovery'),
     # alert_pages, autoplanning, board, cargo_history, command_binding, commands, evidence, field_pages, fleet_connection, human_evidence, inbound_decision, intake_pages, map_config, operations, order_queue, order_timeline, pipeline, placement_view, plan_explanation, plan_service, planning_pages, readiness, rearrangement, services, tier_simulation, views, work_hub, work_state, workspace, yard_pages, yard_rows, yard_scene
     ('harbor_web.alert_pages', 'harbor_web.intake_pages'),
     ('harbor_web.alert_pages', 'harbor_web.operations'),
@@ -258,9 +255,6 @@ ALLOWED_CYCLE_EDGES = {
     ('harbor_web.yard_rows', 'harbor_web.yard_scene'),
     ('harbor_web.yard_scene', 'harbor_web.services'),
     ('harbor_web.yard_scene', 'harbor_web.yard_rows'),
-    # command_models, models
-    ('harbor_web.command_models', 'harbor_web.models'),
-    ('harbor_web.models', 'harbor_web.command_models'),
     # field_episodes, intake_loop
     ('harbor_web.field_episodes', 'harbor_web.intake_loop'),
     ('harbor_web.intake_loop', 'harbor_web.field_episodes'),
