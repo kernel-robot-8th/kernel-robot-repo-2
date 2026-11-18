@@ -7,7 +7,7 @@ from harbor_web import forms, services
 from harbor_web.auth import require_roles
 from harbor_web.record_text import OBJECT_LABELS, record_text
 from harbor_web.models import Audit, Command, DepartureIntent, FieldConfirmation, FieldEpisode, Measurement, Order, Plan
-from harbor_web.views import form_page, page, paginate
+from harbor_web.page_helpers import form_page, page, paginate
 
 
 class ComparisonForm(django_forms.Form):

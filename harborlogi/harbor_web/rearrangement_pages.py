@@ -17,7 +17,7 @@ from harbor_web import rearrangement, services
 from harbor_web.auth import has_role, require_roles
 from harbor_web.inbound_decision import inbound_progress, projected_snapshot
 from harbor_web.models import Audit, Observation, Order, Plan, RearrangeAuthorization
-from harbor_web.views import page
+from harbor_web.page_helpers import page
 from harbor_web.workspace import spatial_stages
 from harbor_web.yard_occupancy import occupancy_map
 from harbor_web.yard_rows import place_context, place_label

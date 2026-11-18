@@ -12,7 +12,8 @@ from harbor_web.order_queue import TIERS, open_outbound_orders, tier_of
 from harbor_web.plan_service import _outbound_schedule
 from harbor_web.presentation import reason_text
 from harbor_web.site_config import spatial_policy, spatial_snapshot
-from harbor_web.views import parse_entries, parse_lanes, selected_observation
+from harbor_web.page_helpers import selected_observation
+from harbor_web.views import parse_entries, parse_lanes
 
 RUNNING_STATES = {'DISPATCHING', 'RECONCILED'}
 
