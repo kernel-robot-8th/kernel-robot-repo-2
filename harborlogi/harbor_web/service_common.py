@@ -15,10 +15,10 @@ def _role(actor, *roles):
         raise PermissionDenied
 
 
-def _save(actor, obj, action):
+def _save(actor, obj, action, *, detail=None):
     obj.full_clean()
     obj.save()
-    Audit.objects.create(actor=actor, action=action, object_type=type(obj).__name__, object_id=str(obj.pk))
+    Audit.objects.create(actor=actor, action=action, object_type=type(obj).__name__, object_id=str(obj.pk), detail=detail or {})
     return obj
 
 
