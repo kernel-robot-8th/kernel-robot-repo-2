@@ -127,3 +127,7 @@ python -m tools.integration.real_fleet_http --platform-root <플랫폼-root> --p
 독립 실행에서는 `HARBOR_INTEGRATION=1`과 도구가 만든 임시 `HARBOR_INTEGRATION_CONFIG`를 함께 공급한다. 명시 모드에서 설정 누락·연결 오류는 실패이며 skip을 성공 증거로 삼지 않는다. 플랫폼·Harbor 전체 SHA 두 개와 exit code를 함께 기록한다. fixture의 합성 관측은 업무 완료의 운영 증거를 제공하지 않는다.
 
 업무 대조 시험에서는 별도 시험 actor가 Fleet의 기명 승인자로 승인한다. Harbor의 런타임 클라이언트에 승인 기능을 추가하지 않는다. 실제 `GOAL_CONFIRMED` 뒤에도 Harbor 장부가 WAITING에 남는지, 잘못된 관측을 거절하는지, 재시작 후 새 조회가 필요한지, 인계 뒤에도 별도 내려놓기·퇴피 근거 전에는 AWAITING_FINAL_EVIDENCE인지 확인한다. 관측 값은 시험에 명시한 합성 데이터이며 인증된 현장 관측을 읽는 어댑터가 아니다. [실행 결과와 제한](validation/2026-10-22-business-reconciliation.md)을 따른다.
+
+## 탑뷰 프레임 프록시
+
+로그인한 열람·운영·관리 역할은 `GET /topview/<source_id>/frame/`으로 최신 JPEG 한 장을 받는다(화면 연결은 없음). 기존 `HARBOR_FLEET_ORIGIN`, `HARBOR_FLEET_TOKEN`, `HARBOR_FLEET_CA_FILE`을 사용해 `GET /api/fleet/workcell-observations`의 `workcells[].cameras[].source_id`에 있는 출처인지 확인한 뒤, `POST /api/fleet/vision/lease`에 `source_id`만 보내고 응답의 `frame_path`를 lease Bearer로 읽는다. 브라우저에는 JPEG와 선택한 `X-Frame-*` 헤더만 반환하며 lease는 전달하지 않고 `no-store`로 응답한다. JPEG는 4 MiB 이하만 허용하고 리다이렉트·다른 origin의 `frame_path`는 거절한다. 설정 누락은 503 「ROSY 연동 전」, 오래된 프레임은 404 `frame stale`이다. 클라이언트의 `sources()`는 `GET /api/fleet/vision/sources`를 지원한다. 확인 못 함: R이 CELL-A 카메라를 sources에 내놓는지, Harbor 서비스 계정이 카메라 열람 권한을 통과하는지, 그림을 Fleet가 아닌 다른 호스트가 주는지. 다른 호스트가 필요하면 현재 프록시로 수용하지 않으며 ROSY 전달 계약을 먼저 확인해야 한다.
