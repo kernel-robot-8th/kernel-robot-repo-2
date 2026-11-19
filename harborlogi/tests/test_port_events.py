@@ -169,5 +169,29 @@ class PortEventTests(unittest.TestCase):
             departures.authorize('pinky-1', since=arrived + timedelta(hours=1))
 
 
+    def test_release_permissions_are_spent_only_by_their_vehicle(self):
+        first = event('vehicle.release_permitted', 'obs-r1', vehicle_id='pinky-1')
+        second = event('vehicle.release_permitted', 'obs-r2', vehicle_id='pinky-2')
+        self.poll(first, second)
+        departures = DepartureLedger(self.path)
+        arrived = parse_event(first)['observed_at'] - timedelta(seconds=1)
+        self.assertEqual(departures.authorize('pinky-1', since=arrived), first['event_id'])
+        with self.assertRaises(ValueError):
+            departures.authorize('pinky-1', since=arrived)
+        self.assertEqual(departures.authorize('pinky-2', since=arrived), second['event_id'])
+        with self.assertRaises(ValueError):
+            departures.authorize('pinky-2', since=arrived)
+
+    def test_release_permission_before_since_is_not_spent(self):
+        permit = event('vehicle.release_permitted', 'obs-old', vehicle_id='pinky-1')
+        self.poll(permit)
+        departures = DepartureLedger(self.path)
+        observed = parse_event(permit)['observed_at']
+        with self.assertRaises(ValueError):
+            departures.authorize('pinky-1', since=observed + timedelta(seconds=1))
+        # 거절한 허락은 소비되지 않고, 경계 시각과 같은 허락은 쓸 수 있다.
+        self.assertEqual(departures.authorize('pinky-1', since=observed), permit['event_id'])
+
+
 if __name__ == '__main__':
     unittest.main()
