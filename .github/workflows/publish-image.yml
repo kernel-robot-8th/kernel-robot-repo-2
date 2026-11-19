@@ -29,6 +29,7 @@ jobs:
       id-token: write
       attestations: write
     env:
+      DOCKER_BUILDKIT: "1"
       REPOSITORY: ghcr.io/robotics-team-1213/harborlogi
       COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
@@ -42,7 +43,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull "${REPOSITORY}:main" || true
           docker build -f harborlogi/deploy/compose/Dockerfile \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            --cache-from "${REPOSITORY}:main" \
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.revision=${COMMIT}" \
             -t "${REPOSITORY}:${COMMIT}" -t "${REPOSITORY}:main" harborlogi

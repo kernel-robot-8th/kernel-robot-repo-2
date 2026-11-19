@@ -8,23 +8,26 @@
 # Needs a full-history checkout with origin/main. Rows are "login<TAB>path" so paths may hold spaces.
 set -euo pipefail
 shopt -s inherit_errexit   # a failing git log inside $(...) must fail the gate, not read as "no overlap"
-since=$(date -u -d "${WINDOW_DAYS:-14} days ago" +%Y-%m-%dT%H:%M:%SZ)
+window_days="${WINDOW_DAYS:-0}"
 skip=" $AUTHOR ${IGNORE:-} "
 pr_files=$(gh api "repos/$REPO/pulls/$PR/files?per_page=100" --paginate --jq '.[].filename')
 if [ -z "$pr_files" ]; then
   echo "PR changes no files: review not required"
   exit 0
 fi
-# Commit -> login comes from GitHub (git identities do not name accounts); files come from one git log.
-logins=$(gh api "repos/$REPO/commits?sha=main&since=$since&per_page=100" --paginate \
-  --jq '.[] | select(.author != null and .author.type == "User") | "\(.sha)\t\(.author.login)"' |
-  awk -F'\t' -v skip="$skip" 'index(skip, " " $2 " ") == 0')
 others_files=$(
-  if [ -n "$logins" ]; then
-    git -c core.quotepath=off log origin/main --since="$since" --no-merges --name-only --format='@%H' |
-      awk -F'\t' 'NR == FNR { who[$1] = $2; next }
-                  /^@/ { login = who[substr($0, 2)]; next }
-                  NF && login != "" { print login "\t" $0 }' <(echo "$logins") -
+  if [ "$window_days" -gt 0 ]; then
+    since=$(date -u -d "${window_days} days ago" +%Y-%m-%dT%H:%M:%SZ)
+    # Commit -> login comes from GitHub (git identities do not name accounts); files come from one git log.
+    logins=$(gh api "repos/$REPO/commits?sha=main&since=$since&per_page=100" --paginate \
+      --jq '.[] | select(.author != null and .author.type == "User") | "\(.sha)\t\(.author.login)"' |
+      awk -F'\t' -v skip="$skip" 'index(skip, " " $2 " ") == 0')
+    if [ -n "$logins" ]; then
+      git -c core.quotepath=off log origin/main --since="$since" --no-merges --name-only --format='@%H' |
+        awk -F'\t' 'NR == FNR { who[$1] = $2; next }
+                    /^@/ { login = who[substr($0, 2)]; next }
+                    NF && login != "" { print login "\t" $0 }' <(echo "$logins") -
+    fi
   fi
   gh api "repos/$REPO/pulls?state=open&per_page=100" --paginate \
     --jq '.[] | select(.user.type == "User") | "\(.user.login) \(.number)"' |
@@ -42,6 +45,14 @@ fi
 echo "files shared with others' recent work:"; awk -F'\t' '{ print $2 " (" $1 ")" }' <<<"$overlap"
 { echo "### review-gate: files shared with others' recent work"; awk -F'\t' '{ print "- " $2 " (" $1 ")" }' <<<"$overlap"; } \
   >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+pr_body=$(gh api "repos/$REPO/pulls/$PR" --jq '.body // ""' 2>/dev/null || true)
+review_bodies=$(gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" --jq '.[].body // ""' 2>/dev/null || true)
+comment_bodies=$(AUTHOR="$AUTHOR" gh api "repos/$REPO/issues/$PR/comments?per_page=100" \
+  --jq '.[] | select(.user.login == env.AUTHOR) | .body // ""' 2>/dev/null || true)
+if grep -Eqi '(^|[[:space:]])Overlap-Review:[[:space:]]*self\b' <<<"$pr_body"$'\n'"$review_bodies"$'\n'"$comment_bodies"; then
+  echo "self overlap review recorded by $AUTHOR"
+  exit 0
+fi
 # shortcut: first 100 reviews only; paginate if a PR ever collects more.
 approvers=$(AUTHOR="$AUTHOR" gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" --jq '
   map(select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED"))
