@@ -19,7 +19,6 @@
       <div class="panel-h"><h3 id="yard-plan-title">야드 평면 · 자리별 적재</h3><span class="scope">현황 #{{ operations.observation.pk }} · {{ operations.yard.dimensions }}</span></div>
       <div class="panel-b">{% include 'yard_rows.html' with yard=operations.yard %}
         {% if operations.inventory.holdings %}<p class="notice">위치 미확정: {% for holding in operations.inventory.holdings %}{{ holding.cargo_id }} ({{ holding.holder_id|default:'보유자 미상' }}){% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
-        <p class="operations-source helptext">야드 현황 #{{ operations.observation.pk }} · {{ operations.observation.source_id }} / {{ operations.observation.source_revision }} · {{ operations.observation.provenance }} · {{ operations.observation.observed_at|date:'Y-m-d H:i:s T' }} · Condition #{{ operations.observation.condition_id }} {{ operations.observation.condition.name }}{% if operations.freshness.stale %} <strong>유효 시간 밖</strong>{% endif %}{% if operations.freshness.superseded %} <strong>같은 출처에 새 현황 있음</strong>{% endif %} · <a href="/inventory/?observation={{ operations.observation.pk }}">이 현황의 재고 자세히 보기</a></p>
       </div>
     </section>
     <section class="panel jobs-panel" aria-labelledby="proposal-title">
