@@ -15,8 +15,8 @@ from harbor_web.tests import test_services as fixtures
 class MapDraftTests(SimpleTestCase):
     def source(self):
         payload = build_map(None, editor_draft())['payload']
-        payload.update(arm_reach=[['A', 'Y11'], ['A', 'temp'], ['B', 'stand']],
-            allowed_moves=[['Y11', 'temp'], ['temp', 'stand']], spatial_moves=[['yard', 'temp']])
+        payload.update(arm_reach=[['A', 'Y11'], ['A', 'temp_a'], ['B', 'stand']],
+            allowed_moves=[['Y11', 'temp_a'], ['temp_a', 'stand']], spatial_moves=[['yard', 'temp_a']])
         return payload
 
     def test_fresh_map_has_no_execution_authority_or_observation(self):
@@ -48,7 +48,7 @@ class MapDraftTests(SimpleTestCase):
         yard['cells'][0]['bay_id'], yard['cells'][1]['bay_id'] = yard['cells'][1]['bay_id'], yard['cells'][0]['bay_id']
         result = build_map(source, draft)
         self.assertNotIn(['A', 'Y11'], result['payload']['arm_reach'])
-        self.assertNotIn(['Y11', 'temp'], result['payload']['allowed_moves'])
+        self.assertNotIn(['Y11', 'temp_a'], result['payload']['allowed_moves'])
         yard['levels'] += 1
         self.assertNotIn(['A', 'Y11'], build_map(source, draft)['payload']['arm_reach'])
 
@@ -56,13 +56,15 @@ class MapDraftTests(SimpleTestCase):
         source = self.source()
         draft = editor_draft(source)
         yard = next(a for a in draft['areas'] if a['id'] == 'yard')
-        yard['columns'] = 4
-        yard['cells'] += [dict(bay_id=f'Y{r}4', row=r, column=4) for r in range(1, 4)]
-        temp = next(a for a in draft['areas'] if a['id'] == 'temp')
+        yard['columns'] = 9  # a whole extra hold: columns stay a multiple of the 1x3 slot
+        yard['cells'] += [dict(bay_id=f'Y{r}{c}', row=r, column=c) for r in range(1, 4) for c in range(7, 10)]
+        for area in draft['areas']:
+            area['x'] += 10 if area['id'] == 'stand' else 0  # keep the display rectangles apart
+        temp = next(a for a in draft['areas'] if a['id'] == 'temp_a')
         temp['levels'] = 4
         result = build_map(source, draft)
         self.assertIn(['A', 'Y11'], result['payload']['arm_reach'])
-        self.assertNotIn(['A', 'temp'], result['payload']['arm_reach'])
+        self.assertNotIn(['A', 'temp_a'], result['payload']['arm_reach'])
         self.assertEqual(result['payload']['spatial_moves'], [])
 
     def test_unknown_fields_overlap_bounds_and_reserved_roles_are_rejected(self):
@@ -108,14 +110,14 @@ class MapDraftTests(SimpleTestCase):
     def test_new_storage_has_no_reach_and_removed_areas_lose_references(self):
         source = self.source()
         draft = editor_draft(source)
-        draft['areas'] = [a for a in draft['areas'] if a['id'] != 'temp']
+        draft['areas'] = [a for a in draft['areas'] if a['id'] != 'temp_a']
         draft['areas'].append(dict(id='extra', label='Extra storage', role='storage',
-            rows=2, columns=3, levels=4, x=10, y=0, cells=[]))
+            rows=2, columns=3, levels=4, x=30, y=0, cells=[]))
         result = build_map(source, draft)
         self.assertEqual(result['payload']['storage_areas'], ['yard', 'extra'])
         self.assertEqual(result['payload']['arm_reach'], [['A', 'Y11'], ['B', 'stand']])
         self.assertEqual(result['payload']['allowed_moves'], [])
-        self.assertEqual(result['summary']['removed_areas'], ['temp'])
+        self.assertEqual(result['summary']['removed_areas'], ['temp_a'])
         self.assertEqual(result['summary']['added_areas'], ['extra'])
 
 
