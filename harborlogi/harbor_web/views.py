@@ -132,9 +132,11 @@ def overview(request):
     operations = operations_context(observation)
     for job in operations['workload']['plans']:  # the timeline panel shows the last recorded facts of each listed job
         job['facts'] = build_timeline(job['plan'].order)['actual_line'][-4:]
+    open_field = FieldEpisode.objects.filter(state='OPEN').count()
+    request._open_field_count = open_field
     return page(request, 'overview.html', section='overview', rows=rows, operations=operations, observations=observations, topview=topview_context(),
                 observation=observation, condition=observation.condition if observation else None,
-                field_pending=FieldEpisode.objects.filter(state='OPEN').count())
+                field_pending=open_field)
 
 
 @require_roles('viewer', 'operator', 'admin')

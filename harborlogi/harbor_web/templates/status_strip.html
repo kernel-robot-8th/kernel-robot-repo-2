@@ -1,0 +1,41 @@
+{% if status_strip %}
+<section class="status-strip" aria-label="운전 상태">
+  <span class="strip-item strip-drive">
+    <a class="strip-pill tone-{{ status_strip.drive_tone }}" href="/alerts/">{{ status_strip.drive_label }}</a>
+  </span>
+  <span class="strip-item strip-day">
+    <span class="strip-label">오늘 일정</span>
+    <strong class="strip-num">{{ status_strip.day_progress.completed }}/{{ status_strip.day_progress.total }} 완료</strong>
+  </span>
+  <span class="strip-item strip-now">
+    <span class="strip-label">지금</span>
+    {% if status_strip.current_job %}
+      {% if status_strip.current_job.href %}
+      <a class="strip-job-link" href="{{ status_strip.current_job.href }}">{{ status_strip.current_job.title }}</a>
+      {% else %}
+      <span class="strip-job-text">{{ status_strip.current_job.title }}</span>
+      {% endif %}
+      <span class="strip-pill tone-{{ status_strip.current_job.tone }}">{{ status_strip.current_job.state }}</span>
+    {% else %}
+      <span class="strip-job-text">하는 일 없음</span>
+    {% endif %}
+    <span class="strip-note">{{ status_strip.state_note }}</span>
+  </span>
+  <span class="strip-item strip-yard">
+    <span class="strip-label">야드</span>
+    {% if status_strip.yard_updated %}
+      <span class="strip-num">{{ status_strip.yard_updated }} 갱신</span>
+      {% if status_strip.yard_stale %}<span class="strip-pill tone-attention">오래됨</span>{% endif %}
+    {% else %}
+      <span class="strip-muted">현황 없음</span>
+    {% endif %}
+  </span>
+  <span class="strip-item strip-equipment">
+    <span class="strip-pill tone-neutral">{{ status_strip.equipment_label }}</span>
+  </span>
+  <span class="strip-item strip-estop">
+    <button type="button" class="strip-estop-btn" disabled aria-disabled="true">비상 정지</button>
+    <span class="strip-note">{{ status_strip.estop_note }}</span>
+  </span>
+</section>
+{% endif %}

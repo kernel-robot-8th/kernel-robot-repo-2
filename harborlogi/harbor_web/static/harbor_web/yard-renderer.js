@@ -1,8 +1,10 @@
+import {transposeArea, transposeBox, transposePoint} from './yard-display.mjs';
 import * as THREE from './vendor/three-0.186.1/three.module.js';
 import {OrbitControls} from './vendor/three-0.186.1/OrbitControls.js';
 import {TransformControls} from './vendor/three-0.186.1/TransformControls.js';
 
-export function createRenderer(canvas, areas, {onSelect, onTransform, onError, colors = {}, showVolumes = false} = {}) {
+export function createRenderer(canvas, areas, {onSelect, onTransform, onError, colors = {}, showVolumes = false, transpose = false} = {}) {
+  if (transpose) areas = areas.map(transposeArea);
   const context = canvas.getContext('webgl2', {antialias: true, preserveDrawingBuffer: true});
   if (!context) throw new Error('WebGL2 is unavailable');
   const palette = {target: '#112c3f', blocker: '#fe6d08', stored: '#2cbbb7',
@@ -66,6 +68,10 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     draggedGizmo = false, revision = 0, renderRevision = 0;
   let width = 0, height = 0;
 
+  function logicalPoint({x, y, z}) {
+    const point = {x, y:z, z:y};
+    return transpose ? transposePoint(point) : point;
+  }
   function invalidate() {
     if (!disposed && !failed && !raf) raf = requestAnimationFrame(draw);
   }
@@ -75,7 +81,7 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     const changed = orbit.update();
     renderer.render(scene, camera);
     canvas.dataset.renderedPositions = JSON.stringify(Object.fromEntries([...models].map(([id, model]) =>
-      [id, {x:model.group.position.x, y:model.group.position.z, z:model.group.position.y}])));
+      [id, logicalPoint(model.group.position)])));
     canvas.dataset.renderRevision = String(++renderRevision);
     if (changed) invalidate();
   }
@@ -91,8 +97,7 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
   });
   transform.addEventListener('mouseUp', () => {
     if (transform.object && editable) {
-      const {x, y, z} = transform.object.position;
-      onTransform?.(transform.object.userData.id, {x, y: z, z: y});
+      onTransform?.(transform.object.userData.id, logicalPoint(transform.object.position));
     }
   });
 
@@ -200,6 +205,7 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     invalidate();
   }
   function setBoxes(boxes) {
+    if (transpose) boxes = boxes.map(transposeBox);
     const ids = new Set(boxes.map(box => box.id));
     transform.detach();
     models.forEach((model, id) => { if (!ids.has(id)) { removeBox(model); models.delete(id); } });
@@ -349,7 +355,8 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     selectLocation(position) {
       const area = areas.find(area => area.id === position?.area);
       locationMarker.visible = Boolean(area);
-      if (area) locationMarker.position.set(area.x + position.column - .5, position.level - .5, area.y + position.row - .5);
+      if (area) locationMarker.position.set(area.x + (transpose ? position.row : position.column) - .5,
+        position.level - .5, area.y + (transpose ? position.column : position.row) - .5);
       canvas.dataset.locationMarker = area ? JSON.stringify(position) : '';
       invalidate();
     },
