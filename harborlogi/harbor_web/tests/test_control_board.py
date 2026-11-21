@@ -71,7 +71,7 @@ class YardRowsTests(SimpleTestCase):
         self.assertEqual([[a['id'] for a in view[side]] for side in ('left', 'right', 'below')], [['temp_a'], ['temp_b'], ['stand']])
         tray = view['right'][0]
         self.assertEqual([s['label'] for lane in tray['lanes'] for s in lane['slots']], ['1번', '2번', '3번'])
-        self.assertEqual((tray['label'], tray['used'], tray['slots'], tray['cargo']), ('임시 장치 B(오른쪽)', 1, 3, ['T1']))
+        self.assertEqual((tray['label'], tray['used'], tray['slots'], tray['cargo']), ('임시 장치 B(오른쪽)', 1, 9, ['T1']))
         self.assertEqual(view['dimensions'], '3행 × 한 행 2자리 · 3층')
 
     def test_place_label_reads_rows_and_slots(self):
@@ -87,9 +87,9 @@ class YardRowsTests(SimpleTestCase):
 
     def test_site_labels_drop_a_lone_slot_number_and_level(self):
         labels, site = place_context(site_policy())
-        self.assertEqual((site.size, site.one_slot, site.one_level), (3, {'stand'}, {'temp_a', 'temp_b', 'stand'}))
+        self.assertEqual((site.size, site.one_slot, site.one_level), (3, {'stand'}, {'stand'}))
         self.assertEqual(place_label(dict(area_id='yard', row=1, column=4, level=3), labels, site), '1행 2칸 3층')
-        self.assertEqual(place_label(dict(area_id='temp_a', row=2, column=1, level=1), labels, site), '임시 장치 A(왼쪽) 2번')
+        self.assertEqual(place_label(dict(area_id='temp_a', row=2, column=1, level=1), labels, site), '임시 장치 A(왼쪽) 2번 1층')
         self.assertEqual(place_label(dict(area_id='stand', row=1, column=1, level=1), labels, site), '반출대')
         self.assertEqual(slot_key(dict(area_id='yard', row=3, column=4), site), 'yard-R3S2')
         self.assertEqual(place_context(example_policy())[1], None)

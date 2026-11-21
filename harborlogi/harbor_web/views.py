@@ -10,6 +10,7 @@ from harbor_web import forms, services
 from harbor_web.auth import has_role, require_roles
 from harbor_web.cargo_history import cargo_history as build_history
 from harbor_web.order_timeline import order_timeline as build_timeline
+from harbor_web.topview_proxy import topview_context
 from harbor_web.models import Audit, Cargo, CargoFootprint, Command, Condition, FieldEpisode, Observation, Order, Plan
 
 
@@ -131,7 +132,7 @@ def overview(request):
     operations = operations_context(observation)
     for job in operations['workload']['plans']:  # the timeline panel shows the last recorded facts of each listed job
         job['facts'] = build_timeline(job['plan'].order)['actual_line'][-4:]
-    return page(request, 'overview.html', section='overview', rows=rows, operations=operations, observations=observations,
+    return page(request, 'overview.html', section='overview', rows=rows, operations=operations, observations=observations, topview=topview_context(),
                 observation=observation, condition=observation.condition if observation else None,
                 field_pending=FieldEpisode.objects.filter(state='OPEN').count())
 
@@ -229,7 +230,7 @@ def outbound_queue(request):
         label = COMMAND_LABELS.get(command.state, command.state) if command else '계획 재검토' if changes else '계획 보류' if plan and plan.result['status'] == 'HOLD' else '계획 검토됨' if plan else '계획 전'
         rows.append(dict(order=order, plan=plan, command=command, status_label=label,
             status=command.state if command else 'HOLD' if changes else plan.result['status'] if plan else '',
-            reason='원래 실행의 상태와 업무 근거를 대조하세요.' if command else changes[0]['message'] if changes else reason_text(plan.result['reason']) if plan else '관측 재고를 선택해 재취급·반출·복귀를 검토하세요.'))
+            reason='원래 실행의 상태와 업무 근거를 대조하세요.' if command else changes[0]['message'] if changes else reason_text(plan.result['reason']) if plan else '야드 현황을 골라 재취급·반출·복귀를 검토하세요.'))
     lanes = services.outbound_lanes() if not q else []
     if lanes:
         from harbor_web.tier_simulation import tier_recommendations
@@ -423,7 +424,7 @@ def inventory(request):
                     place=f"{cell['row']}행 {cell['column']}열 {level}층") for cell in cells)
     placement_rows = [dict(cargo=item['cargo_id'], place=placement_text(item, labels, slot))
                       for item in (selected.payload.get('placements', []) if selected else [])]
-    return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices,
+    return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices, topview=topview_context(),
                 condition=condition, condition_filter='condition' in request.GET,
                 conditions=Condition.objects.order_by('-pk'), definition_rows=definition_rows,
                 placement_rows=placement_rows, yard_stage=stage, yard_scene=scene)

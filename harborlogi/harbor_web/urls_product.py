@@ -1,6 +1,6 @@
 """Harbor product routes, separate from account and Fleet routes."""
 from django.urls import path, re_path
-from harbor_web import views, planning_pages, field_pages, record_pages, guide_pages, map_pages, rearrangement_pages, scenario_pages
+from harbor_web import views, planning_pages, field_pages, record_pages, guide_pages, map_pages, rearrangement_pages, scenario_pages, topview_proxy
 
 urlpatterns = [
     path('workflow/', guide_pages.workflow, name='workflow'),
@@ -39,4 +39,5 @@ urlpatterns = [
     path('records/', record_pages.records, name='records'),
     path('records/compare/', record_pages.comparison, name='comparison'),
     path('records/measurements/new/', record_pages.measurement_new, name='measurement_new'),
+    path('topview/<str:source_id>/frame/', topview_proxy.topview_frame, name='topview_frame'),
 ]

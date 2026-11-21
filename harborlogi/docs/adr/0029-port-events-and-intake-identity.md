@@ -3,6 +3,8 @@
 날짜: 2026-11-08
 
 상태: 수락(2026-11-08, 사용자 결정 D1~D7 "S 결과와 컨베이어 끝 도착을 어느 컨테이너인지와 함께 Harbor에 알린다", "대체 팔 전환은 Fleet이 맡는다", "Harbor는 항만 도메인만 가진다", "S load는 Fleet 작업으로 한다", "11/14 동결 전에 자동 사건까지 한다").
+결과 절 일부를 [ADR 0033](0033-departure-release-rosy-first-field-fallback.md)이 대체한다.
+
 - 번호: 0027은 ROSY 계정 로그인(2026-11-08 병합), 0028은 관제 단위·장치 owner·호스트가 쓴다. 병합 시점 `main`의 번호를 다시 확인한다.
 - 대체: ADR 0005 결정 5의 "공급암 S는 플랫폼 밖 외부 단계"와 결정 6의 "S 퇴피를 Harbor가 확인해 이송 차량 출발을 허용한다". 나머지 0005 결정은 유지한다.
 - 짝 결정: ROSY D-996(항만 사건과 반입 신원). 계약 필드는 그 ADR과 아래 3절이 같다.
@@ -41,5 +43,5 @@ ADR 0005는 S를 플랫폼 밖 단계로 두고, Harbor가 S 퇴피를 사람 �
 ## 결과
 
 - 이송 제안(`POST /api/fleet/trip-proposals`)에 선택 필드 `object_ref`를 싣는다. ROSY는 `object_ref`가 있을 때만 그것을 `request_digest` 본문에 넣는다(키 정렬·공백 없는 JSON, ROSY 161957814a). 같은 key에 다른 `object_ref`면 ROSY가 409로 거절한다. Harbor의 digest 계산은 `harbor/fleet_contract.py:trip_digest` 한 곳이다. ROSY 쪽 필드와 R 조회 경로가 착지하기 전에는 Harbor 소비기가 빈 결과 또는 연결 실패로 기다리기만 한다.
-- `harbor/port_events.py`가 사건 모델·화물별 상태·커서를 갖고, `harbor/departure.py`는 `vehicle.release_permitted`로만 출발을 허용한다.
+- `harbor/port_events.py`가 사건 모델·화물별 상태·커서를 갖고, `harbor/departure.py`의 `vehicle.release_permitted`가 기본 출발 허락이며, 사람 현장 비움 확인(CLEAR)은 대비책이다([ADR 0033](0033-departure-release-rosy-first-field-fallback.md)).
 - 바뀌지 않는 것: 반출·재취급 업무 완료 조건(ADR 0005 결정 6의 A·B 부분), 사람 확인 출처 분리(ADR 0023), Fleet 승인 경계(ADR 0012·0015).
