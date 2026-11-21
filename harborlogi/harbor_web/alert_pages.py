@@ -11,6 +11,7 @@ from django.views.decorators.http import require_http_methods
 from harbor.departure import DepartureLedger
 from harbor_web import access
 from harbor_web.auth import require_roles, roles
+from harbor_web.intake_pages import intake_alert_items
 from harbor_web.models import DepartureIntent, FieldEpisode
 from harbor_web.operations import operations_context
 from harbor_web.views import selected_observation
@@ -114,7 +115,11 @@ def alerts_context(request, *, observation=None, operations=None):
             detail = f'차량 {episode.vehicle_id}'
         alerts.append(dict(title=title, detail=detail, count=1,
             href=f'/field/{episode.pk}/' if can_open_field else None, action='배정 보기'))
-    return dict(alerts=alerts, alert_total=sum(item['count'] for item in alerts))
+    intake_status = ''
+    if can_read:
+        intake_items, intake_status = intake_alert_items(can_read)
+        alerts.extend(intake_items)
+    return dict(alerts=alerts, alert_total=sum(item['count'] for item in alerts), intake_status=intake_status)
 
 
 @require_roles(*access.EVERYONE)
