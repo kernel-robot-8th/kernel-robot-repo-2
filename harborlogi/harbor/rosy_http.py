@@ -1,9 +1,10 @@
 import ipaddress
+import http.client
 import json
 import math
 import re
 from urllib.parse import quote, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -16,7 +17,7 @@ class FleetIdentityError(ValueError):
 
 
 class RosyClient:
-    def __init__(self, base_url=None, token=None, *, timeout=10, transport=None):
+    def __init__(self, base_url=None, token=None, *, timeout=10, transport=None, ca_file=None):
         if transport is not None:
             self._request = transport
             return
@@ -25,8 +26,10 @@ class RosyClient:
             loopback = parsed.hostname == "localhost" or ipaddress.ip_address(parsed.hostname).is_loopback
         except ValueError:
             loopback = False
-        if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password
+        if (not isinstance(base_url, str) or any(c.isspace() or ord(c) < 32 for c in base_url)
+                or parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password
                 or parsed.query or parsed.fragment or parsed.path not in {"", "/"}
+                or parsed.port == 0
                 or parsed.scheme == "http" and not loopback):
             raise ValueError("Expected an HTTPS Fleet origin, or loopback HTTP")
         if not isinstance(token, str) or not token or any(ord(c) < 32 for c in token):
@@ -34,15 +37,28 @@ class RosyClient:
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("Expected a positive finite HTTP timeout")
         self._origin, self._token, self._timeout = base_url.rstrip("/"), token, timeout
-        self._opener = build_opener(_NoRedirect())
+        self._ca_file = ca_file
+        self._discover = bool(ca_file and parsed.scheme == 'https' and parsed.hostname.endswith('.local'))
+        handlers = [_NoRedirect()]
+        if ca_file and not self._discover:
+            from harbor.fleet_discovery import site_ssl_context
+            handlers.append(HTTPSHandler(context=site_ssl_context(ca_file)))
+        self._opener = None if self._discover else build_opener(*handlers)
         self._request = self._http
 
     def _http(self, method, path, body):
         data = json.dumps(body, allow_nan=False).encode() if body is not None else None
         request = Request(self._origin + path, data=data, method=method,
                           headers={"Authorization": "Bearer " + self._token, "Content-Type": "application/json"})
-        with self._opener.open(request, timeout=self._timeout) as response:
-            raw = response.read(1024 * 1024 + 1)
+        opener = self._opener
+        if self._discover:
+            from harbor.fleet_discovery import discovery_opener
+            opener = discovery_opener(self._origin, self._ca_file, self._timeout)
+        try:
+            with opener.open(request, timeout=self._timeout) as response:
+                raw = response.read(1024 * 1024 + 1)
+        except http.client.HTTPException as error:
+            raise ValueError('Invalid Fleet HTTP response') from error
         if len(raw) > 1024 * 1024:
             raise ValueError("Fleet response exceeds 1 MiB")
         value = json.loads(raw)
@@ -134,8 +150,12 @@ class RosyClient:
         return self._call("GET", "/api/fleet/port-events" + query, None)
 
     def execution_profile(self):
-        # Proposed read-only platform signal (ADR0022); no platform route exists yet, so every answer is unmet.
+        # Read-only platform signal (ADR0022). The platform route exists since v1.361; a build without it answers 404, which stays unmet.
         return self._call("GET", "/api/fleet/execution-profile", None)
+
+    def workcell_observations(self):
+        """Read-only D-971 workcell observation and open arm incident status."""
+        return self._call("GET", "/api/fleet/workcell-observations", None)
 
     def request_recheck(self, mission_id, recheck_key):
         return self._call("POST", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/rechecks",
@@ -145,3 +165,55 @@ class RosyClient:
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 192 or any(ord(c) < 32 for c in reason):
             raise ValueError('Expected a short cancellation reason')
         return self._call('POST', '/api/fleet/arm-transfers/jobs/' + quote(mission_id, safe='') + '/cancel', {'reason': reason})
+
+
+def _clean_text(value, limit=200):
+    if not isinstance(value, str):
+        return ""
+    return " ".join("".join(" " if ord(c) < 32 or ord(c) == 127 else c for c in value).split())[:limit]
+
+
+def open_arm_incident_holds(snapshot):
+    """Extract held D-971 arm incidents from GET /api/fleet/workcell-observations; raises ValueError if malformed."""
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("workcells"), list):
+        raise ValueError("Invalid workcell observations payload")
+    holds = []
+    for cell in snapshot["workcells"]:
+        if not isinstance(cell, dict) or not isinstance(cell.get("arms"), list):
+            raise ValueError("Invalid workcell entry")
+        cell_id = _clean_text(cell.get("workcell_id") or "", 96)
+        for arm in cell["arms"]:
+            if not isinstance(arm, dict):
+                raise ValueError("Invalid arm entry")
+            incidents = arm.get("incidents", [])
+            if not isinstance(incidents, list):
+                raise ValueError("Invalid arm incidents entry")
+            held = []
+            for inc in incidents:
+                if not isinstance(inc, dict):
+                    raise ValueError("Invalid arm incident entry")
+                if inc.get("state") == "cleared":
+                    continue
+                decision = inc.get("decision")
+                # Fail closed like Fleet's ArmIncidentStore._holds: missing or malformed decision stays held.
+                if not isinstance(decision, dict) or decision.get("hold") is not False:
+                    held.append(inc)
+            if held:
+                first_decision = held[0].get("decision") if isinstance(held[0].get("decision"), dict) else {}
+                reason = _clean_text(first_decision.get("reason")) or "arm incident not cleared"
+                explanation = held[0].get("explanation") if isinstance(held[0].get("explanation"), dict) else None
+                assessment = explanation.get("assessment") if explanation and isinstance(explanation.get("assessment"), dict) else None
+                entry = {
+                    "workcell_id": cell_id,
+                    "source_id": _clean_text(arm.get("source_id") or "", 96),
+                    "arm_id": _clean_text(arm.get("arm_id") or "", 96),
+                    "incident_ids": [_clean_text(inc.get("incident_id") or "", 64) for inc in held[:16] if inc.get("incident_id")],
+                    "reason": reason,
+                }
+                if assessment and isinstance(assessment.get("type"), str):
+                    entry["assessment"] = {"type": _clean_text(assessment["type"], 64),
+                                           "direction": _clean_text(assessment.get("direction") or "", 64)}
+                holds.append(entry)
+                if len(holds) >= 16:
+                    return holds
+    return holds

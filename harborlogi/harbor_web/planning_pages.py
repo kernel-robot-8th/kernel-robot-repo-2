@@ -14,7 +14,8 @@ from harbor_web import commands, human_evidence, services
 from harbor_web.auth import has_role, require_roles
 from harbor_web.models import Command, Plan
 from harbor_web.pipeline import COMMAND_LABELS, pipeline_for
-from harbor_web.views import page, paginate, reason_text, selected_observation
+from harbor_web.presentation import reason_text
+from harbor_web.views import page, paginate, selected_observation
 
 
 class CommandForm(forms.Form):
@@ -65,6 +66,18 @@ def plan_detail(request, pk):
         if not has_role(request.user, 'operator'):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
+        if request.POST.get('action') == 'decide':  # a person accepts the algorithm's inbound placement (ADR 0012)
+            from django.contrib import messages
+            from harbor_web.inbound_decision import decide_placement
+            version = request.POST.get('expected_version', '')
+            if not (version.isascii() and version.isdigit()):
+                return render(request, 'error.html', dict(reason='검토한 revision이 올바르지 않습니다.', return_url=f'/plans/{pk}/'), status=400)
+            try:
+                decide_placement(request.user, plan_id=pk, expected_version=int(version))
+            except (services.Conflict, ValidationError):
+                return render(request, 'error.html', dict(heading='결정할 수 없습니다', reason='요청이나 계획이 바뀌었습니다. 최신 입고 추천을 다시 확인하세요.', return_url=f'/requests/{plan.order_id}/'), status=409)
+            messages.success(request, '입고 위치를 결정했습니다. 실제 이동은 입고 실행 연결과 관측으로 확인합니다.')
+            return redirect(f'/plans/{pk}/')
         form = CommandForm(request.POST)
         if form.is_valid():
             try:
@@ -80,14 +93,20 @@ def plan_detail(request, pk):
         return page(request, 'workspace.html', section='outbound', **workspace_context(plan.order, plan, review_observation=review_observation))
     if plan.result.get('plan_kind') == 'inbound-placement':
         from harbor_web.placement_view import placement_context
-        return page(request, 'placement_plan.html', section='cargo', **placement_context(plan))
+        from harbor_web.inbound_decision import placement_decision
+        return page(request, 'placement_plan.html', section='cargo', decision=placement_decision(plan), **placement_context(plan))
     from harbor_web.yard_scene import present_stage, scene_for
     observation_stage = None
     if plan.observation.payload.get('schema') == 'grid-placement-v1':
         from harbor_web.yard_view import spatial_yard_view
         observation_stage = present_stage(dict(spatial_yard_view(services.spatial_snapshot(plan.observation), target=plan.order.cargo.code if plan.order.cargo_id else ''),
             panel_id=f'held-plan-{plan.pk}', label='관측한 배치', index=0), plan.condition.payload)
-    return page(request, 'plan.html', section='inventory', plan=plan, display_moves=plan.result.get('moves', []) if plan.order.kind == 'REARRANGE' else [], gate=gate,
+    from harbor_web.yard_rows import place_context, placement_text
+    labels, slot = place_context(plan.condition.payload)
+    display_moves = [dict(move, source=placement_text(move['source_placement'], labels, slot),
+                          destination=placement_text(move['destination_placement'], labels, slot)) if move.get('source_placement') else move
+                     for move in (plan.result.get('moves', []) if plan.order.kind == 'REARRANGE' else [])]
+    return page(request, 'plan.html', section='inventory', plan=plan, display_moves=display_moves, gate=gate,
                 gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']), command=None,
                 observation_stage=observation_stage, yard_scene=scene_for([observation_stage]) if observation_stage else None)
 

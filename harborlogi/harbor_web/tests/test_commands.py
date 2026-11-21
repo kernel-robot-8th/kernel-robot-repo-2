@@ -350,6 +350,40 @@ class CommandTests(TestCase):
         self.assertEqual(command.state, 'CANCEL_PENDING')
         self.assertEqual(commands.command_detail(command)['ledger']['state'], 'HOLD')
 
+    def test_advance_command_state_guards_and_exception_hold(self):
+        plan = self.plan()
+        prepared = commands.prepare_command(self.operator, plan_id=plan.pk, expected_version=1)
+        registry = commands.acquire_registry()
+        self.assertEqual(commands.advance_command(prepared, registry), 'PREPARED')
+
+        job = self.job(prepared)
+        with patch.object(registry.client, 'propose_arm', return_value={'job': job}), patch.object(
+                registry.client, 'arm_request', return_value={'job': job}):
+            reconciled = commands.submit_command(self.operator, command_id=prepared.pk, expected_version=1)
+        self.assertEqual(reconciled.state, 'RECONCILED')
+
+        with patch.object(registry.client, 'arm_request', return_value={'job': job}):
+            def failing_evidence(*args):
+                raise RuntimeError('evidence failure')
+            state = commands.advance_command(reconciled, registry, evidence=failing_evidence)
+        self.assertEqual(state, 'RECONCILED')
+        reconciled.refresh_from_db()
+        self.assertEqual(reconciled.state, 'RECONCILED')
+
+        job.update(status='GOAL_CONFIRMED', resource_policy_digest='a'*64, authority_epoch=1, dispatch_generation=2)
+        receipt = dict(mission_id='mission-1', workcell_id='cell', instance_id='instance', object_ref='cargo',
+            source='bay-ref', target='out-ref', policy_digest='a'*64, authority_epoch=1, dispatch_generation=2,
+            physical_status='AT_TARGET_AND_CLEAR', validated_at_ns=3, request_digest=job['request_digest'],
+            evidence_digest='b'*64, receipt_id='receipt-1', action_id='action-1', attempt_id='attempt-1')
+        with patch.object(registry.client, 'arm_request', return_value={'job': job}), patch.object(
+                registry.client, 'physical_receipt', return_value={'receipt': receipt}):
+            with patch.object(registry.ledger, 'read', side_effect=RuntimeError('ledger failure')):
+                held_state = commands.advance_command(reconciled, registry)
+        self.assertEqual(held_state, 'UNKNOWN')
+        reconciled.refresh_from_db()
+        self.assertEqual((reconciled.state, reconciled.reason), ('UNKNOWN', 'RECONCILIATION_REQUIRED'))
+        self.assertEqual(registry.ledger.read(commands._key(reconciled))['state'], 'HOLD')
+
     def test_receipt_grant_digest_can_differ_from_transfer_body_digest(self):
         from harbor.process import ArmTransferBinding
         command = commands.prepare_command(self.operator, plan_id=self.plan().pk, expected_version=1)

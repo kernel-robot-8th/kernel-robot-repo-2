@@ -13,7 +13,7 @@ from harbor_web import commands, readiness, fleet_connection as bridge
 from harbor_web.models import Audit, Command, EvidenceProducerSetting
 from harbor_web.tests import test_rearrangement_simulation as sim
 
-ALL_MET = dict(arm='MET', evidence='MET', recheck='MET', proposal='UNMET', arm_live='MET', auto_producer='MET')
+ALL_MET = dict(arm='MET', arm_clear='MET', evidence='MET', recheck='MET', proposal='UNMET', arm_live='MET', auto_producer='MET')
 
 
 class ReadinessGateTests(TestCase):
@@ -61,6 +61,8 @@ class ReadinessGateTests(TestCase):
     def test_each_unmet_condition_blocks_with_its_own_reason(self):
         for session, conditions, expected in [
                 ('MISMATCH', {}, 'READINESS_SESSION_UNMET'), ('MATCHED', dict(arm='UNMET'), 'READINESS_ARM_UNMET'),
+                ('MATCHED', dict(arm_clear='UNMET'), 'READINESS_WORKCELL_INCIDENT_HOLD'),
+                ('MATCHED', dict(arm_clear='UNKNOWN'), 'READINESS_WORKCELL_INCIDENT_HOLD'),
                 ('MATCHED', dict(evidence='UNMET'), 'READINESS_EVIDENCE_UNMET'),
                 ('MATCHED', dict(recheck='UNKNOWN'), 'READINESS_EVIDENCE_UNMET')]:
             self.check(session=session, **conditions)
@@ -118,6 +120,7 @@ class ReadinessGateTests(TestCase):
             self.assertTrue(all(m == 'GET' and b is None for m, b in calls))
             self.assertEqual(Command.objects.count(), 0)
             self.assertEqual(result['conditions']['arm_live'], 'UNMET')
+            self.assertEqual(result['conditions']['arm_clear'], 'UNMET')
             self.assertEqual(result['conditions']['evidence'], 'UNMET')
 
     def test_platform_signal_parsing_is_strict(self):

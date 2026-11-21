@@ -1,7 +1,6 @@
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
@@ -11,6 +10,7 @@ from harbor_web import forms, services
 from harbor_web.auth import has_role, require_roles
 from harbor_web.cargo_history import cargo_history as build_history
 from harbor_web.order_timeline import order_timeline as build_timeline
+from harbor_web.topview_proxy import topview_context
 from harbor_web.models import Audit, Cargo, CargoFootprint, Command, Condition, FieldEpisode, Observation, Order, Plan
 
 
@@ -69,6 +69,11 @@ def overview(request):
     requests += list(Order.objects.exclude(kind='REARRANGE').exclude(pk__in=issue_ids).select_related('cargo').order_by('priority_group', 'sequence', 'id')[:12 - len(requests)])
     executions = {command.plan.order_id: command for command in Command.objects.filter(plan__order_id__in=[order.pk for order in requests]).select_related('plan').order_by('pk')}  # newest wins
     plans = {p.order_id: p for p in Plan.objects.filter(order_id__in=[o.pk for o in requests]).order_by('id')}
+    inbound_ids = [o.pk for o in requests if o.kind == 'INBOUND']
+    inbound_episodes = (
+        {e.order_id: e for e in FieldEpisode.objects.filter(order_id__in=inbound_ids).select_related('order__cargo', 'assigned_to').order_by('pk')}
+        if inbound_ids else {}
+    )
     rows = []
     current_queue_digest = services.queue_digest()
     for order in requests:
@@ -77,7 +82,7 @@ def overview(request):
         row = dict(order=order, plan=plan, action=action, reason=reason_text(plan.result['reason']) if plan else ('입고 실행 인계 조건을 확인하세요.' if order.kind == 'INBOUND' else '관측 원본과 반출 순서를 검토하세요.'), status=plan.result['status'] if plan else '', status_label=plan.result['status'] if plan else '계획 전', href=f'/requests/{order.pk}/')
         if order.kind == 'INBOUND':
             from harbor_web.field_pages import episode_status
-            episode = FieldEpisode.objects.filter(order=order).select_related('order__cargo', 'assigned_to').order_by('-pk').first()
+            episode = inbound_episodes.get(order.pk)
             if episode:
                 state = episode_status(episode)
                 row.update(action=state['action'], reason=state['reason'], href=state['href'],
@@ -92,6 +97,11 @@ def overview(request):
                 row.update(action='입고 추천·변경 근거 확인', reason=reason_text(plan.result['reason']),
                     status=plan.result['status'], status_label='입고 배치 추천' if plan.result['status'] == 'READY' else '입고 배치 보류',
                     href=f'/plans/{plan.pk}/')
+                from harbor_web.inbound_decision import placement_decision
+                if plan.result['status'] == 'READY' and plan.order_version == order.version:
+                    decided = placement_decision(plan)
+                    row.update(status_label='입고 위치 결정됨' if decided else '입고 결정 대기',
+                               action='결정 내용 보기' if decided else '추천 위치 결정')
         changes = plan_changes(order, plan, current_queue_digest=current_queue_digest)
         if changes:
             row.update(status='HOLD', status_label='계획 재검토', reason=changes[0]['message'], action='최신 기준으로 검토', href=f'/requests/{order.pk}/')
@@ -122,7 +132,7 @@ def overview(request):
     operations = operations_context(observation)
     for job in operations['workload']['plans']:  # the timeline panel shows the last recorded facts of each listed job
         job['facts'] = build_timeline(job['plan'].order)['actual_line'][-4:]
-    return page(request, 'overview.html', section='overview', rows=rows, operations=operations, observations=observations,
+    return page(request, 'overview.html', section='overview', rows=rows, operations=operations, observations=observations, topview=topview_context(),
                 observation=observation, condition=observation.condition if observation else None,
                 field_pending=FieldEpisode.objects.filter(state='OPEN').count())
 
@@ -220,7 +230,7 @@ def outbound_queue(request):
         label = COMMAND_LABELS.get(command.state, command.state) if command else '계획 재검토' if changes else '계획 보류' if plan and plan.result['status'] == 'HOLD' else '계획 검토됨' if plan else '계획 전'
         rows.append(dict(order=order, plan=plan, command=command, status_label=label,
             status=command.state if command else 'HOLD' if changes else plan.result['status'] if plan else '',
-            reason='원래 실행의 상태와 업무 근거를 대조하세요.' if command else changes[0]['message'] if changes else reason_text(plan.result['reason']) if plan else '관측 재고를 선택해 재취급·반출·복귀를 검토하세요.'))
+            reason='원래 실행의 상태와 업무 근거를 대조하세요.' if command else changes[0]['message'] if changes else reason_text(plan.result['reason']) if plan else '야드 현황을 골라 재취급·반출·복귀를 검토하세요.'))
     lanes = services.outbound_lanes() if not q else []
     if lanes:
         from harbor_web.tier_simulation import tier_recommendations
@@ -300,14 +310,8 @@ def order_new(request):
     form = forms.OrderForm(request.POST or None, initial=initial)
     if request.method == 'POST' and form.is_valid():
         data = dict(form.cleaned_data)
-        make_first = data.pop('make_first')
-        if data.get('sequence') is None:  # last in its tier unless a script sends a sequence
-            data['priority_group'], data['sequence'] = services.back_of_tier(data['priority_group'], data['kind'])
-        try:
-            with transaction.atomic():
-                obj = services.create_order(request.user, **data)
-                if make_first and obj.kind == 'OUTBOUND':
-                    services.move_outbound_to_front(request.user, obj)
+        try:  # last in its tier unless a script sends a sequence; one locked transaction with the move to the front
+            obj = services.register_order(request.user, make_first=data.pop('make_first'), **data)
         except ValidationError as error:
             form_error(form, error)
         except services.Conflict:
@@ -400,19 +404,30 @@ def inventory(request):
             else yard_view(selected.payload['bays'], selected.condition.payload)) if selected else None
     stage = present_stage(dict(view, panel_id='inventory-yard', label='관측한 배치', index=0), condition.payload) if view else None
     scene = scene_for([stage]) if stage else map_scene(condition.payload) if condition else None
+    from harbor_web.yard_rows import place_context, placement_text, slot_key, spot_label
+    labels, slot = place_context(condition.payload) if condition else ({}, None)
     definition_rows = []
     if scene and not selected:
         for area in scene['areas']:
+            if slot:  # fixed container slots: one row per slot, every level at once
+                for row in range(1, area['rows'] + 1):
+                    for first in range(1, area['columns'] + 1, slot.size):
+                        spot = dict(area_id=area['id'], row=row, column=first)
+                        definition_rows.append(dict(area=area['label'], position_id=slot_key(spot, slot),
+                            place=f"{spot_label(spot, labels, slot)} · {area['levels']}층까지"))
+                continue
             for level in range(1, area['levels'] + 1):
                 cells = (condition.payload['yard_layout']['cells'] if area['id'] == 'yard' else
                     [dict(bay_id=f"{area['id']}-R{r}C{c}", row=r, column=c)
                      for r in range(1, area['rows'] + 1) for c in range(1, area['columns'] + 1)])
                 definition_rows.extend(dict(area=area['label'], position_id=f"{cell['bay_id']}-L{level}",
-                    row=cell['row'], column=cell['column'], level=level) for cell in cells)
-    return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices,
+                    place=f"{cell['row']}행 {cell['column']}열 {level}층") for cell in cells)
+    placement_rows = [dict(cargo=item['cargo_id'], place=placement_text(item, labels, slot))
+                      for item in (selected.payload.get('placements', []) if selected else [])]
+    return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices, topview=topview_context(),
                 condition=condition, condition_filter='condition' in request.GET,
                 conditions=Condition.objects.order_by('-pk'), definition_rows=definition_rows,
-                yard_stage=stage, yard_scene=scene)
+                placement_rows=placement_rows, yard_stage=stage, yard_scene=scene)
 
 
 @require_roles('admin')
@@ -433,31 +448,4 @@ def condition_new(request):
     return form_page(request, form_type=forms.ConditionForm, title='설치 기준 등록', section='settings', description='검증 기록의 참조와 계획 조건을 새 버전으로 보존합니다. 진행 중 작업의 기준은 바꾸지 않습니다.', save=lambda data: services.register_condition(request.user, **data), destination='/settings/')
 
 
-def reason_text(code):
-    return {
-        'PLACEMENT_RECOMMENDATION_REQUIRES_EXECUTION_BINDINGS': '반출 순서를 고려한 입고 위치를 계산했습니다. 실제 입고에는 설치 대응과 승인·관측 근거가 필요합니다.',
-        'INBOUND_ALREADY_OBSERVED': '이 화물은 이미 관측에 배치되어 있습니다. 새 입고 위치를 중복 생성하지 않습니다.',
-        'NO_LEGAL_PLACEMENT': '화물의 전체 크기·지지·도달 조건을 만족하는 보관 위치가 없습니다.',
-        'PLACEMENT_SEARCH_LIMIT_REACHED': '배치 후보 검토 한도에 도달했습니다. 위치를 임의로 확정하지 않고 보류합니다.',
-        'OBSERVATION_CARGO_LIMIT_REACHED': '관측 화물 수 한도에 도달해 입고 배치를 보류합니다.',
-        'SOURCE_CONDITION_CHANGED': '결속한 출처의 설치 기준이 바뀌었습니다. 새 기준의 관측을 직접 선택해 다시 계산하세요.',
-        'INCOMING_FOOTPRINT_REQUIRED': '입고 화물의 점유 크기 원본이 필요합니다.',
-        'OTHER_COMMAND_REQUIRES_RECONCILIATION': '다른 인계 작업의 실제 실행 상태를 먼저 대조해야 합니다. 자동 계산으로 실행 중인 배치를 추측하지 않습니다.',
-        'SPATIAL_OBSERVATION_REQUIRED': '이 화물의 다칸 점유 크기를 확인할 수 있는 공간 관측 원본이 필요합니다.',
-        'NO_LEGAL_SPATIAL_PLAN': '전체 점유 면적과 지지 조건을 만족하는 임시 배치·반출·복귀 계획을 찾지 못했습니다.',
-        'SPATIAL_SEARCH_LIMIT_REACHED': '공간 계획의 검토 한도에 도달했습니다. 공간이 없다고 단정하지 않고 보류합니다.',
-        'PROPOSAL_REQUIRES_ADMISSION_AND_EVIDENCE': '계획을 만들었습니다. 실행 전 설치 대응과 승인·근거 조건을 확인하세요.',
-        'PRIORITY_ORDER_BLOCKED': '앞선 반출 지시가 있습니다. 우선순위와 그룹 안 허용 순서를 확인하세요.',
-        'INBOUND_PLANNER_NOT_AVAILABLE': '이 원본 형식으로는 입고 배치를 계산할 수 없습니다. 전체 구역·점유 크기가 포함된 공간 관측을 선택하세요. 입력한 요청은 보존됩니다.',
-        'REVISION_CONFLICT': '검토한 관측 revision과 현재 기준이 다릅니다.',
-        'OBSERVATION_NOT_CURRENT': '관측이 오래되었거나 시각을 확인할 수 없습니다. 최신 원본이 필요합니다.',
-        'PHYSICAL_HOLDING_REQUIRES_RECONCILIATION': '들고 있는 화물이 있어 실제 인계 상태 확인이 필요합니다.',
-        'OUTBOUND_NOT_OBSERVED': '목표 화물을 관측 원본에서 찾을 수 없습니다.',
-        'OUTBOUND_NOT_IN_A_BAY': '목표 화물이 보관 칸에서 확인되지 않았습니다.',
-        'OUTBOUND_ALREADY_ON_STAND_REQUIRES_EVIDENCE': '반출대에 있는 화물의 완료 근거를 확인해야 합니다.',
-        'OUTBOUND_STAND_FULL': '반출대에 빈자리가 없습니다.',
-        'OUTBOUND_MOVE_UNAVAILABLE': '보관 칸에서 반출대로 허용된 이동이 없습니다.',
-        'NO_LEGAL_TEMPORARY_BAY': '방해 화물을 둘 유효한 임시 공간이 없습니다.',
-        'ARM_REACH_UNVERIFIED': '팔의 도달 가능성 검증 참조가 없습니다.',
-        'NO_ARM_REACHES_MOVE': '이 이동을 수행할 수 있는 팔 대응이 없습니다.',
-    }.get(code, '원본과 연결 조건을 확인해야 합니다.')
+from harbor_web.presentation import reason_text  # re-exported for legacy callers/tests
