@@ -11,6 +11,8 @@ from harbor.spatial import Area, CargoShape, Placement, SpatialSnapshot
 from harbor_web import services
 from harbor_web.models import Cargo, CargoFootprint
 from harbor_web.tests import test_multicell_view
+from harbor_web.yard_scene import present_stage, scene_for
+from harbor_web.yard_view import spatial_yard_view
 from harbor_web.yard_rows import place_context, place_label, placement_text, rows_from_snapshot, slot_key
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,63 +35,143 @@ def site_policy():
 class YardRowsTests(SimpleTestCase):
     def test_mixed_footprints_show_every_cargo_of_a_slot_level(self):
         snapshot = test_multicell_view.SpatialViewTests.snapshot(self)  # C1 2×1 under C2 1×1 in row 1, C5 3×1 in row 3
-        view = rows_from_snapshot(snapshot, labels={'temp': '임시 장치', 'stand': '반출대'}, temporary=['temp'],
+        view = rows_from_snapshot(snapshot, labels={'temp': '임시 판', 'stand': '반출대'}, temporary=['temp'],
                                   outbound='stand', targets={'C1'}, rehandles={'C2'})
         lanes = {lane['number']: lane for lane in view['yard']['lanes']}
-        self.assertEqual([len(lane['slots']) for lane in lanes.values()], [1, 1, 1])  # a 3-cell row is one slot
+        self.assertEqual([len(lane['slots']) for lane in lanes.values()], [3])  # logical rows become display columns
         stack = lanes[1]['slots'][0]['stack']
         self.assertEqual([(e['level'], e['cargo'], e['role'], e['partial']) for e in stack],
                          [(1, 'C1', 'target', True), (2, 'C2', 'rehandle', True)])
-        self.assertEqual(lanes[2]['slots'][0]['stack'], [])
-        self.assertEqual([(e['cargo'], e['partial']) for e in lanes[3]['slots'][0]['stack']], [('C5', False)])
+        self.assertEqual(lanes[1]['slots'][1]['stack'], [])
+        self.assertEqual([(e['cargo'], e['partial']) for e in lanes[1]['slots'][2]['stack']], [('C5', False)])
         self.assertEqual([(a['id'], a['role'], a['used'], a['slots']) for a in view['below']],
                          [('temp', '임시 적재', 0, 3), ('stand', '반출', 0, 1)])
-        self.assertEqual(view['dimensions'], '3행 · 3층')
+        self.assertEqual(view['dimensions'], '1행 × 3열 · 3층')
 
     def test_a_one_by_three_container_is_one_slot_of_its_row(self):
         base = test_multicell_view.SpatialViewTests.snapshot(self)
         snapshot = SpatialSnapshot(1, base.observed_at, base.layout, base.areas,
             (CargoShape('A', 3, 1), CargoShape('B', 3, 2)), (Placement('A', 'yard', 2, 1, 1), Placement('B', 'yard', 2, 1, 2)))
-        slot = rows_from_snapshot(snapshot)['yard']['lanes'][1]['slots'][0]
+        slot = rows_from_snapshot(snapshot)['yard']['lanes'][0]['slots'][1]
         self.assertEqual(slot['height'], 2)
         self.assertEqual([(e['level'], e['cargo'], e['partial']) for e in slot['stack']], [(1, 'A', False), (2, 'B', False)])
 
-    def test_site_map_has_two_slots_per_row_and_a_tray_on_each_side(self):
+    def test_site_map_transposes_slots_without_changing_keys_or_cargo(self):
         policy = site_policy()
         areas = (Area('yard', 3, 6, 3), *(Area(**area) for area in policy['spatial_areas']))
         snapshot = SpatialSnapshot(1, timezone.now(), YardLayout.from_dict(policy['yard_layout']), areas,
             (CargoShape('K1', 3, 1), CargoShape('K2', 3, 2), CargoShape('T1', 3, 3)),
             (Placement('K1', 'yard', 1, 4, 1), Placement('K2', 'yard', 1, 4, 2), Placement('T1', 'temp_b', 2, 1, 1)))
-        view = rows_from_snapshot(snapshot, labels={k: v['label'] for k, v in policy['area_presentation'].items()},
+        view = rows_from_snapshot(snapshot, labels=place_context(policy)[0],
                                   temporary=policy['temporary_bays'], outbound='stand', targets={'K1'}, rehandles={'K2'},
-                                  presentation=policy['area_presentation'], slot=policy['slot_cells'])
-        self.assertEqual([[s['label'] for s in lane['slots']] for lane in view['yard']['lanes']], [['1칸', '2칸']] * 3)
-        slot = view['yard']['lanes'][0]['slots'][1]
+                                  presentation=present_stage(dict(spatial_yard_view(snapshot), index=0, label='배치'), policy)['area_presentation'],
+                                  slot=policy['slot_cells'])
+        self.assertEqual([[s['label'] for s in lane['slots']] for lane in view['yard']['lanes']], [['1열', '2열', '3열']] * 2)
+        slot = view['yard']['lanes'][1]['slots'][0]
         self.assertEqual((slot['key'], [(e['level'], e['cargo'], e['role']) for e in slot['stack']]),
                          ('yard-R1S2', [(1, 'K1', 'target'), (2, 'K2', 'rehandle')]))
         self.assertEqual((view['yard']['used'], view['yard']['slots']), (2, 18))
-        self.assertEqual([[a['id'] for a in view[side]] for side in ('left', 'right', 'below')], [['temp_a'], ['temp_b'], ['stand']])
+        self.assertEqual([[a['id'] for a in view[side]] for side in ('left', 'right', 'below')], [['temp_a', 'stand'], ['temp_b'], []])
         tray = view['right'][0]
-        self.assertEqual([s['label'] for lane in tray['lanes'] for s in lane['slots']], ['1번', '2번', '3번'])
-        self.assertEqual((tray['label'], tray['used'], tray['slots'], tray['cargo']), ('임시 장치 B(오른쪽)', 1, 9, ['T1']))
-        self.assertEqual(view['dimensions'], '3행 × 한 행 2자리 · 3층')
+        self.assertEqual([s['label'] for lane in tray['lanes'] for s in lane['slots']], ['1레인', '2레인', '3레인'])
+        self.assertEqual((tray['label'], tray['used'], tray['slots'], tray['cargo']), ('임시 판 B', 1, 9, ['T1']))
+        self.assertEqual(view['dimensions'], '2행 × 3열 · 3층')
+
+    def test_flat_slots_and_scene_share_logical_positions_and_display_names(self):
+        from copy import deepcopy
+        policy = site_policy()
+        original = deepcopy(policy)
+        areas = (Area('yard', 3, 6, 3), *(Area(**area) for area in policy['spatial_areas']))
+        placements = tuple(Placement(f'K{r}{s}', 'yard', r, 1 + (s - 1) * 3, 1)
+                           for r in range(1, 4) for s in range(1, 3))
+        snapshot = SpatialSnapshot(1, timezone.now(), YardLayout.from_dict(policy['yard_layout']), areas,
+            tuple(CargoShape(p.cargo_id, 3, i + 1) for i, p in enumerate(placements)), placements)
+        stage = present_stage(dict(spatial_yard_view(snapshot), index=0, label='배치'), policy)
+        scene = scene_for([stage])
+        labels, site = place_context(policy)
+        boxes = {b['id']: b for b in scene['frames'][0]['boxes']}
+        for display_row, lane in enumerate(stage['slot_map']['yard']['lanes'], 1):
+            self.assertEqual(lane['label'], f'{display_row}행')
+            for display_column, slot in enumerate(lane['slots'], 1):
+                code = f'K{display_column}{display_row}'
+                self.assertEqual(slot['stack'][0]['cargo'], code)
+                box = boxes[code]
+                self.assertEqual(slot['key'], slot_key(dict(area_id=box['area'], **box), site))
+                self.assertEqual(place_label(dict(area_id=box['area'], **box), labels, site),
+                                 f'{display_row}행 {display_column}열 1층')
+                self.assertEqual(box['positions'][0], f'Y{display_column}{1 + (display_row - 1) * 3}-L1')
+        self.assertEqual([a['label'] for a in scene['areas']], ['장치 야드(배)', '임시 판 A', '임시 판 B', '반출대'])
+        by_id = {a['id']: a for a in scene['areas']}
+        self.assertEqual(by_id['stand']['y'], by_id['temp_a']['y'])
+        self.assertGreater(by_id['stand']['x'], by_id['yard']['columns'])
+        self.assertEqual(policy, original)  # includes arm_reach and all stored plan coordinates
+
+    def test_custom_slot_map_names_and_nonoverlapping_rectangles_are_preserved(self):
+        from copy import deepcopy
+        from harbor_web.yard_scene import area_presentation
+        policy = site_policy()
+        policy['area_presentation']['temp_a']['label'] = '별도 적재면'
+        policy['area_presentation']['stand']['x'] = 0
+        policy['area_presentation']['stand']['y'] = 8
+        expected = deepcopy(policy['area_presentation'])
+        shown = area_presentation(policy)
+        self.assertEqual(shown['temp_a'], expected['temp_a'])
+        self.assertEqual(shown['stand'], expected['stand'])
+        self.assertEqual(shown['temp_b']['label'], '임시 판 B')
+        self.assertEqual(policy['area_presentation'], expected)
+
+    def test_legacy_stand_adjustment_does_not_overlap_another_custom_area(self):
+        from harbor_web.yard_scene import area_presentation
+        policy = site_policy()
+        policy['spatial_areas'].append(dict(area_id='extra', rows=1, columns=3, levels=1))
+        policy['storage_areas'] = ['yard', 'extra']
+        policy['area_presentation']['extra'] = dict(label='다른 판', x=7.2, y=-4.2)
+        services.area_presentation(policy)  # The source rectangles are valid.
+        self.assertEqual(area_presentation(policy)['stand'], policy['area_presentation']['stand'])
+
+    def test_missing_display_metadata_resolves_consistently_for_scene_and_slots(self):
+        policy = site_policy()
+        del policy['area_presentation']
+        areas = (Area('yard', 3, 6, 3), *(Area(**area) for area in policy['spatial_areas']))
+        snapshot = SpatialSnapshot(1, timezone.now(), YardLayout.from_dict(policy['yard_layout']), areas, (), ())
+        stage = present_stage(dict(spatial_yard_view(snapshot), index=0, label='배치'), policy)
+        self.assertIn('area_presentation', stage)
+        expected = services.area_presentation(policy)
+        self.assertEqual(stage['area_presentation'], expected)
+        scene = scene_for([stage])
+        self.assertEqual({a['id']: (a['x'], a['y'], a['label']) for a in scene['areas']},
+                         {key: (v['x'], v['y'], v['label']) for key, v in expected.items()})
+
+    def test_read_only_map_scene_uses_observed_display_without_editing_map_draft(self):
+        from copy import deepcopy
+        from harbor_web.map_config import editor_draft, map_scene
+        policy = site_policy()
+        original = deepcopy(policy)
+        scene = map_scene(policy)
+        by_id = {a['id']: a for a in scene['areas']}
+        self.assertEqual(by_id['temp_a']['label'], '임시 판 A')
+        self.assertEqual(by_id['stand']['y'], by_id['temp_a']['y'])
+        draft = {a['id']: a for a in editor_draft(policy)['areas']}
+        self.assertEqual(draft['temp_a']['label'], original['area_presentation']['temp_a']['label'])
+        self.assertEqual(draft['stand']['y'], 1)
+        self.assertEqual(policy, original)
 
     def test_place_label_reads_rows_and_slots(self):
         self.assertEqual(place_label(dict(area_id='yard', row=2, column=1, level=3)), '2행 3층')
-        self.assertEqual(place_label(dict(area_id='yard', row=2, column=4, level=1), slot=3), '2행 2칸 1층')
-        self.assertEqual(place_label(dict(area_id='temp', row=1, column=1, level=1), {'temp': '임시 장치'}), '임시 장치 1층')
-        self.assertEqual(place_label(dict(area_id='temp_a', row=3, column=1, level=1), {'temp_a': '임시 장치 A'}, 3),
-                         '임시 장치 A 3번 1층')
+        self.assertEqual(place_label(dict(area_id='yard', row=2, column=4, level=1), slot=3), '2행 2열 1층')
+        self.assertEqual(place_label(dict(area_id='temp', row=1, column=1, level=1), {'temp': '임시 판'}), '임시 판 1층')
+        self.assertEqual(place_label(dict(area_id='temp_a', row=3, column=1, level=1), {'temp_a': '임시 판 A'}, 3),
+                         '임시 판 A 3레인 1층')
         self.assertEqual(place_label(None), '반입(컨베이어)')
         self.assertEqual(slot_key(dict(area_id='yard', row=1, column=4), 3), 'yard-R1S2')
         self.assertEqual(placement_text(dict(area_id='yard', row=1, column=2, level=1, orientation=90)), '1행 1층 · 2열 · 90°')
-        self.assertEqual(placement_text(dict(area_id='yard', row=1, column=4, level=1, orientation=0), slot=3), '1행 2칸 1층')
+        self.assertEqual(placement_text(dict(area_id='yard', row=1, column=4, level=1, orientation=0), slot=3), '2행 1열 1층')
 
     def test_site_labels_drop_a_lone_slot_number_and_level(self):
         labels, site = place_context(site_policy())
         self.assertEqual((site.size, site.one_slot, site.one_level), (3, {'stand'}, {'stand'}))
-        self.assertEqual(place_label(dict(area_id='yard', row=1, column=4, level=3), labels, site), '1행 2칸 3층')
-        self.assertEqual(place_label(dict(area_id='temp_a', row=2, column=1, level=1), labels, site), '임시 장치 A(왼쪽) 2번 1층')
+        self.assertEqual(place_label(dict(area_id='yard', row=1, column=4, level=3), labels, site), '2행 1열 3층')
+        self.assertEqual(place_label(dict(area_id='temp_a', row=2, column=1, level=1), labels, site), '임시 판 A 2레인 1층')
         self.assertEqual(place_label(dict(area_id='stand', row=1, column=1, level=1), labels, site), '반출대')
         self.assertEqual(slot_key(dict(area_id='yard', row=3, column=4), site), 'yard-R3S2')
         self.assertEqual(place_context(example_policy())[1], None)
@@ -119,7 +201,9 @@ class ControlBoardPagesTests(TestCase):
 
     def test_overview_links_jobs_to_yard_slots_and_their_timeline(self):
         self.assertEqual(self.plan.result['status'], 'READY')
-        html = self.client.get(f'/?observation={self.observation.pk}').content.decode()
+        response = self.client.get(f'/?observation={self.observation.pk}')
+        self.assertEqual(len(response.context['operations']['yard']['yard']['lanes']), 3)
+        html = response.content.decode()
         for text in ('data-yard-row="yard-R1S1"', 'data-yard-row="yard-R3S1"', f'data-job="{self.plan.pk}"',
                      f'data-job-timeline="{self.plan.pk}"', '반출 C1', 'slot-level role-target', 'slot-level role-rehandle',
                      '<b>1층</b> C1', '<b>2층</b> C2', '실제 완료량·처리율', 'id="observation-select"', '장비 상태판 · 보류'):
@@ -161,15 +245,17 @@ class SiteMapPagesTests(TestCase):
         response = self.client.get(f'/?observation={self.observation.pk}')
         inventory = response.context['operations']['inventory']
         self.assertEqual((inventory['occupied'], inventory['capacity'], inventory['occupancy_percent']), (4, 18, 22))
+        self.assertEqual([a['label'] for a in inventory['auxiliary']], ['임시 판 A', '임시 판 B', '반출대'])
         html = response.content.decode()
-        for text in ('장치 야드 4 / 18자리', '장치 야드(배)', '임시 장치 A(왼쪽)', '임시 장치 B(오른쪽)', '반출대', 'site-left', 'site-right',
-                     'data-yard-row="yard-R1S2"', '<span class="slot-name">2칸</span>', '3행 × 한 행 2자리 · 3층'):
+        for text in ('장치 야드 4 / 18자리', '장치 야드(배)', '임시 판 A', '임시 판 B', '반출대', 'site-left', 'site-right',
+                     'data-yard-row="yard-R1S2"', '<span class="slot-name">2열</span>'):
             self.assertIn(text, html)
+        self.assertNotIn('2행 × 3열 · 3층', html)
         for move in self.plan.result['moves']:
             self.assertEqual((move['destination_placement']['column'] - 1) % 3, 0)
         steps = response.context['operations']['workload']['plans'][0]['steps']
         self.assertEqual([(s['phase'], s['source'], s['destination']) for s in steps if s['phase'] == '반출'],
-                         [('반출', '1행 1칸 1층', '반출대')])
+                         [('반출', '1행 1열 1층', '반출대')])
         self.assertNotIn('반출대 1번', html)
 
     def test_inventory_lists_slots_without_sizes_or_turns(self):
@@ -177,8 +263,8 @@ class SiteMapPagesTests(TestCase):
         self.assertIsNotNone(response.context['yard_stage']['slot_map'])
         self.assertEqual(response.context['yard_scene']['slot_cells'], 3)  # the 3D page draws the same slots
         html = response.content.decode()
-        for text in ('data-yard-plan', '자리 평면', '<td>K3</td><td>1행 2칸 1층</td>', '<b>2층</b> K2'):
+        for text in ('data-yard-plan', '자리 평면', '기준 셀 행', '화면 가로(X)는 셀 행', '<td>K3</td><td>2행 1열 1층</td>', '<b>2층</b> K2'):
             self.assertIn(text, html)
         for text in ('방향·크기', 'colspan="3"', '크기 원본 #', 'covered-addresses'):  # the what-if editor keeps its own inputs
             self.assertNotIn(text, html)
-        self.assertContains(self.client.get(f'/plans/{self.plan.pk}/'), '1행 1칸')
+        self.assertContains(self.client.get(f'/plans/{self.plan.pk}/'), '1행 1열')

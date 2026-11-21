@@ -5,12 +5,13 @@ containers by level ("1층 K1 · 2층 K2"); sizes, turns and covered cells are f
 between several cargo (older 1×1 or 2×1 footprints) still shows every one of them. Read-only.
 
 Areas are placed like the site map: the configured presentation puts trays before the first row (left), after the
-last row (right) or past the last column (below the yard, e.g. the conveyor). The yard's rows are drawn as lanes.
+last row (right) or past the last column (below the yard, e.g. the conveyor). Display rows follow logical slots; logical rows become display columns.
 """
 from dataclasses import dataclass
 
 from harbor_web import services
 from harbor_web.yard_occupancy import AREA_LABELS
+from harbor_web.yard_scene import area_presentation
 
 DEFAULT_SLOT = 3
 ROLES = {'target': 'target', 'blocker': 'rehandle', 'rehandle': 'rehandle', 'stored': 'cargo', 'cargo': 'cargo'}
@@ -24,7 +25,7 @@ def _slot_ranges(columns, slot):
     return [(first, min(first + slot - 1, columns)) for first in range(1, columns + 1, slot)]
 
 
-def build_map(areas, occupant, *, labels, temporary, outbound, presentation, slot):
+def build_map(areas, occupant, *, labels, temporary, outbound, presentation, slot, transpose=True):
     """areas: [(area_id, rows, columns, levels)], yard first; occupant(area, row, column, level) -> (code, role).
 
     ``outbound`` is one outbound area id or a collection of them (design 33 allows one per arm plate).
@@ -48,13 +49,18 @@ def build_map(areas, occupant, *, labels, temporary, outbound, presentation, slo
                         partial = len(codes) > 1 or any(code is None for code, _ in found)
                         stack.append(dict(level=level, cargo=', '.join(code for code, _ in codes),
                                           role=codes[0][1] if len(codes) == 1 else 'cargo', partial=partial))
-                label = (f'{number}칸' if len(ranges) > 1 else '') if area_id == 'yard' else (f'{row}번' if rows > 1 else '')
+                label = (f'{row}열' if transpose else (f'{number}칸' if len(ranges) > 1 else '')) if area_id == 'yard' else (f'{row}레인' if rows > 1 else '')
                 slots.append(dict(number=number, key=f'{area_id}-R{row}S{number}', label=label, stack=stack,
                                   height=max((entry['level'] for entry in stack), default=0), levels=levels))
             lanes.append(dict(number=row, key=f'{area_id}-R{row}', label=f'{row}행', slots=slots))
+        if area_id == 'yard' and transpose:
+            lanes = [dict(number=number, key=f'{area_id}-S{number}', label=f'{number}행',
+                          slots=[lane['slots'][number - 1] for lane in lanes])
+                     for number in range(1, len(ranges) + 1)]
         role = '보관' if area_id == 'yard' else '임시 적재' if area_id in temporary else '반출' if area_id in outbound else area_id
         cargo = sorted({code.strip() for lane in lanes for s in lane['slots'] for e in s['stack'] for code in e['cargo'].split(',')})
         built.append(dict(id=area_id, label=labels.get(area_id, area_id), role=role, lanes=lanes, levels=levels,
+                          columns=rows if area_id == 'yard' else rows * len(ranges), transposed=transpose,
                           slots=sum(len(lane['slots']) for lane in lanes) * levels,
                           used=sum(len(s['stack']) for lane in lanes for s in lane['slots']), cargo=cargo))
     yard, rows, columns = built[0], areas[0][1], areas[0][2]
@@ -64,17 +70,18 @@ def build_map(areas, occupant, *, labels, temporary, outbound, presentation, slo
         side = 'left' if item['y'] + area_rows <= 0 else 'right' if item['y'] >= rows else 'below'
         sides[side].append(area)
     per_row = len(_slot_ranges(columns, slot))
-    return dict(yard=yard, **sides, dimensions=f'{rows}행{f" × 한 행 {per_row}자리" if per_row > 1 else ""} · {yard["levels"]}층')
+    dimensions = (f'{per_row}행 × {rows}열' if transpose else f'{rows}행') + f' · {yard["levels"]}층'
+    return dict(yard=yard, **sides, dimensions=dimensions)
 
 
 def _labels(payload):
     if 'yard_layout' not in payload or 'spatial_areas' not in payload:
         return {}  # a bay site has no area map; its bays are named by id
-    return {area_id: item.get('label', area_id) for area_id, item in services.area_presentation(payload).items()}
+    return {area_id: item.get('label', area_id) for area_id, item in area_presentation(payload).items()}
 
 
 def rows_from_snapshot(snapshot, *, labels=None, temporary=(), outbound=None, targets=(), rehandles=(),
-                       presentation=None, slot=DEFAULT_SLOT):
+                       presentation=None, slot=DEFAULT_SLOT, transpose=True):
     """Site map of one spatial snapshot; yard first, then the auxiliary areas in snapshot order."""
     targets, rehandles = set(targets), set(rehandles) - set(targets)
     occupied = snapshot.occupied()
@@ -84,7 +91,7 @@ def rows_from_snapshot(snapshot, *, labels=None, temporary=(), outbound=None, ta
         return code, (_role(code, targets, rehandles) if code else None)
     ordered = sorted(snapshot.areas, key=lambda area: area.area_id != 'yard')
     return build_map([(a.area_id, a.rows, a.columns, a.levels) for a in ordered], occupant, labels=labels or {},
-                     temporary=set(temporary), outbound=outbound, presentation=presentation or {}, slot=slot)
+                     temporary=set(temporary), outbound=outbound, presentation=presentation or {}, slot=slot, transpose=transpose)
 
 
 def _outbound_areas(payload):
@@ -120,7 +127,8 @@ def _spatial(observation, targets, rehandles):
     payload = observation.condition.payload
     return rows_from_snapshot(services.spatial_snapshot(observation), labels=_labels(payload),
                               temporary=payload['temporary_bays'], outbound=_outbound_areas(payload), targets=targets,
-                              rehandles=rehandles, presentation=services.area_presentation(payload), slot=slot_size(payload))
+                              rehandles=rehandles, presentation=area_presentation(payload), slot=slot_size(payload),
+                              transpose=bool(payload.get('slot_cells')))
 
 
 def slot_map_from_stage(stage, payload):
@@ -140,7 +148,8 @@ def slot_map_from_stage(stage, payload):
     areas = [(s.get('area_id', 'yard'), s['layout']['rows'], s['layout']['columns'], len(s['layers'])) for s in sources]
     return build_map(areas, lambda a, r, c, z: grid.get((a, r, c, z), (None, None)), labels=_labels(payload),
                      temporary=set(payload.get('temporary_bays', [])), outbound=_outbound_areas(payload),
-                     presentation=services.area_presentation(payload), slot=slot_size(payload))
+                     presentation=area_presentation(payload), slot=slot_size(payload),
+                     transpose=bool(payload.get('slot_cells')))
 
 
 def _bays(observation, targets, rehandles):
@@ -183,21 +192,22 @@ def slot_key(placement, slot=DEFAULT_SLOT):
 
 
 def spot_label(placement, labels=None, slot=None):
-    """Where in its area, without the level: '1행' or '1행 2칸' in the yard, '임시 장치 A 1번' elsewhere.
+    """Display address without the level: '2행 1열' in the yard, '임시 판 A 1레인' elsewhere.
 
     ``slot`` is the slot width or a SlotSite; an area with a single slot is named alone.
     """
     size = getattr(slot, 'size', slot)
     if placement.get('area_id') == 'yard':
-        return f"{placement['row']}행" + (f" {(placement['column'] - 1) // size + 1}칸" if size else '')
+        return (f"{(placement['column'] - 1) // size + 1}행 {placement['row']}열"
+                if size else f"{placement['row']}행")
     label = (labels or {}).get(placement.get('area_id'), placement.get('area_id'))
-    return f"{label} {placement['row']}번" if size and placement.get('area_id') not in getattr(slot, 'one_slot', ()) else label
+    return f"{label} {placement['row']}레인" if size and placement.get('area_id') not in getattr(slot, 'one_slot', ()) else label
 
 
 def place_label(placement, labels=None, slot=None):
-    """'1행 2층' (or '1행 2칸 2층' when the site has two slots per row), '임시 장치 A 1번 1층' elsewhere.
+    """'2행 1열 2층' on a slot site, '임시 판 A 1레인 1층' elsewhere.
 
-    With a SlotSite a single-level area drops its level: '임시 장치 A 1번', '반출대'.
+    With a SlotSite a single-level area drops its level: '임시 판 A 1레인', '반출대'.
     """
     if not placement:
         return '반입(컨베이어)'
@@ -206,7 +216,7 @@ def place_label(placement, labels=None, slot=None):
 
 
 def route_text(move, labels=None, slot=None):
-    """'1행 1칸 2층 → 임시 장치 A 1번 1층' for a stored spatial move."""
+    """'1행 1열 2층 → 임시 판 A 1레인 1층' for a stored spatial move."""
     return f"{placement_text(move['source_placement'], labels, slot)} → {placement_text(move['destination_placement'], labels, slot)}"
 
 
