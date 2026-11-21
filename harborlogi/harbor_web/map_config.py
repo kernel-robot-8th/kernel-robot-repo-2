@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from harbor.layout import YardLayout
 from harbor_web import services
 from harbor_web.models import clean_text
+from harbor_web.yard_scene import area_presentation
 
 
 def _grid(rows, columns, levels):
@@ -54,6 +55,10 @@ def map_scene(payload):
     if 'yard_layout' not in payload:
         return None
     draft = editor_draft(payload)
+    if payload.get('slot_cells'):
+        presentation = area_presentation(payload)
+        for area in draft['areas']:
+            area.update(presentation[area['id']])
     return dict(kind='map-definition', observed=False, slot_cells=payload.get('slot_cells'),
         areas=[{k: a[k] for k in ('id', 'label', 'rows', 'columns', 'levels', 'x', 'y')} for a in draft['areas']],
         frames=[dict(index=0, label='배치 미관측', boxes=[], move=None)])
