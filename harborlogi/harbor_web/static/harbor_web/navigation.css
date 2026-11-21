@@ -13,7 +13,7 @@
 .nav-group-label {margin:0;padding:0 var(--primitive-space-3);max-width:none;font-size:var(--primitive-font-caption);font-weight:600;line-height:1.4;color:var(--semantic-text-inverse);opacity:.85}
 @media(min-width:901px) {
   .nav-compact .sidebar {width:var(--component-navigation-rail-width)}
-  .nav-compact main:not(.signed-out) {margin-left:var(--component-navigation-rail-width)}
+  .nav-compact main:not(.signed-out),.nav-compact .status-strip {margin-left:var(--component-navigation-rail-width)}
   .nav-compact .sidebar {padding-inline:var(--primitive-space-2)}
   .nav-compact .nav-density {justify-content:center}
   /* Rail (KAN-115 시안): icon with a short name under it, so the menu reads without hovering */

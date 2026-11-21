@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block title %}처리할 것{% endblock %}
+{% block crumb %}처리할 것{% endblock %}
+{% block content %}
+<section id="alerts-page" aria-labelledby="alerts-title">
+  <div class="page-head"><h1 id="alerts-title">처리할 것</h1></div>
+  <section class="panel" aria-labelledby="alerts-now-title">
+    <div class="panel-h"><h2 id="alerts-now-title">지금 처리할 것</h2><span class="num">{{ alert_total }}건</span></div>
+    {% if alerts %}
+    <ul class="attention-list">
+      {% for item in alerts %}
+      <li>
+        <span class="chip tone-hold">처리할 것{% if item.count > 1 %} {{ item.count }}건{% endif %}</span>
+        <span class="attention-text"><strong class="what">{{ item.title }}</strong><span class="why">{{ item.detail }}</span></span>
+        {% if item.href %}<a class="button quiet" href="{{ item.href }}">{{ item.action }}</a>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="panel-b" role="status">처리할 것 없음 · 자동 운전 중</p>
+    {% endif %}
+  </section>
+  <p class="muted">상태는 ROSY 실행 결과로 바뀜</p>
+</section>
+{% endblock %}

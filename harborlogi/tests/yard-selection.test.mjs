@@ -18,7 +18,7 @@ console.log('Logical linked selection: covered cells, levels, areas, rotations a
 
 // A slot site (KAN-115): 1×3 slots, every level of a slot at once, and place names like yard_rows.place_label.
 const areas = [{id:'yard', label:'장치 야드', rows:3, columns:6, levels:3},
-  {id:'temp_a', label:'임시 장치 A', rows:3, columns:3, levels:1}, {id:'stand', label:'반출대', rows:1, columns:3, levels:1}];
+  {id:'temp_a', label:'임시 판 A', rows:3, columns:3, levels:1}, {id:'stand', label:'반출대', rows:1, columns:3, levels:1}];
 const site = [{id:'K1', area:'yard', row:1, column:4, level:1, width:3, depth:1}, {id:'K2', area:'yard', row:1, column:4, level:2, width:3, depth:1},
   {id:'narrow', area:'yard', row:2, column:1, level:1, width:2, depth:1}, {id:'T1', area:'temp_a', row:2, column:1, level:1, width:3, depth:1}];
 const yardSlots = slotStacks(site, areas[0], 3);
@@ -29,8 +29,8 @@ assert.deepEqual([second.first, second.top, second.levels.map(entry => [entry.le
 assert.deepEqual(yardSlots.find(slot => slot.row === 2 && slot.number === 1).levels.map(entry => entry.partial), [true]);
 assert.deepEqual(yardSlots.find(slot => slot.row === 3 && slot.number === 1), {row:3, number:1, first:1, levels:[], top:0});
 assert.deepEqual(slotStacks(site, areas[1], 3).map(slot => slot.levels.length), [0, 1, 0]);
-assert.equal(slotLabel(areas, {area:'yard', row:1, column:4, level:2}, 3), '1행 2칸 2층');
-assert.equal(slotLabel(areas, {area:'temp_a', row:2, column:1, level:1}, 3), '임시 장치 A 2번');
+assert.equal(slotLabel(areas, {area:'yard', row:1, column:4, level:2}, 3), '2행 1열 2층');
+assert.equal(slotLabel(areas, {area:'temp_a', row:2, column:1, level:1}, 3), '임시 판 A 2레인');
 assert.equal(slotLabel(areas, {area:'stand', row:1, column:1, level:1}, 3), '반출대');
 assert.equal(slotLabel(areas, null, 3), '');
 console.log('Slot site: slots per row, levels at once, partial slots and place names passed');
