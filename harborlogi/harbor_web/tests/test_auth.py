@@ -99,6 +99,12 @@ class RoleTests(TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertTrue(self.user.check_password('long-test-password-472!'))
 
+    def test_username_rejects_bang_and_at(self):
+        from django.core.exceptions import ValidationError
+        for bad in ('user!name', 'user@name'):
+            with self.assertRaises(ValidationError):
+                User(username=bad).full_clean(exclude=['password'])
+
 class DatabaseOwnershipTests(TestCase):
     def test_business_database_is_rejected_without_mutation(self):
         import sqlite3
