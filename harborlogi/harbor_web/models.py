@@ -226,12 +226,20 @@ class FieldConfirmation(Immutable):
 
 
 class DepartureIntent(Immutable):
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+', null=True, blank=True)
     episode = models.OneToOneField(FieldEpisode, on_delete=models.PROTECT)
-    confirmation = models.OneToOneField(FieldConfirmation, on_delete=models.PROTECT)
+    confirmation = models.OneToOneField(FieldConfirmation, on_delete=models.PROTECT, null=True, blank=True)
+    release_event_id = models.CharField(max_length=64, blank=True, default='')
     key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     vehicle_id = models.CharField(max_length=96)
     cargo = models.ForeignKey(Cargo, on_delete=models.PROTECT)
-    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+', null=True, blank=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(
+            condition=(models.Q(confirmation__isnull=False, release_event_id='')
+                       | (models.Q(confirmation__isnull=True) & ~models.Q(release_event_id=''))),
+            name='departure_exactly_one_authorization')]
 
 
 class Measurement(Immutable):

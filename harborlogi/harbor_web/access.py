@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 PERSONAS = {'operator': '업무 담당', 'field': '현장 확인', 'admin': '설치·운영 관리', 'viewer': '조회'}
-NAV_GROUPS = (('work', '업무 처리'), ('evidence', '재고·근거'), ('field', '현장'), ('admin', '관리'), ('help', '도움말'))
+NAV_GROUPS = (('work', '업무 처리'), ('evidence', '현황·기록'), ('field', '현장'), ('admin', '관리'), ('help', '도움말'))
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,7 @@ PAGES = (
     Page('cargo', '/requests/', '화물·요청', '화물 등록과 업무 지시', READ, 'work'),
     Page('work', '/work/', '실행·대조', '인계 상태와 원본 근거', READ, 'work'),
     Page('rearrangement', '/rearrangement/', '자동 재배치', '허용 범위와 실행 기록', READ, 'work'),
-    Page('inventory', '/inventory/', '재고·관측', '원본 배치와 설치 기준', READ, 'evidence'),
+    Page('inventory', '/inventory/', '야드 현황', '자리별 컨테이너와 설치 기준', READ, 'evidence'),
     Page('records', '/records/', '기록·검증', '이력과 비교 결과', READ, 'evidence'),
     Page('field', '/field/', '현장 확인', '회차별 사실 확인', frozenset({'operator', 'field', 'admin'}), 'field'),
     Page('settings', '/settings/', '설정·계정', '팀 역할과 구역 맵', ADMIN, 'admin', True),
