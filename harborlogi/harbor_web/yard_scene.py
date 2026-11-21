@@ -13,11 +13,33 @@ def _box(cell, area):
         size=cell.get('footprint_label', '1×1'))
 
 
+def area_presentation(payload):
+    """Display-only names and spacing; pinned installation coordinates stay intact."""
+    from harbor_web import services
+    presentation = services.area_presentation(payload)
+    if payload.get('slot_cells'):
+        for area_id, suffix in (('temp', ''), ('temp_a', ' A'), ('temp_b', ' B')):
+            item = presentation.get(area_id)
+            old = f'임시 장치{suffix}'
+            if item and item['label'] in (old, old + '(왼쪽)', old + '(오른쪽)'):
+                item['label'] = AREA_LABELS[area_id]
+        stand, plate = presentation.get('stand'), presentation.get('temp_a')
+        if stand and plate and (stand['x'], stand['y'], plate['x'], plate['y']) == (7.2, 1, 0, -4.2):
+            # Only the old cell map's centered stand moves to A's side; custom maps keep their spacing.
+            areas = {a.area_id: a for a in services.map_areas(payload)}
+            candidate, size = dict(stand, y=plate['y']), areas['stand']
+            overlaps = any(candidate['x'] < p['x'] + areas[key].columns and p['x'] < candidate['x'] + size.columns
+                and candidate['y'] < p['y'] + areas[key].rows and p['y'] < candidate['y'] + size.rows
+                for key, p in presentation.items() if key != 'stand')
+            if not overlaps:
+                presentation['stand'] = candidate
+    return presentation
+
+
 def present_stage(stage, payload):
-    """Carry explicit display metadata with the pinned condition, without changing old spacing."""
-    if 'area_presentation' in payload:
-        from harbor_web import services
-        stage['area_presentation'] = services.area_presentation(payload)
+    """Carry explicit display metadata with the pinned condition, keeping logical cell addresses intact."""
+    if 'area_presentation' in payload or payload.get('slot_cells'):
+        stage['area_presentation'] = area_presentation(payload)
         for source in [stage, *stage.get('auxiliary_areas', []), *stage.get('auxiliary_bays', [])]:
             area_id = source.get('area_id', source.get('bay_id', 'yard'))
             item = stage['area_presentation'][area_id]
