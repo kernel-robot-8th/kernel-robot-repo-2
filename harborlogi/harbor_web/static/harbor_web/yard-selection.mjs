@@ -44,13 +44,13 @@ export function occupancyFor(heights, row, column, depth = 1, width = 1) {
   return {height, step: Math.min(height, OCCUPANCY_CAP)};
 }
 
-/** A slot site's place as yard_rows.place_label names it: '1행 2칸 3층', '임시 장치 A 2번', '반출대'. */
+/** A slot site's place as yard_rows.place_label names it: '2행 1열 3층', '임시 판 A 2레인', '반출대'. */
 export function slotLabel(areas, item, slotCells) {
   if (!item) return '';
   const area = areas.find(a => a.id === item.area) || {id:item.area, label:item.area, rows:1, columns:slotCells, levels:1};
-  if (area.id === 'yard') return `${item.row}행 ${Math.floor((item.column - 1) / slotCells) + 1}칸 ${item.level}층`;
+  if (area.id === 'yard') return `${Math.floor((item.column - 1) / slotCells) + 1}행 ${item.row}열 ${item.level}층`;
   const lone = area.rows * Math.floor(area.columns / slotCells) === 1;
-  return `${area.label}${lone ? '' : ` ${item.row}번`}${area.levels === 1 ? '' : ` ${item.level}층`}`;
+  return `${area.label}${lone ? '' : ` ${item.row}레인`}${area.levels === 1 ? '' : ` ${item.level}층`}`;
 }
 
 /** Every slot of one area, row by row: the cargo on each level and the highest occupied level (KAN-115). */
@@ -209,7 +209,7 @@ export function mountLinkedGrid(preview, scene, onSelect, inspectDestination = (
   function renderSlots() {
     const basis = document.createElement('p'); basis.className = 'helptext'; basis.dataset.linkedOccupancyBasis = '';
     basis.textContent = mode === 'map-definition' ? '자리 정의만 있습니다 · 화물 위치는 확인되지 않았습니다' :
-      `자리마다 아래층부터 컨테이너 번호 · ${mode === 'local-draft' ? '가상 배치 · 실적 아님' : /예상/.test(stageLabel || '') ? '예상 · 실적 아님' : '관측값'}${rehandle.size && mode !== 'local-draft' ? ' · 재취급 예정은 저장된 계획 기준' : ''}`;
+      `자리마다 위층부터 컨테이너 번호 · ${mode === 'local-draft' ? '가상 배치 · 실적 아님' : /예상/.test(stageLabel || '') ? '예상 · 실적 아님' : '관측값'}${rehandle.size && mode !== 'local-draft' ? ' · 재취급 예정은 저장된 계획 기준' : ''}`;
     const yard = scene.areas.find(area => area.id === 'yard') || scene.areas[0];
     const sides = {left:[], center:[], right:[]};
     for (const area of scene.areas)
@@ -234,16 +234,19 @@ export function mountLinkedGrid(preview, scene, onSelect, inspectDestination = (
   function slotArea(area, isYard) {
     const section = document.createElement('section'); section.className = isYard ? 'site-yard' : 'site-tray';
     section.dataset.gridArea = area.id; section.setAttribute('aria-label', area.label);
-    const slots = slotStacks(boxes, area, slotCells), perRow = slots.length / area.rows;
-    const holder = document.createElement('div'); holder.className = isYard ? `yard-lanes lanes-${area.rows}` : 'tray-slots';
-    for (let row = 1; row <= area.rows; row++) {
-      const lane = isYard ? document.createElement('div') : holder;
-      if (isYard) {
-        const label = document.createElement('span'); label.className = 'lane-label'; label.textContent = `${row}행`;
-        lane.className = 'yard-lane'; lane.append(label); holder.append(lane);
+    const slots = slotStacks(boxes, area, slotCells), displayRows = Math.ceil(area.columns / slotCells);
+    const holder = document.createElement('div'); holder.className = isYard ? 'yard-lanes transposed' : 'tray-slots';
+    holder.style.setProperty(isYard ? '--yard-columns' : '--tray-columns', isYard ? area.rows : slots.length);
+    if (isYard) {
+      for (let number = 1; number <= displayRows; number++) {
+        const lane = document.createElement('div'), label = document.createElement('span');
+        lane.className = 'yard-lane'; label.className = 'lane-label'; label.textContent = `${number}행`;
+        lane.append(label); holder.append(lane);
+        for (const slot of slots.filter(item => item.number === number))
+          lane.append(slotCard(area, slot, `${slot.row}열`));
       }
-      for (const slot of slots.filter(item => item.row === row))
-        lane.append(slotCard(area, slot, isYard ? (perRow > 1 ? `${slot.number}칸` : '') : (area.rows > 1 ? `${row}번` : '')));
+    } else {
+      for (const slot of slots) holder.append(slotCard(area, slot, area.rows > 1 ? `${slot.row}레인` : ''));
     }
     const title = document.createElement('h4'); title.textContent = area.label;
     const count = document.createElement('small');
@@ -254,7 +257,7 @@ export function mountLinkedGrid(preview, scene, onSelect, inspectDestination = (
     const card = document.createElement('div'); card.className = `slot-card${slot.levels.length ? '' : ' empty'}`;
     card.dataset.yardRow = `${area.id}-R${slot.row}S${slot.number}`;
     if (name) { const label = document.createElement('span'); label.className = 'slot-name'; label.textContent = name; card.append(label); }
-    for (const {level, boxes:found, partial} of slot.levels)
+    for (const {level, boxes:found, partial} of [...slot.levels].reverse())
       for (const box of found) card.append(levelButton(area, level, box, partial));
     if (!slot.levels.length) {
       const empty = document.createElement('span'); empty.className = 'slot-empty';
