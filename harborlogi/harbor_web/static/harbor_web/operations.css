@@ -85,8 +85,6 @@
 .sw.role-rehandle {background:var(--primitive-color-orange-soft);color:var(--primitive-color-warning-ink);border:2px dashed var(--primitive-color-orange-dark)}
 .yard-legend-rows {grid-column:1/-1;display:flex;flex-wrap:wrap;gap:var(--primitive-space-2) var(--primitive-space-4);list-style:none;margin:0;padding:0;font-size:var(--primitive-font-caption);color:var(--semantic-text-secondary)}
 .sw {display:inline-block;width:14px;height:12px;border-radius:3px;margin-right:var(--primitive-space-1);vertical-align:-2px}
-.yard-panel .operations-source {margin:var(--primitive-space-3) 0 0;overflow-wrap:anywhere}
-.yard-panel .operations-source strong {color:var(--primitive-color-warning-ink);margin-left:var(--primitive-space-1)}
 .jobs-wrap {border:0;border-radius:0}
 .jobs-table td {vertical-align:middle}
 .jobs-table small {display:block;color:var(--semantic-text-secondary)}

@@ -106,7 +106,9 @@ def main():
             user.groups.add(*Group.objects.filter(name__in=['viewer', 'operator', 'field', 'admin']))
         for code, name in [('C1', '우선 반출 화물'), ('C2', '상단 재취급 화물'), ('C3', '공급 인계 확인 화물'),
                            ('C4', '옆 자리 보관 화물'), ('C5', '하단 보관 화물'), ('C6', '중단 보관 화물'), ('C7', '2행 둘째 자리 화물'),
-                           ('C8', '3행 하단 화물'), ('C9', '3행 상단 화물')]:
+                           ('C8', '3행 하단 화물'), ('C9', '긴급 반출 화물'), ('C10', '1행 맨 위 화물'), ('C11', '1행 둘째 자리 2층 화물'),
+                           ('C12', '2행 맨 위 화물'), ('C13', '일반 반출 화물'), ('C14', '3행 첫 자리 상단 화물'), ('C15', '3행 둘째 자리 맨 위 화물'),
+                           ('N1', '입고 예정 화물 1'), ('N2', '입고 예정 화물 2')]:
             length = 3  # every site container is 1×3 and fills one slot (KAN-115)
             if not Cargo.objects.filter(code=code).exists():
                 services.register_cargo(user, code=code, name=name, weight_kg=2, volume_m3='0.012', destination='컨베이어 · 합성 시험', length_cells=length)
@@ -124,8 +126,10 @@ def main():
             condition = services.register_condition(user, name=name, calibration_ref='synthetic-only-not-field-calibration', payload=policy)
         now = timezone.now()
         placements = []
-        for code, row, column, level in [('C1', 1, 1, 1), ('C2', 1, 1, 2), ('C4', 1, 4, 1), ('C5', 2, 1, 1), ('C6', 2, 1, 2),
-                                         ('C7', 2, 4, 1), ('C8', 3, 4, 1), ('C9', 3, 4, 2)]:
+        # 14 of 18 slots: a busy yard where most outbound needs rehandling and inbound has four places left.
+        for code, row, column, level in [('C1', 1, 1, 1), ('C2', 1, 1, 2), ('C10', 1, 1, 3), ('C4', 1, 4, 1), ('C11', 1, 4, 2),
+                                         ('C5', 2, 1, 1), ('C6', 2, 1, 2), ('C12', 2, 1, 3), ('C7', 2, 4, 1),
+                                         ('C13', 3, 1, 1), ('C14', 3, 1, 2), ('C8', 3, 4, 1), ('C9', 3, 4, 2), ('C15', 3, 4, 3)]:
             footprint = CargoFootprint.objects.filter(cargo__code=code).order_by('-pk').first()
             placements.append(dict(cargo_id=code, area_id='yard', row=row, column=column, level=level,
                                    orientation=0, footprint_revision=footprint.pk))
@@ -140,8 +144,18 @@ def main():
         if inbound is None:
             inbound = services.create_order(user, cargo=Cargo.objects.get(code='C3'), kind='INBOUND', priority_group=3, sequence=1, tie_policy='FIXED', note='현장 확인 화면 검토용 합성 요청')
         ensure_field_episode(user, inbound)
-        order.refresh_from_db()  # plan last, so the plan matches the queue it is shown with
-        services.make_plan(user, order_id=order.pk, expected_version=order.version, observation_id=observation.pk)
+        # More work in every tier, so queues, plans and the yard plan show a working shift rather than one example.
+        for code, kind, group, note in [('C9', 'OUTBOUND', 1, '긴급 반출 · 위 화물 재취급 필요'), ('C13', 'OUTBOUND', 3, '일반 반출 · 위 화물 재취급 필요'),
+                                        ('C7', 'OUTBOUND', 3, '일반 반출 · 바로 꺼냄'), ('N1', 'INBOUND', 2, '우선 입고 · 자리 추천 검토'),
+                                        ('N2', 'INBOUND', 3, '일반 입고 · 자리 추천 검토')]:
+            if not Order.objects.filter(cargo__code=code, kind=kind).exists():
+                group, sequence = services.back_of_tier(group, kind)
+                services.create_order(user, cargo=Cargo.objects.get(code=code), kind=kind, priority_group=group, sequence=sequence,
+                                      tie_policy='FIXED', note=note)
+        # Plans last and together, so every plan matches the queue it is shown with.
+        for planned in Order.objects.filter(cargo__code__in=['C1', 'C9', 'C13', 'C7', 'N1', 'N2']).exclude(kind='REARRANGE').order_by('pk'):
+            planned.refresh_from_db()
+            services.make_plan(user, order_id=planned.pk, expected_version=planned.version, observation_id=observation.pk)
     print('Product preview: http://127.0.0.1:8060/ · synthetic data; Fleet disconnected.', flush=True)
     print('Persona accounts: ' + ', '.join(PERSONA_ACCOUNTS.values()) + ' (passwords only in the access file).', flush=True)
     print('Private access file: runs/product-preview/access.json (do not publish).', flush=True)

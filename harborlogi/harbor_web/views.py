@@ -230,7 +230,7 @@ def outbound_queue(request):
         label = COMMAND_LABELS.get(command.state, command.state) if command else '계획 재검토' if changes else '계획 보류' if plan and plan.result['status'] == 'HOLD' else '계획 검토됨' if plan else '계획 전'
         rows.append(dict(order=order, plan=plan, command=command, status_label=label,
             status=command.state if command else 'HOLD' if changes else plan.result['status'] if plan else '',
-            reason='원래 실행의 상태와 업무 근거를 대조하세요.' if command else changes[0]['message'] if changes else reason_text(plan.result['reason']) if plan else '관측 재고를 선택해 재취급·반출·복귀를 검토하세요.'))
+            reason='원래 실행의 상태와 업무 근거를 대조하세요.' if command else changes[0]['message'] if changes else reason_text(plan.result['reason']) if plan else '야드 현황을 골라 재취급·반출·복귀를 검토하세요.'))
     lanes = services.outbound_lanes() if not q else []
     if lanes:
         from harbor_web.tier_simulation import tier_recommendations
