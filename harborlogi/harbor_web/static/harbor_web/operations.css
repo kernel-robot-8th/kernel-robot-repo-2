@@ -207,3 +207,11 @@ button.slot-level[aria-pressed=true] {outline:3px solid var(--primitive-color-or
 .work-auto {display:block}
 .work-auto > summary {padding:var(--primitive-space-4);font-weight:600;cursor:pointer}
 .work-auto > .panel-b {border-top:1px solid var(--semantic-border-divider)}
+.work-flow.is-edit [data-order][data-running="0"] .work-chip {cursor:grab}
+.work-flow [data-order].is-dragging {opacity:.55}
+.work-flow [data-order].is-drop-before {box-shadow:inset 3px 0 0 var(--semantic-border-selected)}
+.work-flow [data-order].is-drop-after {box-shadow:inset -3px 0 0 var(--semantic-border-selected)}
+.wk-result {margin-top:var(--primitive-space-3);padding:var(--primitive-space-3) var(--primitive-space-4);border-left:3px solid var(--semantic-border-divider);background:var(--semantic-surface-canvas);display:grid;gap:var(--primitive-space-2)}
+.wk-result.is-good {border-left-color:var(--semantic-status-success-foreground)}
+.wk-result.is-critical {border-left-color:var(--semantic-status-danger-foreground);background:var(--semantic-status-danger-background)}
+.wk-result-row {display:flex;flex-wrap:wrap;align-items:center;gap:var(--primitive-space-2)}

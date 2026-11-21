@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load static %}
 {% block title %}작업{% endblock %}
 {% block crumb %}작업{% endblock %}
 {% block content %}
@@ -18,11 +19,15 @@
   </div>
 </section>
 <section class="panel" aria-labelledby="work-outbound">
-  <div class="panel-h"><h2 id="work-outbound">반출 순서</h2><span class="scope">등록된 순서 · 읽기 전용</span></div>
-  <div class="panel-b">
-    {% if outbound %}<ol class="work-flow" aria-label="반출 순서">
-    {% for row in outbound %}<li class="work-{{ row.tone }}"><span class="work-chip"><span>{{ forloop.counter }}</span> <a href="{{ row.href }}">{{ row.order.cargo.code }}</a> <span>{{ row.order.tier_label }}</span> <span class="work-state">{{ row.state }}</span></span>{% if row.order.tie_policy == 'ANY' %}<small>같은 우선순위 안 순서 미지정</small>{% endif %}</li>{% endfor %}
-    </ol>{% else %}<p>남은 반출 작업이 없습니다</p>{% endif %}
+  <div class="panel-h"><h2 id="work-outbound">반출 순서</h2><span class="scope">{% if can_operate and outbound %}순서 바꾸기 시뮬레이션 후 적용{% else %}등록된 순서 · 읽기 전용{% endif %}</span></div>
+  <div class="panel-b"{% if can_operate and outbound %} data-reorder-editor data-validate-url="{% url 'outbound_validate' %}" data-reorder-url="{% url 'outbound_reorder' %}"{% endif %}>
+    {% if outbound %}
+    {% if can_operate %}<p id="wk-edit-help" class="helptext" hidden>카드를 끌어 옮기거나 ‘맨 앞으로’·좌우 화살표로 순서를 바꾼 뒤 ‘이 순서 검증해 보기’를 누르세요. 실행 중인 반출은 옮길 수 없습니다.</p>{% endif %}
+    <ol id="wk-flow" class="work-flow" aria-label="반출 순서">
+    {% for row in outbound %}<li class="work-{{ row.tone }}" data-order="{{ row.order.pk }}" data-version="{{ row.order.version }}" data-tier="{{ row.order.priority_group }}" data-code="{{ row.order.cargo.code }}" data-running="{% if row.state == '진행 중' %}1{% else %}0{% endif %}"><span class="work-chip"><span data-reorder-seq>{{ forloop.counter }}</span> <a href="{{ row.href }}">{{ row.order.cargo.code }}</a> <span>{{ row.order.tier_label }}</span> <span class="work-state">{{ row.state }}</span></span>{% if row.order.tie_policy == 'ANY' %}<small>같은 우선순위 안 순서 미지정</small>{% endif %}</li>{% endfor %}
+    </ol>
+    {% if can_operate %}<div id="wk-out-actions" class="actions"></div><div id="wk-result" aria-live="polite"></div><form method="post" action="{% url 'outbound_reorder' %}" data-reorder-form hidden>{% csrf_token %}</form><script type="module" src="{% static 'harbor_web/reorder.js' %}"></script>{% endif %}
+    {% else %}<p>남은 반출 작업이 없습니다</p>{% endif %}
   </div>
 </section>
 <section class="panel" aria-labelledby="work-inbound">
