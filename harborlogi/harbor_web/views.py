@@ -10,6 +10,7 @@ from harbor_web import forms, services
 from harbor_web.auth import has_role, require_roles
 from harbor_web.cargo_history import cargo_history as build_history
 from harbor_web.order_timeline import order_timeline as build_timeline
+from harbor_web.topview_proxy import topview_context
 from harbor_web.models import Audit, Cargo, CargoFootprint, Command, Condition, FieldEpisode, Observation, Order, Plan
 
 
@@ -131,7 +132,7 @@ def overview(request):
     operations = operations_context(observation)
     for job in operations['workload']['plans']:  # the timeline panel shows the last recorded facts of each listed job
         job['facts'] = build_timeline(job['plan'].order)['actual_line'][-4:]
-    return page(request, 'overview.html', section='overview', rows=rows, operations=operations, observations=observations,
+    return page(request, 'overview.html', section='overview', rows=rows, operations=operations, observations=observations, topview=topview_context(),
                 observation=observation, condition=observation.condition if observation else None,
                 field_pending=FieldEpisode.objects.filter(state='OPEN').count())
 
@@ -423,7 +424,7 @@ def inventory(request):
                     place=f"{cell['row']}행 {cell['column']}열 {level}층") for cell in cells)
     placement_rows = [dict(cargo=item['cargo_id'], place=placement_text(item, labels, slot))
                       for item in (selected.payload.get('placements', []) if selected else [])]
-    return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices,
+    return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices, topview=topview_context(),
                 condition=condition, condition_filter='condition' in request.GET,
                 conditions=Condition.objects.order_by('-pk'), definition_rows=definition_rows,
                 placement_rows=placement_rows, yard_stage=stage, yard_scene=scene)

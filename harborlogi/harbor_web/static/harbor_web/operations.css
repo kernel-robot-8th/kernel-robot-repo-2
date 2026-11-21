@@ -31,7 +31,7 @@
 .planning-recommendation {padding:var(--primitive-space-4);margin-block:var(--primitive-space-4);border:1px solid var(--semantic-border-divider);border-radius:var(--primitive-radius-panel);background:var(--semantic-surface-panel)}
 .planning-recommendation .section-heading {flex-wrap:wrap;gap:var(--primitive-space-2)}
 .recommendation-candidate + .recommendation-candidate {border-top:1px solid var(--semantic-border-divider);padding-top:var(--primitive-space-3);margin-top:var(--primitive-space-3)}
-/* Control board (KAN-115 시안): attention → KPIs → yard plan : jobs (3:2) → timeline → parked */
+/* 상황판: 확인 사항 → 지표 → 야드·탑뷰 → 작업 계획 → 타임라인 */
 .topbar-context {display:flex;align-items:center;flex-wrap:wrap;gap:var(--primitive-space-2) var(--primitive-space-4);flex:1;min-width:0;margin-left:var(--primitive-space-6)}
 .crumb {font-weight:700;white-space:nowrap}
 .crumb:empty {display:none}
@@ -71,7 +71,15 @@
 .kpi .n {font-size:var(--primitive-font-caption);color:var(--semantic-text-secondary)}
 .kpi .n b {color:var(--primitive-color-warning-ink);font-weight:600}
 .kpi.na .v {color:var(--semantic-text-secondary)}
-.control-ws {display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:var(--primitive-space-4);align-items:start}
+.control-ws {display:grid;grid-template-columns:minmax(0,1fr)}
+.yard-topview {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--primitive-space-4);align-items:start}
+.yard-topview > * {min-width:0}
+.yard-topview > .yard-linked {display:flex;flex-direction:column;align-items:stretch}
+.yard-topview .linked-flat {order:-1}
+.topview-panel img {display:block;width:100%;height:auto;border-radius:var(--primitive-radius-control)}
+.topview-panel img[hidden] {display:none}
+.topview-panel select {width:100%}
+.topview-panel [role="status"] {color:var(--semantic-text-secondary);overflow-wrap:anywhere}
 .sw.role-cargo {background:var(--primitive-color-navy-soft);color:var(--primitive-color-ink)}
 .sw.role-target {background:var(--primitive-color-navy);color:var(--primitive-color-white)}
 .sw.role-rehandle {background:var(--primitive-color-orange-soft);color:var(--primitive-color-warning-ink);border:2px dashed var(--primitive-color-orange-dark)}
@@ -105,7 +113,7 @@
 .parked b {color:var(--semantic-text-secondary)}
 .next-actions {margin-top:var(--primitive-space-6)}
 .next-actions .table-wrap {border:0;border-radius:0}
-@media(max-width:1100px) {.control-ws {grid-template-columns:minmax(0,1fr)}}
+@media(max-width:1100px) {.yard-topview {grid-template-columns:minmax(0,1fr)}}
 @media(max-width:700px) {
   .attention-list li {grid-template-columns:minmax(0,1fr)}
   .yard-plan {grid-template-columns:minmax(0,1fr)}

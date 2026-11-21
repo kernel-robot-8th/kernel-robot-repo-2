@@ -32,7 +32,9 @@ def episode_status(episode, *, now=None):
                and confirmation.actor.is_active and has_role(confirmation.actor, 'field'))
     fresh = bool(current and timedelta(0) <= (now or timezone.now()) - confirmation.observed_at <= timedelta(minutes=5))
     needs_new = not departure and episode.state in {'CONFIRMED', 'MISMATCH', 'UNABLE'} and not fresh
-    if departure:
+    if departure and departure.release_event_id:
+        label, action, reason = 'ROSY 허락으로 출발 준비됨', 'Fleet 인계 원본 확인', 'ROSY 차량 출발 허락을 기록했습니다. Fleet에서 실제 차량 실행을 확인하세요.'
+    elif departure:
         label, action, reason = '출발 전제 기록됨', 'Fleet 인계 원본 확인', '출발 전제만 기록했습니다. 같은 차량·화물·회차를 Fleet에 인계하고 실제 차량 실행을 확인하세요.'
     elif fresh:
         label, action, reason = '현장 확인 유효', '출발 전제 검토', '현장 CLEAR 확인이 유효합니다. 관제 담당자가 원본과 차량을 확인하세요.'
@@ -97,8 +99,9 @@ def field_detail(request, pk):
                     new = services.reassign_episode(request.user, episode_id=pk, **reassign.cleaned_data)
                     return redirect(f'/field/{new.pk}/')
             elif action == 'departure' and request.POST.get('confirmation_id', '').isdigit():
-                services.prepare_departure(request.user, episode_id=pk, confirmation_id=int(request.POST['confirmation_id']))
-                messages.info(request, '차량과 회차에 결속된 출발 전제를 기록했습니다. Fleet 운영자에게 같은 차량과 원본을 인계하세요.')
+                intent = services.prepare_departure(request.user, episode_id=pk, confirmation_id=int(request.POST['confirmation_id']))
+                messages.info(request, 'ROSY 허락으로 이미 출발 준비됨' if intent.release_event_id else
+                              '차량과 회차에 결속된 출발 전제를 기록했습니다. Fleet 운영자에게 같은 차량과 원본을 인계하세요.')
                 return redirect(f'/field/{pk}/')
             else:
                 return render(request, 'error.html', dict(reason='지원하지 않는 현장 확인 요청입니다.', return_url=f'/field/{pk}/'), status=400)

@@ -18,7 +18,7 @@ class SecurityHeadersMiddleware:
         response = self.get_response(request)
         if request.user.is_authenticated:
             add_never_cache_headers(response)
-        response['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+        response['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
         response['Referrer-Policy'] = 'same-origin'
         response['X-Content-Type-Options'] = 'nosniff'
         return response
