@@ -3,11 +3,109 @@
   <form class="obs-chip-form operations-selector" method="get"><label>볼 야드 현황<select name="observation" data-auto-submit>{% for item in observations %}<option value="{{ item.pk }}" {% if item.pk == observation.pk %}selected{% endif %}>{{ item.display_label }}{% if forloop.first %} · 최신{% endif %}</option>{% endfor %}</select></label><button type="submit" class="quiet">현황 선택</button><p class="helptext">카메라 등이 확인한 시각별 야드 상태입니다. 기본은 가장 최근이고, 지난 것은 비교할 때만 고르세요.</p></form>
 </details>{% endif %}{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>물량·계획·실행 현황</h1><p>야드 현황과 전체 지시, 예상 작업량과 실제 근거를 구분해 판단하세요.</p></div><div class="actions">{% if can_operate %}<a class="button quiet" href="/requests/new/{% if observation %}?observation={{ observation.pk }}{% endif %}">업무 요청 등록</a>{% endif %}<a class="button" href="/outbound/{% if observation %}?observation={{ observation.pk }}{% endif %}">반출 관제 열기</a></div></div>
-{% include 'operations_summary.html' %}
-{% if not observation %}<div class="notice"><strong>야드 현황이 없습니다</strong><p>화물과 업무 지시를 먼저 등록할 수 있습니다. 계획에는 출처 · 시각 · 설치 기준이 있는 야드 현황이 필요합니다.</p>{% if can_admin %}<a class="button quiet" href="/inventory/import/">야드 현황 등록</a>{% else %}<a class="button quiet" href="/inventory/">현황 연결 상태 확인</a>{% endif %}</div>{% endif %}
-<section class="panel next-actions" aria-labelledby="next-actions-title">
-  <div class="panel-h"><h3 id="next-actions-title">요청별 다음 조치</h3><span class="scope">전체 등록 요청 · 우선 확인할 업무</span><a class="src button quiet" href="/requests/{% if observation %}?observation={{ observation.pk }}{% endif %}">전체 요청 보기</a></div>
-  {% if rows %}<div class="table-wrap"><table class="action-table"><caption class="sr-only">요청별 다음 조치</caption><thead><tr><th scope="col">요청·화물</th><th scope="col">검토 상태</th><th scope="col">필요한 판단</th><th scope="col">다음 조치</th></tr></thead><tbody>{% for row in rows %}<tr><td><a href="/requests/{{ row.order.pk }}/{% if observation %}?observation={{ observation.pk }}{% endif %}">{{ row.order.title|default:row.order.cargo.code }}</a><small>{% if row.order.title %}{{ row.order.cargo.code }} · {% endif %}{% if row.order.kind == 'INBOUND' %}입고{% else %}반출{% endif %} #{{ row.order.pk }} · {{ row.order.tier_label }}</small></td><td><span class="badge {{ row.status }}">{{ row.status_label }}</span>{% if row.field_status %}<small>현장 인계: {{ row.field_status }}</small>{% endif %}</td><td>{{ row.reason }}</td><td><a class="button quiet" href="{{ row.href }}">{{ row.action }}</a></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="panel-b"><h4>등록된 업무 요청이 없습니다</h4><p>화물 정보와 입고·반출 지시를 등록하면, 필요한 조치가 이곳에 모입니다.</p>{% if can_operate %}<div class="actions"><a class="button" href="/cargo/new/">첫 화물 등록</a><a class="button quiet" href="/requests/new/{% if observation %}?observation={{ observation.pk }}{% endif %}">이미 등록된 화물로 요청하기</a></div>{% endif %}</div>{% endif %}
-  <p class="panel-f">계획 READY는 실행 허가가 아닙니다. 실제 수행과 완료는 ROSY 결과 및 업무 근거로 대조합니다.</p>
-</section>{% endblock %}
+<div class="board" data-control-board>
+  <div class="page-head"><div><h1 id="h-board">상황판</h1></div><div class="actions">{% if can_operate %}<a class="button quiet" href="/requests/new/{% if observation %}?observation={{ observation.pk }}{% endif %}">업무 요청 등록</a>{% endif %}<a class="button" href="/outbound/{% if observation %}?observation={{ observation.pk }}{% endif %}">반출 관제 열기</a></div></div>
+
+  <section class="panel board-run" aria-labelledby="h-board-run">
+    <h2 id="h-board-run" class="sr-only">운전 상태</h2>
+    <div class="board-run-main">
+      <span class="board-pill tone-{{ board.drive_tone }}">{{ board.drive_label }}</span>
+      <span class="board-run-progress">오늘 일정 <strong>{{ board.day_progress.completed }}/{{ board.day_progress.total }}</strong> 완료 · 남은 일 <strong>{{ board.day_progress.remaining }}</strong>건</span>
+    </div>
+    <span class="board-run-note">상태는 ROSY 실행 결과로 바뀜</span>
+  </section>
+
+  <section class="board-section" aria-labelledby="h-board-counts">
+    <h2 id="h-board-counts" class="board-section-title">오늘 처리량</h2>
+    <div class="board-counts">
+      {% for item in board.counts %}
+      <div class="board-count-card">
+        <span class="board-count-kind">{{ item.label }}</span>
+        <strong class="board-count-val">완료 {{ item.completed }}건</strong>
+        <span class="board-count-sub">남은 일 {{ item.pending }}건</span>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {% if board.alerts %}
+  <section class="panel board-alerts" aria-labelledby="h-board-alerts">
+    <div class="panel-h"><h2 id="h-board-alerts">처리할 것</h2><span class="board-pill tone-attention">{{ board.alert_total }}건</span><a class="src button quiet" href="/alerts/">처리할 것 {{ board.alert_total }}건 보기</a></div>
+    <ul class="attention-list">
+      {% for item in board.alerts %}
+      <li>
+        <span class="chip tone-hold">처리할 것{% if item.count > 1 %} {{ item.count }}건{% endif %}</span>
+        <span class="attention-text"><span class="what">{{ item.title }}</span><span class="why">{{ item.detail }}</span></span>
+        {% if item.href %}<a class="button quiet" href="{{ item.href }}">{{ item.action }}</a>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <div class="board-row">
+    <section class="panel board-current" aria-labelledby="h-board-current">
+      <div class="panel-h"><h2 id="h-board-current">지금 하는 일</h2>{% if board.current_job %}<span class="board-pill tone-{{ board.current_job.tone }}">{{ board.current_job.state }}</span>{% endif %}</div>
+      <div class="panel-b">
+        {% if board.current_job %}
+          <div class="board-job-head">{% if board.current_job.href %}<a class="board-job-title" href="{{ board.current_job.href }}">{{ board.current_job.title }}</a>{% else %}<strong class="board-job-title">{{ board.current_job.title }}</strong>{% endif %}</div>
+          {% if board.current_job.source and board.current_job.destination %}<p class="board-job-route">{% if board.current_job.cargo %}<span class="board-job-cargo">{{ board.current_job.cargo }}</span> · {% endif %}{{ board.current_job.source }} → {{ board.current_job.destination }}</p>{% endif %}
+          {% if board.current_job.arm %}<p class="board-job-meta">팔 {{ board.current_job.arm }}</p>{% endif %}
+        {% else %}
+          <p class="muted">하는 일 없음</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="panel board-next" aria-labelledby="h-board-next">
+      <div class="panel-h"><h2 id="h-board-next">다음 일</h2><span class="scope">추천 순서</span></div>
+      <div class="panel-b">
+        {% if board.next_jobs %}
+          <ol class="board-next-list">
+            {% for job in board.next_jobs %}
+            <li class="board-next-item">
+              <div class="board-next-main">
+                <span class="chip">{{ job.kind_label }}</span>
+                {% if job.href %}<a class="board-next-title" href="{{ job.href }}">{{ job.title }}</a>{% else %}<strong class="board-next-title">{{ job.title }}</strong>{% endif %}
+                <span class="board-pill tone-{{ job.tone }}">{{ job.state }}</span>
+              </div>
+              {% if job.route_text or job.arm %}<div class="board-next-meta">{% if job.route_text %}<span>{{ job.route_text }}</span>{% endif %}{% if job.arm %}<span>팔 {{ job.arm }}</span>{% endif %}</div>{% endif %}
+            </li>
+            {% endfor %}
+          </ol>
+        {% else %}
+          <p class="muted">다음 일 없음</p>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+
+  <section class="board-section board-even" aria-labelledby="h-board-yard">
+    <div class="yard-topview">
+      <section class="panel yard-panel" aria-labelledby="h-board-yard">
+        <div class="panel-h"><h2 id="h-board-yard">야드</h2><a class="src button quiet" href="/inventory/{% if observation %}?observation={{ observation.pk }}{% endif %}">야드 크게 보기</a></div>
+        <div class="panel-b">
+          {% if board.mini_yard %}
+            {% include 'yard_rows.html' with yard=board.mini_yard %}
+            {% if operations.inventory.holdings %}<p class="notice">위치 미확정: {% for holding in operations.inventory.holdings %}{{ holding.cargo_id }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+          {% else %}
+            <p class="muted">야드 현황이 없습니다.</p>
+          {% endif %}
+        </div>
+      </section>
+      {% include 'topview_panel.html' %}
+    </div>
+  </section>
+
+  <details class="fold board-support">
+    <summary>자세히(지원 담당자용)</summary>
+    {% include 'operations_summary.html' %}
+    {% if not observation %}<div class="notice"><strong>야드 현황이 없습니다</strong><p>화물과 업무 지시를 먼저 등록할 수 있습니다. 계획에는 출처 · 시각 · 설치 기준이 있는 야드 현황이 필요합니다.</p>{% if can_admin %}<a class="button quiet" href="/inventory/import/">야드 현황 등록</a>{% else %}<a class="button quiet" href="/inventory/">현황 연결 상태 확인</a>{% endif %}</div>{% endif %}
+    <section class="panel next-actions" aria-labelledby="next-actions-title">
+      <div class="panel-h"><h3 id="next-actions-title">요청별 다음 조치</h3><span class="scope">전체 등록 요청 · 우선 확인할 업무</span><a class="src button quiet" href="/requests/{% if observation %}?observation={{ observation.pk }}{% endif %}">전체 요청 보기</a></div>
+      {% if rows %}<div class="table-wrap"><table class="action-table"><caption class="sr-only">요청별 다음 조치</caption><thead><tr><th scope="col">요청·화물</th><th scope="col">검토 상태</th><th scope="col">필요한 판단</th><th scope="col">다음 조치</th></tr></thead><tbody>{% for row in rows %}<tr><td><a href="/requests/{{ row.order.pk }}/{% if observation %}?observation={{ observation.pk }}{% endif %}">{{ row.order.title|default:row.order.cargo.code }}</a><small>{% if row.order.title %}{{ row.order.cargo.code }} · {% endif %}{% if row.order.kind == 'INBOUND' %}입고{% else %}반출{% endif %} #{{ row.order.pk }} · {{ row.order.tier_label }}</small></td><td><span class="badge {{ row.status }}">{{ row.status_label }}</span>{% if row.field_status %}<small>현장 인계: {{ row.field_status }}</small>{% endif %}</td><td>{{ row.reason }}</td><td><a class="button quiet" href="{{ row.href }}">{{ row.action }}</a></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="panel-b"><h4>등록된 업무 요청이 없습니다</h4><p>화물 정보와 입고·반출 지시를 등록하면, 필요한 조치가 이곳에 모입니다.</p>{% if can_operate %}<div class="actions"><a class="button" href="/cargo/new/">첫 화물 등록</a><a class="button quiet" href="/requests/new/{% if observation %}?observation={{ observation.pk }}{% endif %}">이미 등록된 화물로 요청하기</a></div>{% endif %}</div>{% endif %}
+      <p class="panel-f">계획 READY는 실행 허가가 아닙니다. 실제 수행과 완료는 ROSY 결과 및 업무 근거로 대조합니다.</p>
+    </section>
+  </details>
+</div>
+{% endblock %}

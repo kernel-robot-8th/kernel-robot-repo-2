@@ -128,13 +128,18 @@ def overview(request):
         for row in rows:
             if row['href'].startswith(('/requests/', '/plans/')):
                 row['href'] += f'?observation={observation.pk}'
+    from harbor_web.board import board_context
     from harbor_web.operations import operations_context
     operations = operations_context(observation)
     for job in operations['workload']['plans']:  # the timeline panel shows the last recorded facts of each listed job
         job['facts'] = build_timeline(job['plan'].order)['actual_line'][-4:]
-    open_field = FieldEpisode.objects.filter(state='OPEN').count()
+    open_episodes = list(FieldEpisode.objects.filter(state='OPEN').select_related('order__cargo').order_by('created_at', 'pk'))
+    open_field = len(open_episodes)
     request._open_field_count = open_field
-    return page(request, 'overview.html', section='overview', rows=rows, operations=operations, observations=observations, topview=topview_context(),
+    request._open_field_episodes = open_episodes
+    board = board_context(request, observation=observation, operations=operations)
+    return page(request, 'overview.html', section='overview', rows=rows, operations=operations, board=board,
+                observations=observations, topview=topview_context(),
                 observation=observation, condition=observation.condition if observation else None,
                 field_pending=open_field)
 

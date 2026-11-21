@@ -24,13 +24,17 @@ COMMAND_TEXT = {
 }
 
 
-def alerts_context(request):
+def alerts_context(request, *, observation=None, operations=None):
     held = roles(request.user)
     can_read = bool(held & access.READ)
     alerts = []
     if can_read:
-        observation = selected_observation(request, default_latest=True)
-        operations = operations_context(observation)
+        if operations is None:
+            if observation is None:
+                observation = selected_observation(request, default_latest=True)
+            operations = operations_context(observation)
+        else:
+            observation = operations.get('observation')
         for item in operations['attention']:
             href = item['href']
             if href.startswith('/work/'):
@@ -53,13 +57,19 @@ def alerts_context(request):
             alerts.append(dict(title=f'{cargo} · 작업 확인 필요',
                 detail=COMMAND_TEXT.get(command.state, '작업 상태를 확인해야 합니다.'),
                 count=1, href=f'/work/{command.pk}/', action='작업 보기'))
-    episodes = FieldEpisode.objects.filter(state='OPEN').select_related('order__cargo').order_by('created_at', 'pk')
     can_open_field = bool(held & {'operator', 'admin', 'field'})
-    if not held & {'operator', 'admin'}:
-        if can_read:
-            can_open_field = False  # Readers can see the alert, but field details require assignment.
-        else:
-            episodes = episodes.filter(assigned_to=request.user)
+    cached_episodes = getattr(request, '_open_field_episodes', None)
+    if (held & {'operator', 'admin'} or can_read) and cached_episodes is not None:
+        episodes = cached_episodes
+        if not held & {'operator', 'admin'}:
+            can_open_field = False
+    else:
+        episodes = FieldEpisode.objects.filter(state='OPEN').select_related('order__cargo').order_by('created_at', 'pk')
+        if not held & {'operator', 'admin'}:
+            if can_read:
+                can_open_field = False  # Readers can see the alert, but field details require assignment.
+            else:
+                episodes = episodes.filter(assigned_to=request.user)
     for episode in episodes:
         cargo = episode.order.cargo.code if episode.order.cargo_id else '자동 재배치'
         alerts.append(dict(title=f'{cargo} · 적재면 확인 대기', detail=f'차량 {episode.vehicle_id}', count=1,

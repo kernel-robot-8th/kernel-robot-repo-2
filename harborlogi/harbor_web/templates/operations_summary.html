@@ -1,4 +1,4 @@
-<section class="operations-summary control-board" aria-labelledby="operations-title" data-control-board>
+<section class="operations-summary control-board" aria-labelledby="operations-title"{% if not board %} data-control-board{% endif %}>
   <h2 id="operations-title" class="sr-only">물량과 작업 전망</h2>
   <section class="panel operations-attention" aria-labelledby="attention-title">
     <div class="panel-h"><h3 id="attention-title">확인이 필요한 것 {{ operations.attention_total }}건</h3><span class="scope">{% if operations.observation %}야드 현황 #{{ operations.observation.pk }} 기준 · 인계는 전체{% else %}야드 현황 없음{% endif %}</span></div>
@@ -14,6 +14,7 @@
   </div>
 
   {% if operations.observation %}
+  {% if not board %}
   <div class="yard-topview">
     <section class="panel yard-panel" aria-labelledby="yard-plan-title">
       <div class="panel-h"><h3 id="yard-plan-title">야드 평면 · 자리별 적재</h3><span class="scope">현황 #{{ operations.observation.pk }}</span></div>
@@ -23,6 +24,7 @@
     </section>
     {% include 'topview_panel.html' %}
   </div>
+  {% endif %}
   <div class="control-ws">
     <section class="panel jobs-panel" aria-labelledby="proposal-title">
       <div class="panel-h"><h3 id="proposal-title">이 현황 기준 작업 계획</h3><span class="scope">유효 READY {{ operations.workload.ready_count }}건 · HOLD {{ operations.workload.hold_count }}건 · 재검토로 이동 집계 제외 {{ operations.workload.excluded_count }}건</span></div>
@@ -35,7 +37,7 @@
     <div class="panel-b tl"><div class="lbl">계획 줄<span>예상 · 시각 없음</span></div><ol class="steps">{% for step in row.steps %}<li class="step phase-{% if step.phase == '재취급' %}rehandle{% elif step.phase == '반출' %}outbound{% else %}other{% endif %}"><i>{{ step.number }}</i>{{ step.phase }} {{ step.cargo }} <small>{{ step.source }} → {{ step.destination }}{% if step.arm %} · 암 {{ step.arm }}{% endif %}</small></li>{% empty %}<li class="muted">예상 이동 없음 · {{ row.summary }}</li>{% endfor %}</ol>
       <div class="lbl">실제 줄<span>시각 있는 기록만</span></div><ul class="facts">{% for fact in row.facts %}<li><time datetime="{{ fact.at|date:'c' }}">{{ fact.at|date:'H:i:s' }}</time><span>{{ fact.text }}</span><span class="src">{{ fact.source }}</span></li>{% empty %}<li><time>-</time><span>실행 기록 없음 · 계획만 있음</span><span class="src">업무 완료 미확인</span></li>{% endfor %}</ul></div>
   </div>{% endfor %}</section>{% endif %}
-  {% else %}{% include 'topview_panel.html' %}<p class="notice">야드 현황이 없어 재고 · 점유 · 예상 이동을 알 수 없습니다. 등록 지시 건수는 전체 범위로 표시합니다.</p>{% endif %}
+  {% else %}{% if not board %}{% include 'topview_panel.html' %}{% endif %}<p class="notice">야드 현황이 없어 재고 · 점유 · 예상 이동을 알 수 없습니다. 등록 지시 건수는 전체 범위로 표시합니다.</p>{% endif %}
 
   <details class="operations-handoffs"><summary>원래 인계 상태 · 전체 출처 {{ operations.handoffs|length }}건</summary><ul>{% for row in operations.handoffs %}<li><a href="/work/{{ row.command.pk }}/">{{ row.cargo }} · 요청 #{{ row.command.order_id }}</a> / 원본 Plan #{{ row.plan.pk }} · 현황 #{{ row.plan.observation_id }} ({{ row.plan.observation.source_id }}) · {{ row.label }}</li>{% empty %}<li>준비된 인계가 없습니다.</li>{% endfor %}</ul><p>인계는 원래 Plan에 고정됩니다. 새 제안의 이동 합계에 넣지 않으며, 완료는 업무 장부의 최종 근거 대조로 끝난 인계만 셉니다.</p></details>
   <p class="operations-unmeasured">교대·일 단위 처리율과 TEU·ton 환산: <strong>미집계</strong> · 등록 지시는 입고 {{ operations.orders.inbound }}건 / 반출 {{ operations.orders.outbound }}건(전체 출처, 처리 완료나 미처리 잔량이 아님) · 시간당 물동량은 최근 24시간 동안 Harbor가 완료를 기록한 첫 시각~마지막 시각 사이만 셉니다.</p>

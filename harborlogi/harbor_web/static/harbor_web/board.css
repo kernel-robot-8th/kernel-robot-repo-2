@@ -1,0 +1,253 @@
+/* v4.8 situation board (WP07): uses design tokens from harbor/web_assets/tokens.css only. */
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--primitive-space-4);
+  margin-bottom: var(--primitive-space-6);
+}
+.board .page-head {
+  margin-bottom: 0;
+}
+.board .panel-h h2,
+.board .panel-h h3 {
+  margin: 0;
+  font-size: var(--primitive-font-body);
+}
+.board-section-title {
+  margin: 0 0 var(--primitive-space-2);
+  font-size: var(--primitive-font-label);
+  font-weight: var(--primitive-font-strong);
+  color: var(--semantic-text-secondary);
+}
+
+/* 1. 운전 상태 */
+.board-run {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--primitive-space-3) var(--primitive-space-4);
+  padding: var(--primitive-space-4) var(--primitive-space-6);
+  background: var(--semantic-surface-panel);
+  border: var(--primitive-border-thin) solid var(--semantic-border-divider);
+  border-radius: var(--primitive-radius-panel);
+}
+.board-run-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--primitive-space-3) var(--primitive-space-4);
+}
+.board-run-progress {
+  font-size: var(--primitive-font-body);
+  font-variant-numeric: tabular-nums;
+}
+.board-run-note {
+  font-size: var(--primitive-font-caption);
+  color: var(--semantic-text-secondary);
+}
+.board-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--primitive-space-1) var(--primitive-space-2);
+  border-radius: var(--primitive-radius-small);
+  font-size: var(--primitive-font-caption);
+  font-weight: var(--primitive-font-strong);
+  white-space: nowrap;
+}
+.board-pill.tone-good {
+  background: var(--semantic-status-success-background);
+  color: var(--semantic-status-success-foreground);
+}
+.board-pill.tone-attention {
+  background: var(--semantic-status-warning-background);
+  color: var(--semantic-status-warning-foreground);
+}
+.board-pill.tone-info {
+  background: var(--semantic-status-info-background);
+  color: var(--semantic-status-info-foreground);
+}
+.board-pill.tone-neutral {
+  background: var(--semantic-status-unknown-background);
+  color: var(--semantic-status-unknown-foreground);
+}
+
+/* 2. 오늘 처리량 */
+.board-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--primitive-space-3);
+}
+.board-count-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--primitive-space-1);
+  min-width: 0;
+  padding: var(--primitive-space-3) var(--primitive-space-4);
+  background: var(--semantic-surface-panel);
+  border: var(--primitive-border-thin) solid var(--semantic-border-divider);
+  border-radius: var(--primitive-radius-panel);
+}
+.board-count-kind {
+  font-size: var(--primitive-font-label);
+  font-weight: var(--primitive-font-strong);
+  color: var(--semantic-text-secondary);
+}
+.board-count-val {
+  font-size: var(--primitive-font-section);
+  font-weight: var(--primitive-font-bold);
+  line-height: var(--primitive-font-heading-line);
+  font-variant-numeric: tabular-nums;
+}
+.board-count-sub {
+  font-size: var(--primitive-font-caption);
+  color: var(--semantic-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 3. 처리할 것 */
+.board-alerts {
+  border-color: var(--primitive-color-orange-dark);
+}
+.board-alerts .panel-h {
+  background: var(--semantic-status-warning-background);
+}
+
+/* 4. 지금 하는 일 & 다음 일 */
+.board-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--primitive-space-4);
+  align-items: start;
+}
+.board-row > * {
+  min-width: 0;
+}
+.board-job-head {
+  margin-bottom: var(--primitive-space-2);
+}
+.board-job-title {
+  font-size: var(--primitive-font-section);
+  font-weight: var(--primitive-font-bold);
+  line-height: var(--primitive-font-heading-line);
+  text-decoration: none;
+}
+.board-job-title:hover {
+  text-decoration: underline;
+}
+.board-job-route {
+  margin: var(--primitive-space-1) 0;
+  font-size: var(--primitive-font-body);
+  color: var(--semantic-text-primary);
+}
+.board-job-cargo {
+  font-family: ui-monospace, monospace;
+  font-weight: var(--primitive-font-strong);
+}
+.board-job-meta {
+  margin: 0;
+  font-size: var(--primitive-font-label);
+  color: var(--semantic-text-secondary);
+}
+.board-next-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--primitive-space-2);
+}
+.board-next-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--primitive-space-1);
+  padding: var(--primitive-space-2) 0;
+  border-top: var(--primitive-border-thin) solid var(--semantic-border-divider);
+}
+.board-next-item:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.board-next-item:last-child {
+  padding-bottom: 0;
+}
+.board-next-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--primitive-space-2);
+}
+.board-next-title {
+  font-weight: var(--primitive-font-strong);
+  text-decoration: none;
+}
+.board-next-title:hover {
+  text-decoration: underline;
+}
+.board-next-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--primitive-space-1) var(--primitive-space-3);
+  font-size: var(--primitive-font-caption);
+  color: var(--semantic-text-secondary);
+}
+
+/* 5. 야드 : ROSY 탑뷰 (1:1) */
+.yard-topview.board-even,
+.board-even .yard-topview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--primitive-space-4);
+  align-items: start;
+}
+.yard-topview.board-even > *,
+.board-even .yard-topview > * {
+  min-width: 0;
+}
+
+/* 미니 평면 이동 강조 및 갈 자리 옅은 화물 번호 */
+.slot-card.is-move-slot {
+  background: var(--semantic-surface-selected);
+  border-color: var(--semantic-border-selected);
+}
+.slot-ghost {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--primitive-space-1) var(--primitive-space-2);
+  border: var(--primitive-border-thin) dashed var(--semantic-border-selected);
+  border-radius: var(--primitive-radius-small);
+  background: var(--semantic-surface-panel);
+  color: var(--semantic-text-secondary);
+  font-family: ui-monospace, monospace;
+  font-weight: var(--primitive-font-strong);
+  opacity: 0.72;
+}
+
+/* 지원 담당자용 접힘 */
+.board-support {
+  margin-top: var(--primitive-space-4);
+  padding: var(--primitive-space-3) var(--primitive-space-4);
+  background: var(--semantic-surface-panel);
+  border: var(--primitive-border-thin) solid var(--semantic-border-divider);
+  border-radius: var(--primitive-radius-panel);
+}
+
+@media (min-width: 1100px) {
+  .board-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .yard-topview.board-even,
+  .board-even .yard-topview {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .board-run {
+    padding: var(--primitive-space-3) var(--primitive-space-4);
+  }
+  .board-counts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
