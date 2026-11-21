@@ -4,7 +4,6 @@ import sqlite3
 from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.http import Http404
 from django.views.decorators.http import require_http_methods
@@ -13,9 +12,9 @@ from harbor.ledger import ReadOnlyLedger
 from harbor_web import commands, human_evidence, services
 from harbor_web.auth import has_role, require_roles
 from harbor_web.models import Command, Plan
-from harbor_web.pipeline import COMMAND_LABELS, pipeline_for
+from harbor_web.pipeline import pipeline_for
 from harbor_web.presentation import reason_text
-from harbor_web.views import page, paginate, selected_observation
+from harbor_web.views import page, selected_observation
 
 
 class CommandForm(forms.Form):
@@ -135,16 +134,8 @@ def candidate_preview(request, pk, rank):
 @require_roles('viewer', 'operator', 'admin')
 @require_http_methods(['GET'])
 def work_list(request):
-    q, state = request.GET.get('q', '')[:200], request.GET.get('state', '')
-    items = Command.objects.select_related('plan__order__cargo').order_by('-id')
-    if q:  # A rearrangement order has no cargo code; an empty search must not drop it.
-        items = items.filter(Q(plan__order__cargo__code__icontains=q) | Q(mission_id__icontains=q))
-    if state in dict(Command._meta.get_field('state').choices):
-        items = items.filter(state=state)
-    context = paginate(request, items)
-    for command in context['page']:
-        command.display_state = COMMAND_LABELS.get(command.state, '원래 실행 대조 필요')
-    return page(request, 'work.html', section='work', q=q, state=state, **context)
+    from harbor_web.work_hub import work_hub
+    return work_hub(request)
 
 
 @require_roles('viewer', 'operator', 'admin', 'field')  # same roles as work_detail, which narrows field staff
