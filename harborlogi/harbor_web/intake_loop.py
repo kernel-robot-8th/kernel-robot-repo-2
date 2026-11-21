@@ -5,10 +5,15 @@ adds the cargo to the intake manifest. The executor proposes that trip once (a d
 operator admits it in ROSY), records TRIP_ARRIVED when Fleet confirms the trip, and reads R's port
 events into the intake ledger. Both are off until HARBOR_TRIP_DESTINATION names the intake place.
 """
+import logging
 import os
+
+from django.db.models import Max
 
 from harbor.port_events import RANK, IntakeLedger
 from harbor.transport import TransportLedger, TripIntent
+
+logger = logging.getLogger(__name__)
 
 
 def trip_key(departure):
@@ -42,6 +47,8 @@ def tick(registry, *, now):
     for departure in DepartureIntent.objects.select_related('cargo').order_by('pk'):
         key, cargo = trip_key(departure), departure.cargo.code
         try:
+            # 멱등 준비로 intent만 남거나 manifest 저장이 실패한 회차도 복구한다.
+            prepare_trip(departure, now=now)
             row = transport.read(key)
             if RANK.get(intake.read(cargo)['state'], len(RANK)) >= RANK['TRIP_ARRIVED']:
                 continue  # arrived, further along, or HOLD
@@ -52,6 +59,16 @@ def tick(registry, *, now):
                 if job.get('status') == 'GOAL_CONFIRMED':
                     intake.arrive(cargo, now=now)
         except Exception:
-            continue  # One trip's failure never blocks the others; the original key is reconciled next tick.
+            logger.exception('출발 준비 %s의 이송 처리 실패; 다음 틱에 재시도', departure.pk)
+            continue
     intake.expire(now=now, connection=registry.config['origin'])  # An R that answered before, then went silent.
-    return intake.poll(client, connection=registry.config['origin'], now=now)
+    result = intake.poll(client, connection=registry.config['origin'], now=now)
+    from harbor_web.field_episodes import prepare_departure_from_release
+    from harbor_web.models import FieldEpisode
+    latest = FieldEpisode.objects.exclude(state='REASSIGNED').values('vehicle_id').annotate(pk_max=Max('pk')).values('pk_max')
+    for episode in FieldEpisode.objects.filter(pk__in=latest, departureintent__isnull=True).order_by('pk'):
+        try:
+            prepare_departure_from_release(episode, now=now)
+        except Exception:
+            logger.exception('회차 %s의 ROSY 출발 준비 실패', episode.pk)
+    return result
