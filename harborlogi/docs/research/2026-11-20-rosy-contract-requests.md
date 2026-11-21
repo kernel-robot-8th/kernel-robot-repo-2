@@ -59,9 +59,9 @@ Harbor는 야드 보관 장부와 실제 인식 결과를 비교해 불일치를
 
 - `harbor/departure.py:37-50` `DepartureLedger.authorize(since=...)` — `since` 매개변수가 도착 시각을 요구
 - `harbor/departure.py` 모듈 설명과 `DepartureLedger.authorize`: 차량별 현재 도착 이후 허락을 한 번 소비
-- ADR 0031 참조(다른 작업 소관)
+- ADR 0033 참조(다른 작업 소관)
 
-**상태**: 새 계약 필요(ADR 대상) — ADR 0031(다른 작업 소관)
+**상태**: 새 계약 필요(ADR 대상) — ADR 0033(다른 작업 소관)
 
 ---
 

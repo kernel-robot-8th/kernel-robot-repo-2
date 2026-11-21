@@ -69,4 +69,4 @@ Harbor 자리 주소 형식은 `<area>-r<n>-c<n>-l<n>` (`harbor/process.py:85-87
 
 - ROSY 요청 문서: `docs/research/2026-11-20-rosy-contract-requests.md` (항목 1)
 - ADR 0029: 반입 사건 계약(`docs/adr/0029-port-events-and-intake-identity.md`)
-- ADR 0031: 차량별 도착 사건(다른 작업 소관)
+- ADR 0033: 차량별 도착 사건(다른 작업 소관)
