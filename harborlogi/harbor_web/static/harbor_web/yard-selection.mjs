@@ -236,7 +236,7 @@ export function mountLinkedGrid(preview, scene, onSelect, inspectDestination = (
     section.dataset.gridArea = area.id; section.setAttribute('aria-label', area.label);
     const slots = slotStacks(boxes, area, slotCells), displayRows = Math.ceil(area.columns / slotCells);
     const holder = document.createElement('div'); holder.className = isYard ? 'yard-lanes transposed' : 'tray-slots';
-    holder.style.setProperty(isYard ? '--yard-columns' : '--tray-columns', isYard ? area.rows : slots.length);
+    holder.dataset.columns = String(isYard ? area.rows : slots.length);
     if (isYard) {
       for (let number = 1; number <= displayRows; number++) {
         const lane = document.createElement('div'), label = document.createElement('span');
