@@ -81,6 +81,12 @@ class TopviewProxyTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.camera.lease.assert_not_called()
 
+    def test_unusable_peer_source_does_not_block_known_camera(self):
+        self.reader.workcell_observations.return_value['workcells'][0]['cameras'].append({})
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b'jpeg-test')
+
     def test_stale_and_network_errors_do_not_expose_credentials(self):
         for error, status in ((StaleFrameError('test-lease-secret'), 404),
                               (OSError('test-lease-secret'), 502),

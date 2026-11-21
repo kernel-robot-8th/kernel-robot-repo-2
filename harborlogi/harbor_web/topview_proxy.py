@@ -14,6 +14,7 @@ source_id는 GET /api/fleet/workcell-observations의 cameras[].source_id에서
 import os
 
 from django.http import HttpResponse
+from django.urls import reverse
 from django.views.decorators.http import require_http_methods
 
 from harbor.rosy_http import RosyClient
@@ -31,6 +32,34 @@ def _fleet_settings():
     return origin, token, ca_file
 
 
+def _camera_sources(origin, token, ca_file, *, timeout):
+    """화면과 프레임 프록시가 같은 관측 경로·카메라 검증을 쓴다."""
+    snapshot = RosyClient(origin, token, timeout=timeout, ca_file=ca_file).workcell_observations()
+    cells = snapshot.get('workcells')
+    if not isinstance(cells, list) or any(
+            not isinstance(cell, dict) or not isinstance(cell.get('cameras', []), list)
+            or any(not isinstance(camera, dict) for camera in cell.get('cameras', [])) for cell in cells):
+        raise ValueError('Invalid workcell cameras')
+    sources = [camera.get('source_id') for cell in cells for camera in cell.get('cameras', [])]
+    # 출처 없는 다른 카메라가 정상 카메라까지 막거나 URL 경로를 바꾸지 않게 한다.
+    return list(dict.fromkeys(source for source in sources
+        if isinstance(source, str) and source and '/' not in source and source not in ('.', '..')
+        and not any(ord(char) < 32 or ord(char) == 127 for char in source)))
+
+
+def topview_context():
+    """연결 실패는 탑뷰 칸 안에만 표시하고 야드 화면을 계속 연다."""
+    origin, token, ca_file = _fleet_settings()
+    if not origin or not token:
+        return dict(sources=[], status='ROSY 연동 전')
+    try:
+        sources = _camera_sources(origin, token, ca_file, timeout=2)
+        return dict(sources=[dict(source_id=source, url=reverse('topview_frame', args=[source]))
+                             for source in sources], status='' if sources else 'ROSY 연결 안 됨')
+    except (ValueError, OSError):
+        return dict(sources=[], status='ROSY 연결 안 됨')
+
+
 @require_roles(*READ)
 @require_http_methods(['GET'])
 def topview_frame(request, source_id):
@@ -40,13 +69,7 @@ def topview_frame(request, source_id):
         return HttpResponse("ROSY 연동 전", status=503, content_type="text/plain; charset=utf-8")
 
     try:
-        snapshot = RosyClient(origin, token, timeout=10, ca_file=ca_file).workcell_observations()
-        cells = snapshot.get('workcells')
-        if not isinstance(cells, list) or any(
-                not isinstance(cell, dict) or not isinstance(cell.get('cameras', []), list)
-                or any(not isinstance(camera, dict) for camera in cell.get('cameras', [])) for cell in cells):
-            raise ValueError('Invalid workcell cameras')
-        if not any(camera.get('source_id') == source_id for cell in cells for camera in cell.get('cameras', [])):
+        if source_id not in _camera_sources(origin, token, ca_file, timeout=10):
             return HttpResponse('frame unavailable', status=404, content_type='text/plain; charset=utf-8')
         client = VisionClient(origin, token, timeout=10, ca_file=ca_file)
         lease_response = client.lease(source_id)
