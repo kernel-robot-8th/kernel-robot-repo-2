@@ -88,9 +88,16 @@ class RoleTests(TestCase):
         other = Client()
         other.force_login(self.user)
         self.client.force_login(self.user)
-        response = self.client.post('/accounts/password_change/', {'old_password': 'long-test-password-472!', 'new_password1': 'different-password-852!', 'new_password2': 'different-password-852!'})
+        response = self.client.post('/accounts/password_change/', {'old_password': 'long-test-password-472!', 'new_password1': 'different-password-852', 'new_password2': 'different-password-852'})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(other.get('/accounts/password_change/').status_code, 302)
+
+    def test_password_change_rejects_bang_and_at(self):
+        self.client.force_login(self.user)
+        for bad in ('bad!password12', 'bad@password12'):
+            response = self.client.post('/accounts/password_change/', {'old_password': 'long-test-password-472!', 'new_password1': bad, 'new_password2': bad})
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(self.user.check_password('long-test-password-472!'))
 
 class DatabaseOwnershipTests(TestCase):
     def test_business_database_is_rejected_without_mutation(self):
