@@ -409,7 +409,7 @@ def inventory(request):
     from harbor_web.map_config import map_scene
     view = (spatial_yard_view(services.spatial_snapshot(selected)) if selected.payload.get('schema') == 'grid-placement-v1'
             else yard_view(selected.payload['bays'], selected.condition.payload)) if selected else None
-    stage = present_stage(dict(view, panel_id='inventory-yard', label='관측한 배치', index=0), condition.payload) if view else None
+    stage = present_stage(dict(view, panel_id='inventory-yard', label='현재 야드 배치', index=0), condition.payload) if view else None
     scene = scene_for([stage]) if stage else map_scene(condition.payload) if condition else None
     from harbor_web.yard_rows import place_context, placement_text, slot_key, spot_label
     labels, slot = place_context(condition.payload) if condition else ({}, None)

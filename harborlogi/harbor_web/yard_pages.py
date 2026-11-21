@@ -69,7 +69,7 @@ def outbound_chain_replay(observation):
     labels, slot = place_context(observation.condition.payload)
 
     stages = [present_stage(
-        dict(spatial_yard_view(current), index=0, phase='관측', label='관측한 배치', move=None, panel_id='yard-chain-0'),
+        dict(spatial_yard_view(current), index=0, phase='현재', label='현재 야드 배치', move=None, panel_id='yard-chain-0'),
         observation.condition.payload,
     )]
     arrows = []

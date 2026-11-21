@@ -87,6 +87,8 @@ def _alert_count(request, *, held, can_read, observation, stale, superseded, com
                     total += excluded
         total += sum(1 for c in commands if work_state(c) == '처리할 것')
         total += _unmatched_completed_count(commands)
+        from harbor_web.intake_pages import read_holds
+        total += len(read_holds()[0])
 
     if held & {'operator', 'admin'} or can_read:
         cached = getattr(request, '_open_field_count', None)

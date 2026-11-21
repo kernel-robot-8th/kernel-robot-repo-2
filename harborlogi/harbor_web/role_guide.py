@@ -5,7 +5,7 @@ from harbor_web import access
 
 _ROLE_ACTIONS = {
     ('work', 'operator'): '읽기·예외 처리',
-    ('inventory', 'admin'): '읽기·원본 등록',
+    ('inventory', 'admin'): '읽기·자료 등록',
     ('alerts', 'operator'): '읽기·예외 처리',
     ('alerts', 'field'): '읽기·현장 확인',
     ('records', 'operator'): '읽기·측정 등록',
