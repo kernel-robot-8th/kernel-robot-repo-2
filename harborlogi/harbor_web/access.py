@@ -23,6 +23,7 @@ ADMIN = frozenset({'admin'})
 EVERYONE = frozenset({'viewer', 'operator', 'field', 'admin'})
 
 PAGES = (
+    Page('alerts', '/alerts/', '처리할 것', '예외와 현장 배정', EVERYONE),
     Page('overview', '/', '운영 현황', '조치가 필요한 업무', READ, 'work'),
     Page('outbound', '/outbound/', '반출 관제', '우선순위·재취급 계획', READ, 'work'),
     Page('cargo', '/requests/', '화물·요청', '화물 등록과 업무 지시', READ, 'work'),
