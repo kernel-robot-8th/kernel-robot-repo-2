@@ -3,9 +3,11 @@ name: review-gate
 # Required check. Needs a teammate's approval only when the PR touches files others changed recently.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
   pull_request_review:
     types: [submitted, dismissed]
+  issue_comment:
+    types: [created, edited]
 
 permissions:
   actions: write         # re-run this head's earlier failed gate after an approval
@@ -14,6 +16,7 @@ permissions:
 
 jobs:
   review-gate:
+    if: github.event_name != 'issue_comment' || (github.event.issue.pull_request != null && contains(github.event.comment.body, 'Overlap-Review:'))
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
@@ -23,6 +26,12 @@ jobs:
       # Run the base branch's gate so a PR cannot loosen its own check; gate edits take effect once merged.
       - run: |
           gate=".github/review-gate.sh"
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            PR="${{ github.event.issue.number }}"
+            BASE=$(gh api "repos/$REPO/pulls/$PR" --jq '.base.ref')
+            AUTHOR=$(gh api "repos/$REPO/pulls/$PR" --jq '.user.login')
+            export PR BASE AUTHOR
+          fi
           git rev-parse --verify -q "origin/$BASE" > /dev/null || { echo "::error::origin/$BASE is missing"; exit 1; }
           if git cat-file -e "origin/$BASE:$gate"; then git show "origin/$BASE:$gate" > "$RUNNER_TEMP/review-gate.sh"
           else cp "$gate" "$RUNNER_TEMP/review-gate.sh"; fi   # only before the base branch has the gate
@@ -35,12 +44,14 @@ jobs:
           AUTHOR: ${{ github.event.pull_request.user.login }}
           IGNORE: codex
       # The pull_request event keeps its own check, so its pre-approval failure would still block the merge.
-      - if: github.event_name == 'pull_request_review'
+      - if: github.event_name == 'pull_request_review' || github.event_name == 'issue_comment'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.event.pull_request.head.sha }}
+          ISSUE_PR: ${{ github.event.issue.number }}
         run: |
-          for run in $(gh api "repos/$REPO/actions/workflows/review-gate.yml/runs?head_sha=$SHA&event=pull_request&status=failure" --jq '.workflow_runs[].id'); do
+          head_sha="${SHA:-$(gh api "repos/$REPO/pulls/$ISSUE_PR" --jq '.head.sha')}"
+          for run in $(gh api "repos/$REPO/actions/workflows/review-gate.yml/runs?head_sha=$head_sha&event=pull_request&status=failure" --jq '.workflow_runs[].id'); do
             gh api -X POST "repos/$REPO/actions/runs/$run/rerun" >/dev/null && echo "re-ran gate run $run"
           done
