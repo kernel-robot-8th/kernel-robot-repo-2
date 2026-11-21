@@ -191,3 +191,20 @@ button.slot-level[aria-pressed=true] {outline:3px solid var(--primitive-color-or
 .slot-drop[data-drop-state=valid] {background:var(--primitive-color-teal-soft);color:var(--primitive-color-teal-dark);border:1px dashed var(--primitive-color-teal-dark)}
 .slot-drop[data-drop-state=invalid] {color:var(--semantic-text-secondary)}
 @media (prefers-reduced-motion:reduce) {.slot-card {transition:none}}
+/* Global status strip (WP05) */
+.status-strip {margin-left:var(--primitive-size-navigation);display:flex;flex-wrap:wrap;align-items:center;gap:var(--primitive-space-2) var(--primitive-space-4);padding:var(--primitive-space-2) var(--primitive-space-6);background:var(--semantic-surface-panel);border-bottom:1px solid var(--semantic-border-divider);font-size:var(--primitive-font-label);min-width:0}
+.strip-item {display:inline-flex;align-items:center;gap:var(--primitive-space-2);min-width:0}
+.strip-label,.strip-note,.strip-muted {color:var(--semantic-text-secondary);font-size:var(--primitive-font-caption)}
+.strip-num {font-variant-numeric:tabular-nums;white-space:nowrap}
+.strip-job-link {font-weight:600;text-decoration:none}
+.strip-job-link:hover {text-decoration:underline}
+.strip-job-text {font-weight:600}
+.strip-pill {display:inline-flex;align-items:center;padding:var(--primitive-space-1) var(--primitive-space-2);border-radius:var(--primitive-radius-small);font-size:var(--primitive-font-caption);font-weight:600;text-decoration:none;white-space:nowrap}
+.strip-pill.tone-critical {background:var(--semantic-status-danger-background);color:var(--semantic-status-danger-foreground)}
+.strip-pill.tone-attention {background:var(--semantic-status-warning-background);color:var(--semantic-status-warning-foreground)}
+.strip-pill.tone-info {background:var(--semantic-status-info-background);color:var(--semantic-status-info-foreground)}
+.strip-pill.tone-good {background:var(--semantic-status-success-background);color:var(--semantic-status-success-foreground)}
+.strip-pill.tone-neutral {background:var(--semantic-status-unknown-background);color:var(--semantic-status-unknown-foreground)}
+.strip-estop {margin-left:auto}
+.strip-estop-btn {min-height:var(--primitive-size-control);padding:var(--primitive-space-1) var(--primitive-space-3);font-size:var(--primitive-font-label)}
+@media (max-width:900px) {.status-strip {margin-left:0;padding:var(--primitive-space-2) var(--primitive-space-4)} .strip-estop {margin-left:0}}
