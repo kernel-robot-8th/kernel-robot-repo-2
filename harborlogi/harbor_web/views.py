@@ -58,7 +58,7 @@ def form_page(request, *, form_type, title, section, save, destination, descript
 def overview(request):
     from harbor_web.workspace import plan_changes
     if not has_role(request.user, 'viewer', 'operator', 'admin'):
-        return redirect('/field/')
+        return redirect('/alerts/')
     observation = selected_observation(request, default_latest=True)
     observations = list(Observation.objects.select_related('condition').order_by('-pk')[:100])
     if observation and all(item.pk != observation.pk for item in observations):
@@ -382,7 +382,7 @@ def order_detail(request, pk):
                 review_observation=observation, observation_query=f'observation={observation.pk}' if observation else '')
 
 
-@require_roles('viewer', 'operator', 'admin')
+@require_roles('viewer', 'operator', 'field', 'admin')
 @require_http_methods(['GET'])
 def inventory(request):
     observations = Observation.objects.select_related('condition').order_by('-id')
@@ -446,7 +446,9 @@ def observation_new(request):
 @require_roles('admin')
 @require_http_methods(['GET'])
 def settings_page(request):
-    return page(request, 'settings.html', section='settings', conditions=Condition.objects.order_by('-id'))
+    from harbor_web.role_guide import role_table
+    return page(request, 'settings.html', section='settings',
+                conditions=Condition.objects.order_by('-id'), role_table=role_table())
 
 
 @require_roles('admin')
