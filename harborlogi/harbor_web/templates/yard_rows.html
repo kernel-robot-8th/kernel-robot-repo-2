@@ -1,8 +1,8 @@
 {% if yard %}<div class="site-frame"><div class="site-map" data-yard-plan>
   {% if yard.left %}<div class="site-side site-left">{% for area in yard.left %}{% include 'site_area.html' %}{% endfor %}</div>{% endif %}
   <div class="site-center">
-    <section class="site-yard" aria-label="{{ yard.yard.label }} · 위에서 본 줄 순서"><h4>{{ yard.yard.label }}<small>{{ yard.yard.used }} / {{ yard.yard.slots }}자리</small></h4>
-      <div class="yard-lanes lanes-{{ yard.yard.lanes|length }}">{% for lane in yard.yard.lanes %}<div class="yard-lane"><span class="lane-label">{{ lane.label }}</span>{% for slot in lane.slots %}{% include 'slot_card.html' %}{% endfor %}</div>{% endfor %}</div>
+    <section class="site-yard" aria-label="{{ yard.yard.label }} · 1행 위쪽 · 1열 왼쪽"><h4>{{ yard.yard.label }}<small>{{ yard.yard.used }} / {{ yard.yard.slots }}자리</small></h4>
+      <div class="yard-lanes{% if yard.yard.transposed %} transposed{% else %} lanes-{{ yard.yard.lanes|length }}{% endif %}" data-columns="{{ yard.yard.columns|default:1 }}">{% for lane in yard.yard.lanes %}<div class="yard-lane"><span class="lane-label">{{ lane.label }}</span>{% for slot in lane.slots %}{% include 'slot_card.html' %}{% endfor %}</div>{% endfor %}</div>
     </section>
     {% for area in yard.below %}{% include 'site_area.html' %}{% endfor %}
   </div>

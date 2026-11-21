@@ -68,7 +68,7 @@ export async function mountYardViewer(figure) {
   const ceiling = Math.max(...scene.areas.map(a => a.levels)) + .6;
   let renderer = null;
   renderer = createRenderer(canvas, scene.areas, {
-    showVolumes: scene.kind === 'map-definition',
+    showVolumes: scene.kind === 'map-definition', transpose: Boolean(slotCells),
     colors, onSelect: id => select(id), onTransform: (id, position) => {
       if (!draft || playing) return;
       const box = draft.find(b => b.id === id);
