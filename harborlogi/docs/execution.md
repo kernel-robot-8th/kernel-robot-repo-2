@@ -1,5 +1,15 @@
 # 공정 제안과 업무 장부 사용법
 
+## 원본 물리 근거 provider (D-915)
+
+`HARBOR_EXECUTOR_EVIDENCE=physical`은 기존 실행기에 원본 Fleet closure 증거를 읽는 provider를 선택한다. 기본값은 꺼짐이다. 서버 환경의 `HARBOR_PLACEMENT_SOURCES`와 `HARBOR_RETREAT_SOURCES`에는 서로 다른 설치 출처를 각각 하나씩 지정한다. 어느 팔이 움직였는지는 Fleet이 고르므로 Harbor는 팔 대응 설정을 두지 않고, 시도에 참여한 팔마다 Fleet의 해제 구역·AT_TARGET_AND_CLEAR 판정·빈 그리퍼를 퇴피 근거로 쓴다. receipt와 원문 SHA가 다르거나 실행 시도가 다르면 단계 확인에 쓰지 않는다. Harbor에는 observer 토큰을 공급하지 않고 기존 전용 Fleet service 신원을 사용한다.
+
+이 provider는 `WAITING`인 현재 ARM 단계에서만 근거를 공급한다. 마지막 이동 확인 뒤 상태는 `AWAITING_FINAL_EVIDENCE`이며 `final` 요청에는 근거를 반환하지 않는다. `finish()`에는 별도 최종 업무 근거가 필요하다. 운영 producer·실제 Gazebo 시계 변환·실물 수용은 아직 검증하지 않았다.
+
+개발 HTTP 경로는 기존 `tools.integration.real_fleet_http`에 `--evidence-only --app-python <isolated-harbor-python>`을 전달해 실행한다. 고정 플랫폼 SHA와 깨끗한 양 끝 checkout이 필요하다. 별도 소비자 프로세스가 실제 Fleet HTTP와 UDS를 사용하지만, 이 모드의 측정값은 합성 fixture다. Gazebo 물리 관측이나 장치 수용 결과로 해석하지 않는다.
+
+## 기존 공정과 장부
+
 필요한 플랫폼 계약은 D-836, API reference v1.292다. 후보 이송은 simulation profile의 기존 named operator 접수다. 기존 단일 `robot_id` 호출은 플랫폼에서 계속 지원한다.
 
 1. `plan_outbound`로 관측 revision에 결속한 순수 반출 제안을 만든다.
@@ -117,3 +127,9 @@ python -m tools.integration.real_fleet_http --platform-root <플랫폼-root> --p
 독립 실행에서는 `HARBOR_INTEGRATION=1`과 도구가 만든 임시 `HARBOR_INTEGRATION_CONFIG`를 함께 공급한다. 명시 모드에서 설정 누락·연결 오류는 실패이며 skip을 성공 증거로 삼지 않는다. 플랫폼·Harbor 전체 SHA 두 개와 exit code를 함께 기록한다. fixture의 합성 관측은 업무 완료의 운영 증거를 제공하지 않는다.
 
 업무 대조 시험에서는 별도 시험 actor가 Fleet의 기명 승인자로 승인한다. Harbor의 런타임 클라이언트에 승인 기능을 추가하지 않는다. 실제 `GOAL_CONFIRMED` 뒤에도 Harbor 장부가 WAITING에 남는지, 잘못된 관측을 거절하는지, 재시작 후 새 조회가 필요한지, 인계 뒤에도 별도 내려놓기·퇴피 근거 전에는 AWAITING_FINAL_EVIDENCE인지 확인한다. 관측 값은 시험에 명시한 합성 데이터이며 인증된 현장 관측을 읽는 어댑터가 아니다. [실행 결과와 제한](validation/2026-10-22-business-reconciliation.md)을 따른다.
+
+## 탑뷰 프레임 프록시
+
+로그인한 열람·운영·관리 역할은 `GET /topview/<source_id>/frame/`으로 최신 JPEG 한 장을 받는다(운영 현황과 관측 재고의 야드 평면 옆 「ROSY 탑뷰」에서 표시). 기존 `HARBOR_FLEET_ORIGIN`, `HARBOR_FLEET_TOKEN`, `HARBOR_FLEET_CA_FILE`을 사용해 `GET /api/fleet/workcell-observations`의 `workcells[].cameras[].source_id`에 있는 출처인지 확인한 뒤, `POST /api/fleet/vision/lease`에 `source_id`만 보내고 응답의 `frame_path`를 lease Bearer로 읽는다. 브라우저에는 JPEG와 선택한 `X-Frame-*` 헤더만 반환하며 lease는 전달하지 않고 `no-store`로 응답한다. JPEG는 4 MiB 이하만 허용하고 리다이렉트·다른 origin의 `frame_path`는 거절한다. 설정 누락은 503 「ROSY 연동 전」, 오래된 프레임은 404 `frame stale`이다. 클라이언트의 `sources()`는 `GET /api/fleet/vision/sources`를 지원한다. 확인 못 함: R이 CELL-A 카메라를 sources에 내놓는지, Harbor 서비스 계정이 카메라 열람 권한을 통과하는지, 그림을 Fleet가 아닌 다른 호스트가 주는지. 다른 호스트가 필요하면 현재 프록시로 수용하지 않으며 ROSY 전달 계약을 먼저 확인해야 한다.
+
+두 화면은 같은 관측 경로에서 카메라 목록을 읽으며 HTTP 요청별 타임아웃은 2초다. 기존 `.local`·CA 연결의 mDNS 탐색은 별도로 기본 3초가 걸리므로 전체 페이지 조회가 2초 안에 끝난다는 뜻은 아니다. 설정이 없으면 「ROSY 연동 전」, 목록 조회 실패·사용 가능한 카메라 없음이면 「ROSY 연결 안 됨」을 표시하고 야드 화면은 계속 열린다. 카메라가 여러 대면 선택하며 프레임은 성공 뒤 1초, 실패 뒤 3초 간격으로 다시 읽는다. 탭이 숨겨지면 조회를 취소·정지하고 돌아오면 재개한다. 캡처 시각은 헤더가 있을 때 브라우저 현지 시각으로 표시하며 이전 이미지의 blob URL은 해제한다.

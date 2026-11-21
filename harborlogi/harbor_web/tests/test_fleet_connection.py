@@ -26,10 +26,127 @@ class FleetConnectionTests(TransactionTestCase):
             'HARBOR_FLEET_ORIGIN': '', 'HARBOR_FLEET_PRINCIPAL': '',
             'HARBOR_FLEET_ALLOWED_ORIGINS': 'https://fleet.example',
             'HARBOR_FLEET_TOKEN': 'private-bridge-token',
+            'HARBOR_FLEET_CA_FILE': '',
             'HARBOR_LEDGER_PATH': '/private/ledger.db', 'HARBOR_BINDINGS_PATH': '/private/bindings.json',
         })
         self.environment.start()
         self.addCleanup(self.environment.stop)
+
+    def test_admin_discovery_verifies_only_installed_sites_without_saving_identity(self):
+        self.client.force_login(self.admin)
+        rows = [dict(hostname='site-pc.local', address='192.168.50.2', port=8443),
+                dict(hostname='stranger.local', address='192.168.50.3', port=8443)]
+        with patch.dict(os.environ, HARBOR_FLEET_CA_FILE='site-ca.pem',
+                        HARBOR_FLEET_ALLOWED_ORIGINS='https://site-pc.local:8443'), \
+             patch('harbor.fleet_discovery.site_ssl_context'), \
+             patch('harbor.fleet_discovery.browse_fleets', return_value=rows), \
+             patch('harbor.fleet_discovery.endpoint_opener') as verify, \
+             patch('harbor.rosy_http.RosyClient._http', side_effect=AssertionError('discovery sent bearer')):
+            response = self.client.post('/settings/integration/', {'action': 'discover', 'expected_version': 0})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'site-pc.local')
+        self.assertNotContains(response, 'stranger.local')
+        self.assertEqual(response.context['discovered_origins'], ['https://site-pc.local:8443'])
+        self.assertEqual(verify.call_count, 1)
+        self.assertFalse(FleetConnection.objects.exists())
+        self.assertEqual(Command.objects.count(), 0)
+        self.assertNotIn('private-bridge-token', response.content.decode())
+
+    def test_discovery_retains_site_and_api_hint_for_get_without_credentials(self):
+        self.client.force_login(self.admin)
+        row = dict(hostname='site-pc.local', address='192.168.50.2', port=8443)
+        with patch.dict(os.environ, HARBOR_FLEET_CA_FILE='site-ca.pem', HARBOR_FLEET_TOKEN='',
+                        HARBOR_FLEET_ALLOWED_ORIGINS='https://site-pc.local:8443'), \
+             patch('harbor.fleet_discovery.site_ssl_context'), \
+             patch('harbor.fleet_discovery.browse_fleets', return_value=[row]), \
+             patch('harbor.fleet_discovery.endpoint_opener'), \
+             patch('harbor.fleet_discovery.public_api_status', return_value='ARM_API_NOT_ADVERTISED'):
+            response = self.client.post('/settings/integration/', {'action': 'discover', 'expected_version': 0})
+            self.assertEqual(response.context['discovered_origins'], ['https://site-pc.local:8443'])
+            self.assertContains(response, '작업 API 미공개')
+            self.assertFalse(response.context['connection_guidance']['can_check'])
+            with patch('harbor.fleet_discovery.browse_fleets', side_effect=AssertionError('GET must not browse')):
+                response = self.client.get('/settings/integration/')
+            self.assertContains(response, '작업 API 미공개')
+            self.assertContains(response, '검색 시점')
+            with patch.dict(os.environ, HARBOR_FLEET_ALLOWED_ORIGINS='https://other.local:8443'):
+                self.assertIsNone(bridge.last_discovery())
+        self.assertEqual(Command.objects.count(), 0)
+        self.assertFalse(FleetConnection.objects.exists())
+
+    def test_public_schema_unknown_keeps_discovered_site_without_claiming_readiness(self):
+        row = dict(hostname='site-pc.local', address='192.168.50.2', port=8443)
+        with patch.dict(os.environ, HARBOR_FLEET_CA_FILE='site-ca.pem', HARBOR_FLEET_ALLOWED_ORIGINS='https://site-pc.local:8443'), \
+             patch('harbor.fleet_discovery.site_ssl_context'), \
+             patch('harbor.fleet_discovery.browse_fleets', return_value=[row]), \
+             patch('harbor.fleet_discovery.endpoint_opener'), \
+             patch('harbor.fleet_discovery.public_api_status', return_value='PUBLIC_API_UNCONFIRMED'):
+            result = bridge.discover_connections(self.admin, expected_version=0)
+        self.assertEqual(result['origins'], ['https://site-pc.local:8443'])
+        self.assertEqual(result['sites'], [dict(origin='https://site-pc.local:8443', api='PUBLIC_API_UNCONFIRMED')])
+        self.assertEqual(result['failures'], [])
+        self.assertEqual(Command.objects.count(), 0)
+
+    def test_discovery_with_no_installed_lan_origin_fails_before_network(self):
+        with patch.dict(os.environ, HARBOR_FLEET_CA_FILE='site-ca.pem'), \
+             patch('harbor.fleet_discovery.browse_fleets', side_effect=AssertionError('no approved LAN sites')):
+            with self.assertRaisesMessage(ValidationError, 'FLEET_DISCOVERY_CONFIGURATION'):
+                bridge.discover_connections(self.admin, expected_version=0)
+
+    def test_ca_content_change_invalidates_cached_discovery(self):
+        import tempfile
+        from pathlib import Path
+        row = dict(hostname='site-pc.local', address='192.168.50.2', port=8443)
+        with tempfile.TemporaryDirectory() as folder:
+            ca = Path(folder) / 'ca.crt'
+            ca.write_text('fixture CA before rotation')
+            with patch.dict(os.environ, HARBOR_FLEET_CA_FILE=str(ca), HARBOR_FLEET_ALLOWED_ORIGINS='https://site-pc.local:8443'), \
+                 patch('harbor.fleet_discovery.site_ssl_context'), \
+                 patch('harbor.fleet_discovery.browse_fleets', return_value=[row]), \
+                 patch('harbor.fleet_discovery.endpoint_opener'), \
+                 patch('harbor.fleet_discovery.public_api_status', return_value='ARM_API_ADVERTISED'):
+                bridge.discover_connections(self.admin, expected_version=0)
+                self.assertIsNotNone(bridge.last_discovery())
+                ca.write_text('fixture CA after rotation')
+                self.assertIsNone(bridge.last_discovery())
+
+    def test_discovery_is_explicit_admin_post_and_preserves_existing_profile(self):
+        self.save()
+        self.client.force_login(self.admin)
+        with patch('harbor.fleet_discovery.browse_fleets', side_effect=AssertionError('unexpected browse')):
+            self.assertEqual(self.client.get('/settings/integration/').status_code, 200)
+            missing_ca = self.client.post('/settings/integration/', {'action': 'discover', 'expected_version': 1})
+            self.assertContains(missing_ca, '사이트 CA')
+            stale = self.client.post('/settings/integration/', {'action': 'discover', 'expected_version': 0})
+            self.assertContains(stale, '연결 설정이 변경')
+            self.client.force_login(self.operator)
+            self.assertEqual(self.client.post('/settings/integration/', {'action': 'discover', 'expected_version': 1}).status_code, 403)
+        self.assertEqual(FleetConnection.objects.get().origin, 'https://fleet.example')
+
+    def test_connection_probe_and_execution_client_share_installed_ca(self):
+        self.save()
+        with patch.dict(os.environ, HARBOR_FLEET_CA_FILE='site-ca.pem'), \
+             patch.object(bridge, 'RosyClient') as client:
+            client.return_value.session.return_value = {'principal_id': 'harbor-service', 'role': 'service'}
+            client.return_value.arm_request.side_effect = self.missing()
+            self.assertEqual(bridge.check_connection(self.admin, expected_version=1)['status'], 'VERIFIED')
+            self.assertTrue(any(call.kwargs.get('ca_file') == 'site-ca.pem' for call in client.call_args_list))
+            config = commands._config()
+            self.assertEqual(config['ca_file'], 'site-ca.pem')
+            from harbor_web.commands import Registry
+            client.reset_mock()
+            with patch.object(commands, 'WriterLease'), patch.object(commands, 'BusinessLedger'):
+                Registry(config)
+            self.assertEqual(client.call_args.kwargs['ca_file'], 'site-ca.pem')
+
+    def test_discovery_failure_has_separate_actionable_diagnostic(self):
+        from harbor.fleet_discovery import DiscoveryError
+        self.save()
+        self.client.force_login(self.admin)
+        with patch('harbor.rosy_http.RosyClient._http', side_effect=DiscoveryError('FLEET_DISCOVERY_CONFLICT')):
+            result = bridge.check_connection(self.admin, expected_version=1)
+        self.assertEqual(result['reason'], 'FLEET_DISCOVERY_CONFLICT')
+        self.assertContains(self.client.get('/settings/integration/'), '여러 주소')
 
     def save(self, **overrides):
         fields = dict(origin='https://fleet.example', principal='harbor-service',
@@ -42,8 +159,8 @@ class FleetConnectionTests(TransactionTestCase):
                          io.BytesIO(json.dumps({'detail': {'code': code}}).encode()))
 
     def rest(self, code=None):
-        # evidence, recheck, proposal, execution-profile probes; a generic 404 means the route is absent
-        return [self.missing(code) for _ in range(4)]
+        # workcell-observations, evidence, recheck, proposal, port-events, execution-profile probes; generic 404 = absent
+        return [self.missing(code) for _ in range(6)]
 
     def test_saved_connection_feeds_existing_execution_and_contains_no_token(self):
         self.save()
@@ -85,7 +202,21 @@ class FleetConnectionTests(TransactionTestCase):
                     result = bridge.check_connection(self.admin, expected_version=1)
                 self.assertEqual(result['reason'], expected)
                 self.assertNotEqual(result['status'], 'VERIFIED')
-                self.assertEqual(http.call_count, 6 if error else 1)
+                self.assertEqual(http.call_count, 8 if error else 1)
+
+    def test_port_events_condition_shows_an_r_without_the_route(self):
+        self.save()
+        session, arm = {'principal_id': 'harbor-service', 'role': 'service'}, self.missing()
+        for answer, expected in [(self.missing('PORT_EVENT_CURSOR_INVALID', 400), 'MET'),
+                                 (self.missing(None), 'UNMET'),  # old R: no such route
+                                 (self.missing('PORT_EVENT_CURSOR_INVALID'), 'UNKNOWN'),
+                                 ({'events': [], 'cursor': 'c', 'complete': True}, 'UNKNOWN')]:
+            with self.subTest(expected=expected), patch('harbor.rosy_http.RosyClient._http', side_effect=[
+                    session, arm, *self.rest()[:4], answer, self.missing(None)]):
+                result = bridge.check_connection(self.admin, expected_version=1)
+            self.assertEqual(result['conditions']['port_events'], expected)
+        with self.assertRaises(ValidationError):
+            self.save(principal='p' * 97, expected_version=1)  # ROSY refuses principal ids over 96
 
     def test_get_is_read_only_and_only_admin_can_change_or_probe(self):
         self.save()
@@ -213,3 +344,25 @@ class FleetConnectionTests(TransactionTestCase):
             with self.assertRaisesMessage(ValidationError, 'CONNECTION_CHANGED'):
                 bridge.check_connection(self.admin, expected_version=1)
         self.assertFalse(Audit.objects.filter(action='fleet.check').exists())
+
+    def test_workcell_observations_surfaces_d971_arm_holds_without_allowing_harbor_clear(self):
+        self.save()
+        held_snapshot = {'workcells': [{'workcell_id': 'cell-1', 'arms': [
+            {'source_id': 'arm_b', 'arm_id': 'arm-2', 'incidents': [
+                {'incident_id': 'inc-1', 'state': 'explained', 'decision': {'hold': True, 'reason': 'overload stall'},
+                 'explanation': {'assessment': {'type': 'overload', 'direction': 'stalled'}}},
+            ]},
+        ]}]}
+        with patch('harbor.rosy_http.RosyClient._http', side_effect=[
+            {'principal_id': 'harbor-service', 'role': 'service'}, self.missing(),
+            held_snapshot, *[self.missing() for _ in range(5)],
+        ]):
+            result = bridge.check_connection(self.admin, expected_version=1)
+        self.assertEqual(result['conditions']['arm_clear'], 'UNMET')
+        self.assertEqual(len(result['arm_holds']), 1)
+        self.client.force_login(self.admin)
+        with patch('harbor.rosy_http.RosyClient._http', side_effect=AssertionError('GET contacted Fleet')):
+            response = self.client.get('/settings/integration/')
+        self.assertContains(response, 'ROSY 작업셀 팔 사건 보류 중 (D-971)')
+        self.assertContains(response, 'overload stall')
+        self.assertContains(response, 'arm-2')

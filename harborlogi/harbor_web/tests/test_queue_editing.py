@@ -1,6 +1,7 @@
 """Outbound queue in three priority tiers, request titles and first-place registration (KAN-115 · KAN-116)."""
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from django.contrib.auth.models import Group, User
 from django.core.exceptions import PermissionDenied
@@ -61,6 +62,49 @@ class QueueEditingTests(TestCase):
         self.assertEqual((a.version, b.version), (1, 1))
         self.assertFalse(Audit.objects.filter(action='order.update').exists())
 
+    def closing(self, *orders):
+        return patch('harbor_web.order_queue.completed_order_ids', return_value=[order.pk for order in orders])
+
+    def test_swap_inside_one_lane_leaves_other_lanes_alone_across_a_gap(self):
+        a, closed, c, d = self.order('A', 1, 1), self.order('X', 2, 1), self.order('C', 3, 1), self.order('D', 3, 2)
+        with self.closing(closed):
+            services.reorder_outbound(self.operator, lanes=[dict(fixed=True, orders=[(a.pk, 1)]), dict(fixed=True, orders=[]),
+                                                            dict(fixed=True, orders=[(d.pk, 1), (c.pk, 1)])])
+        self.assertEqual(self.lanes(), [(1, 1, 'FIXED', 'A'), (2, 1, 'FIXED', 'X'), (3, 1, 'FIXED', 'D'), (3, 2, 'FIXED', 'C')])
+        a.refresh_from_db(); c.refresh_from_db()
+        self.assertEqual((a.version, c.version), (1, 2))
+        self.assertFalse(Audit.objects.filter(action='order.update', object_id=str(a.pk)).exists())
+
+    def test_saving_an_unchanged_queue_with_a_gap_changes_nothing(self):
+        a, closed, c = self.order('A', 1, 1), self.order('X', 2, 1), self.order('C', 3, 1)
+        with self.closing(closed):
+            changed = services.reorder_outbound(self.operator, lanes=[dict(fixed=True, orders=[(a.pk, 1)]), dict(fixed=True, orders=[]), dict(fixed=True, orders=[(c.pk, 1)])])
+        self.assertEqual(changed, [])
+        self.assertFalse(Audit.objects.filter(action='order.update').exists())
+
+    def test_moved_lanes_still_renumber_above_finished_orders(self):
+        a, closed, c = self.order('A', 1, 1), self.order('X', 2, 1), self.order('C', 3, 1)
+        with self.closing(closed):
+            services.reorder_outbound(self.operator, lanes=[dict(fixed=True, orders=[(c.pk, 1)]), dict(fixed=True, orders=[(a.pk, 1)]), dict(fixed=True, orders=[])])
+        self.assertEqual(self.lanes(), [(1, 1, 'FIXED', 'C'), (2, 1, 'FIXED', 'X'), (2, 2, 'FIXED', 'A')])
+
+    def test_swap_beside_a_finished_order_stays_above_its_sequence(self):
+        closed, b, c = self.order('X', 1, 1), self.order('B', 1, 2), self.order('C', 1, 3)
+        with self.closing(closed):
+            services.reorder_outbound(self.operator, lanes=[dict(fixed=True, orders=[(c.pk, 1), (b.pk, 1)]), dict(fixed=True, orders=[]), dict(fixed=True, orders=[])])
+        self.assertEqual(self.lanes(), [(1, 1, 'FIXED', 'X'), (1, 2, 'FIXED', 'C'), (1, 3, 'FIXED', 'B')])
+
+    def test_policy_change_beside_a_finished_order_stays_above_its_sequence(self):
+        closed, b = self.order('X', 1, 1), self.order('B', 1, 2)
+        with self.closing(closed):
+            services.reorder_outbound(self.operator, lanes=[dict(fixed=False, orders=[(b.pk, 1)]), dict(fixed=True, orders=[]), dict(fixed=True, orders=[])])
+        self.assertEqual(self.lanes(), [(1, 1, 'FIXED', 'X'), (1, 2, 'ANY', 'B')])
+
+    def test_any_lane_turning_fixed_gets_distinct_sequences(self):
+        a, b = self.order('A', 1, 1, 'ANY'), self.order('B', 1, 1, 'ANY')
+        services.reorder_outbound(self.operator, lanes=[dict(fixed=True, orders=[(a.pk, 1), (b.pk, 1)]), dict(fixed=True, orders=[]), dict(fixed=True, orders=[])])
+        self.assertEqual(self.lanes(), [(1, 1, 'FIXED', 'A'), (1, 2, 'FIXED', 'B')])
+
     def test_stale_version_is_a_conflict_and_changes_nothing(self):
         a, b = self.order('A', 1, 1), self.order('B', 2, 1)
         with self.assertRaises(services.Conflict):
@@ -116,6 +160,31 @@ class QueueEditingTests(TestCase):
                                                            tie_policy='FIXED', make_first='on'))
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.lanes(), [(1, 1, 'FIXED', 'X'), (3, 1, 'FIXED', 'C'), (3, 2, 'FIXED', 'A'), (3, 3, 'FIXED', 'B')])
+
+    def test_registration_takes_the_queue_lock_before_its_transaction(self):
+        # Same order as every mutating service: queue_lock first, then the SQLite write lock (review of #44). The
+        # request's first lock must come while no transaction of its own is open yet.
+        from unittest.mock import patch
+        from django.db import connection
+        from harbor_web import coordination
+        depths, lock = [], coordination.queue_lock
+
+        class Spy:
+            def __enter__(self):
+                depths.append(len(connection.atomic_blocks))
+                return lock.__enter__()
+
+            def __exit__(self, *exc):
+                return lock.__exit__(*exc)
+        self.order('A', 3, 1)
+        cargo = self.cargo('C')
+        self.client.force_login(self.operator)
+        outside = len(connection.atomic_blocks)
+        with patch.object(coordination, 'queue_lock', Spy()):
+            response = self.client.post('/requests/new/', dict(cargo=cargo.pk, kind='OUTBOUND', priority_group=3,
+                                                               tie_policy='FIXED', make_first='on'))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(depths[:1], [outside])
 
     def test_unchecked_fixed_order_box_saves_any(self):
         self.client.force_login(self.operator)

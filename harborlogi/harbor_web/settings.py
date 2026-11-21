@@ -48,7 +48,22 @@ def validate_database_path(database):
 DB_PATH = os.environ.get('HARBOR_WEB_DATABASE')
 if MODE == 'live' and (not DB_PATH or not Path(DB_PATH).is_absolute() or 'legacy' in DB_PATH.lower() or Path(DB_PATH).name == 'web-development.sqlite3'):
     raise ImproperlyConfigured('Live mode requires an explicit absolute non-legacy HARBOR_WEB_DATABASE.')
-DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': DB_PATH or (':memory:' if MODE == 'test' else BASE_DIR / 'runs/web-development.sqlite3'), 'OPTIONS': {'timeout': 20}}}
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': DB_PATH or (':memory:' if MODE == 'test' else BASE_DIR / 'runs/web-development.sqlite3'),
+        'OPTIONS': {
+            'timeout': 20,
+            'transaction_mode': 'IMMEDIATE',
+            'init_command': (
+                'PRAGMA journal_mode=WAL;'
+                'PRAGMA synchronous=NORMAL;'
+                'PRAGMA foreign_keys=ON;'
+                'PRAGMA busy_timeout=20000;'
+            ),
+        },
+    }
+}
 validate_database_path(DATABASES['default']['NAME'])
 INSTALLED_APPS = ['django.contrib.admin', 'django.contrib.auth', 'django.contrib.contenttypes', 'django.contrib.sessions', 'django.contrib.messages', 'django.contrib.staticfiles', 'axes', 'harbor_web.apps.HarborWebConfig']
 MIDDLEWARE = ['django.middleware.security.SecurityMiddleware', 'whitenoise.middleware.WhiteNoiseMiddleware', 'django.contrib.sessions.middleware.SessionMiddleware', 'django.middleware.common.CommonMiddleware', 'django.middleware.csrf.CsrfViewMiddleware', 'django.contrib.auth.middleware.AuthenticationMiddleware', 'harbor_web.rosy_account.RosyAccountMiddleware', 'django.contrib.messages.middleware.MessageMiddleware', 'django.middleware.clickjacking.XFrameOptionsMiddleware', 'harbor_web.middleware.SecurityHeadersMiddleware', 'axes.middleware.AxesMiddleware']
@@ -56,7 +71,7 @@ ROOT_URLCONF = 'harbor_web.urls'
 WSGI_APPLICATION = 'harbor_web.wsgi.application'
 TEMPLATES = [{'BACKEND': 'django.template.backends.django.DjangoTemplates', 'DIRS': [BASE_DIR / 'harbor_web/templates'], 'APP_DIRS': True, 'OPTIONS': {'context_processors': ['django.template.context_processors.request', 'django.contrib.auth.context_processors.auth', 'django.contrib.messages.context_processors.messages', 'harbor_web.presentation.context']}}]
 AUTHENTICATION_BACKENDS = ['axes.backends.AxesStandaloneBackend', 'django.contrib.auth.backends.ModelBackend']
-AUTH_PASSWORD_VALIDATORS = [{'NAME': 'django.contrib.auth.password_validation.' + name} for name in ['UserAttributeSimilarityValidator', 'MinimumLengthValidator', 'CommonPasswordValidator', 'NumericPasswordValidator']]
+AUTH_PASSWORD_VALIDATORS = [*[{'NAME': 'django.contrib.auth.password_validation.' + name} for name in ['UserAttributeSimilarityValidator', 'MinimumLengthValidator', 'CommonPasswordValidator', 'NumericPasswordValidator']], {'NAME': 'harbor_web.auth.NoBangAtPasswordValidator'}]
 LOGIN_URL = '/accounts/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = LOGIN_URL
