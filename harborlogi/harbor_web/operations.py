@@ -5,6 +5,7 @@ from django.utils import timezone
 from harbor_web import services
 from harbor_web.models import Audit, Command, Observation, Order, Plan
 from harbor_web.workspace import COMMAND_LABELS
+from harbor_web.yard_scene import area_presentation
 from harbor_web.yard_rows import DEFAULT_SLOT, place_context, place_label, slot_key, yard_rows
 
 ATTENTION_STATES = ('UNKNOWN', 'DISPATCHING', 'CANCEL_PENDING', 'BLOCKED')
@@ -27,7 +28,7 @@ def _inventory(observation):
     spatial = observation.payload.get('schema') == 'grid-placement-v1'
     snapshot = services.snapshot(observation)
     areas = []
-    presentation = services.area_presentation(policy) if spatial else {}
+    presentation = area_presentation(policy) if spatial else {}
     slot = policy.get('slot_cells') if spatial else None  # fixed 1×3 slots: count containers, not cells (KAN-115)
     if spatial:
         for area in snapshot.areas:

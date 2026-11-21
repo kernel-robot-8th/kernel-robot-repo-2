@@ -1,8 +1,10 @@
 """Harbor product routes, separate from account and Fleet routes."""
 from django.urls import path, re_path
+from harbor_web import alert_pages
 from harbor_web import views, planning_pages, field_pages, record_pages, guide_pages, map_pages, rearrangement_pages, reorder_validate, scenario_pages, topview_proxy
 
 urlpatterns = [
+    path('alerts/', alert_pages.alerts, name='alerts'),
     path('workflow/', guide_pages.workflow, name='workflow'),
     path('settings/integration/', guide_pages.integration, name='integration'),
     path('', views.overview, name='overview'),

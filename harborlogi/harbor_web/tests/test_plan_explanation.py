@@ -125,5 +125,5 @@ class InboundExplanationTests(TestCase):
 class AreaLabelTests(SimpleTestCase):
     def test_per_arm_temporary_areas_read_by_name(self):
         from harbor_web.plan_explanation import _location
-        for area_id, label in (('temp_a', '임시 장치 A 2층'), ('temp_b', '임시 장치 B 2층'), ('stand', '반출대 2층')):
+        for area_id, label in (('temp_a', '임시 판 A 2층'), ('temp_b', '임시 판 B 2층'), ('stand', '반출대 2층')):
             self.assertEqual(_location(dict(area_id=area_id, row=1, column=1, level=2))['label'], label)

@@ -1,6 +1,6 @@
 from functools import wraps
 from django.contrib.auth.views import redirect_to_login
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpResponse
 
 def roles(user):
@@ -28,3 +28,19 @@ def client_ip(request):
 
 def lockout_response(request, credentials=None, *args, **kwargs):
     return HttpResponse('Too many login attempts. Try again later.', status=429, content_type='text/plain')
+
+
+def validate_no_bang_at_username(value):
+    if any(c in value for c in '!@'):
+        raise ValidationError('아이디에 ! 또는 @ 문자를 사용할 수 없습니다.', code='username_forbidden_chars')
+
+
+class NoBangAtPasswordValidator:
+    """Reject ! and @ in passwords to prevent shell/URL parsing issues."""
+
+    def validate(self, password, user=None):
+        if any(c in password for c in '!@'):
+            raise ValidationError('비밀번호에 ! 또는 @ 문자를 사용할 수 없습니다.', code='password_forbidden_chars')
+
+    def get_help_text(self):
+        return '비밀번호에는 !와 @ 문자를 사용할 수 없습니다.'
