@@ -21,6 +21,10 @@ def record_release(connection, event):
                        (event["event_id"], event["vehicle_id"], event["observed_at"].isoformat()))
 
 
+class NoReleasePermit(ValueError):
+    """현재 회차 이후 쓸 수 있는 ROSY 출발 허락이 없다."""
+
+
 class DepartureLedger:
     """Spends ROSY release permissions, one per departure."""
 
@@ -45,7 +49,7 @@ class DepartureLedger:
             # ISO strings are not safely orderable across offsets, so compare parsed times.
             current = [r for r in rows if datetime.fromisoformat(r["observed_at"]) >= since]
             if not current:
-                raise ValueError("ROSY has not permitted this vehicle to leave since it arrived")
+                raise NoReleasePermit("ROSY has not permitted this vehicle to leave since it arrived")
             newest = max(current, key=lambda r: datetime.fromisoformat(r["observed_at"]))
             c.execute("UPDATE release_permits SET state='AUTHORIZED' WHERE event_id=?", (newest["event_id"],))
             return newest["event_id"]
