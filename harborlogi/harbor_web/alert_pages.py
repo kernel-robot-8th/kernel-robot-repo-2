@@ -2,6 +2,7 @@
 from datetime import timedelta
 import math
 import os
+from pathlib import Path
 
 from django.conf import settings
 from django.shortcuts import render
@@ -36,8 +37,8 @@ def release_overdue_minutes() -> float:
 def _has_release_permit(episode):
     if DepartureIntent.objects.filter(episode=episode).exclude(release_event_id='').exists():
         return True
-    path = os.environ.get('HARBOR_LEDGER_PATH', '')
-    if not path:
+    path = os.environ.get('HARBOR_LEDGER_PATH', '').strip()
+    if not path or not Path(path).exists():
         return False
     return DepartureLedger(path).has_permit(episode.vehicle_id, since=episode.created_at)
 
