@@ -11,13 +11,17 @@ assert.equal(frameStatus(404), '그림이 오래됨');
 for (const status of [0, 502, 503]) assert.equal(frameStatus(status), 'ROSY 연결 안 됨');
 assert.equal(frameStatus(200), '');
 assert.equal(frameStatus(200, 'invalid'), '');
-const captured = new Date(2026, 10, 21, 9, 8, 7).toISOString();
+const capturedDate = new Date(2026, 10, 21, 9, 8, 7);
+const captured = capturedDate.toISOString();
+const capturedEpoch = capturedDate.getTime() / 1000;
 assert.equal(frameStatus(200, captured), '찍은 시각 09:08:07');
+assert.equal(frameStatus(200, String(capturedEpoch)), '찍은 시각 09:08:07');
+assert.equal(frameStatus(200, `${capturedEpoch}.410025`), '찍은 시각 09:08:07');
 assert.equal(frameStatus(502, captured), 'ROSY 연결 안 됨');
 console.log('Topview: normal polling, retry, visibility pause and status text passed');
 
 // 브라우저가 없는 Node에서도 실제 비동기 갱신과 취소·오래된 응답 무시를 확인한다.
-const saved = Object.fromEntries(['document', 'window', 'fetch', 'setTimeout', 'clearTimeout']
+const saved = Object.fromEntries(['document', 'window', 'fetch', 'setTimeout', 'clearTimeout', 'Image']
   .map(key => [key, globalThis[key]]));
 const revoke = URL.revokeObjectURL;
 const revoked = [];
@@ -97,6 +101,117 @@ try {
   window.dispatchEvent(new Event('pagehide'));
   assert.equal(timers.size, 0);
   assert.equal(image.hidden, true);
+
+  // Offscreen Image.decode() atomic frame swap, mid-decode abort, corrupt JPEG rejection, and full cleanup.
+  let hiddenState = true;
+  const hiddenTransitions = [];
+  const removedAttrs = [];
+  const swapImage = {
+    get hidden() { return hiddenState; },
+    set hidden(value) { hiddenState = value; hiddenTransitions.push(value); },
+    removeAttribute(name) { removedAttrs.push(name); delete this[name]; },
+  };
+  const swapStatus = {textContent: ''};
+  const swapSelect = new EventTarget();
+  swapSelect.value = '/topview/cam-one/frame/';
+  const swapNodes = {
+    '[data-topview-image]': swapImage,
+    '[data-topview-status]': swapStatus,
+    '[data-topview-source]': swapSelect,
+  };
+  const doc2 = new EventTarget();
+  doc2.hidden = false;
+  const win2 = new EventTarget();
+  globalThis.document = doc2;
+  globalThis.window = win2;
+  timers.clear();
+  calls.length = 0;
+  revoked.length = 0;
+
+  let decodeBehavior = () => Promise.resolve();
+  let finishDecode;
+  globalThis.Image = class FakeImage {
+    decode() { return decodeBehavior(); }
+  };
+  respond = () => Promise.resolve(new Response('jpeg-1', {
+    headers: {'Content-Type': 'image/jpeg', 'X-Frame-Captured-At': `${capturedEpoch}.410025`},
+  }));
+  const cleanup = mountTopview({querySelector: selector => swapNodes[selector], dataset: {}});
+  await settle();
+  const frame1 = swapImage.src;
+  assert.ok(frame1);
+  assert.equal(swapImage.hidden, false);
+  assert.equal(swapStatus.textContent, '찍은 시각 09:08:07');
+  assert.deepEqual(hiddenTransitions, [false]);
+  assert.deepEqual(removedAttrs, []);
+
+  // Frame 2 while decode() is pending: frame 1 remains visible & unrevoked.
+  decodeBehavior = () => new Promise(resolve => { finishDecode = resolve; });
+  respond = () => Promise.resolve(new Response('jpeg-2', {
+    headers: {'Content-Type': 'image/jpeg', 'X-Frame-Captured-At': `${capturedEpoch}.900000`},
+  }));
+  tick();
+  await settle();
+  assert.equal(swapImage.src, frame1);
+  assert.equal(swapImage.hidden, false);
+  assert.equal(revoked.length, 0);
+
+  // Frame 2 decode resolves -> atomic swap without hidden=true or removeAttribute('src').
+  finishDecode();
+  await settle();
+  const frame2 = swapImage.src;
+  assert.notEqual(frame2, frame1);
+  assert.deepEqual(hiddenTransitions, [false]);
+  assert.deepEqual(removedAttrs, []);
+  assert.deepEqual(revoked, [frame1]);
+
+  // Corrupt JPEG (decode rejects) -> temporary URL revoked, image hidden, status ROSY 연결 안 됨, 3s retry.
+  decodeBehavior = () => Promise.reject(new Error('corrupt jpeg'));
+  respond = () => Promise.resolve(new Response('bad-jpeg', {
+    headers: {'Content-Type': 'image/jpeg', 'X-Frame-Captured-At': `${capturedEpoch}.950000`},
+  }));
+  tick();
+  await settle();
+  assert.equal(swapImage.hidden, true);
+  assert.equal(swapStatus.textContent, 'ROSY 연결 안 됨');
+  assert.equal(revoked.length, 3);
+  assert.equal(timers.values().next().value.delay, 3000);
+
+  // Mid-decode abort: tab hidden while decode() pending -> pending URL revoked on settle, active frame preserved.
+  decodeBehavior = () => Promise.resolve();
+  respond = () => Promise.resolve(new Response('jpeg-3', {headers: {'Content-Type': 'image/jpeg'}}));
+  tick();
+  await settle();
+  assert.equal(swapImage.hidden, false);
+  const frame3 = swapImage.src;
+
+  let finishLateDecode;
+  decodeBehavior = () => new Promise(resolve => { finishLateDecode = resolve; });
+  respond = () => Promise.resolve(new Response('jpeg-4', {headers: {'Content-Type': 'image/jpeg'}}));
+  tick();
+  await settle();
+  const revokedBeforeAbort = revoked.length;
+  doc2.hidden = true;
+  doc2.dispatchEvent(new Event('visibilitychange'));
+  finishLateDecode();
+  await settle();
+  assert.equal(revoked.length, revokedBeforeAbort + 1);
+  assert.equal(swapImage.src, frame3);
+
+  // Returned cleanup removes change, visibilitychange, pagehide, and pageshow listeners.
+  const callsBeforeCleanup = calls.length;
+  const revokedBeforeCleanup = revoked.length;
+  cleanup();
+  assert.equal(revoked.length, revokedBeforeCleanup + 1);
+  const removedAfterCleanup = removedAttrs.length;
+  doc2.hidden = false;
+  swapSelect.dispatchEvent(new Event('change'));
+  doc2.dispatchEvent(new Event('visibilitychange'));
+  win2.dispatchEvent(Object.assign(new Event('pageshow'), {persisted: true}));
+  win2.dispatchEvent(new Event('pagehide'));
+  assert.equal(calls.length, callsBeforeCleanup);
+  assert.equal(removedAttrs.length, removedAfterCleanup);
+  assert.equal(timers.size, 0);
 } finally {
   Object.assign(globalThis, saved);
   URL.revokeObjectURL = revoke;
