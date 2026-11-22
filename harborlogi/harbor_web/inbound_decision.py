@@ -10,9 +10,9 @@ from django.db import transaction
 
 from harbor_web.coordination import serialized
 from harbor_web.models import Audit, Command, Order, Plan
+from harbor_web.plan_service import DECIDE_ACTION, placement_decision  # noqa: F401 (re-exported)
 from harbor_web.service_common import Conflict, _role
 
-DECIDE_ACTION = 'plan.decide'
 # Why the decision page hides its button (workspace.plan_changes), most actionable first.
 BLOCKED_BY = (('OBSERVATION_NOT_FRESH', '관측 유효 시간 지남 · 새 관측 필요'),
               ('OBSERVATION_REVISION_CHANGED', '새 관측 있음 · 다시 계산 필요'),
@@ -22,10 +22,6 @@ BLOCKED_BY = (('OBSERVATION_NOT_FRESH', '관측 유효 시간 지남 · 새 관�
 class PlacementDecisionForm(forms.Form):
     expected_version = forms.IntegerField(min_value=1)
     alternative_rank = forms.IntegerField(min_value=0, required=False)
-
-
-def placement_decision(plan):
-    return Audit.objects.filter(action=DECIDE_ACTION, object_type='Plan', object_id=str(plan.pk)).select_related('actor').first()
 
 
 @serialized

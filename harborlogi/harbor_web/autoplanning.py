@@ -5,12 +5,14 @@ import json
 from django.utils import timezone
 from harbor_web.command_models import ACTIVE_COMMAND_STATES
 from harbor_web.models import Command, CargoFootprint, Observation, Order, Plan
+from harbor_web.order_queue import queue_digest
+from harbor_web.plan_service import _calculate_plan, placement_decision
+from harbor_web.site_config import constraints
 
 
 def placement_reservations(order, observation):
     """Earlier automatic requests reserve empty cells, never observed support."""
     from harbor.spatial import CargoShape, Placement
-    from harbor_web.inbound_decision import placement_decision
     binding = order.planning_observation if order.planning_observation_id else observation
     seen = {item['cargo_id'] for item in observation.payload.get('placements', [])}
     cells, references = set(), []
@@ -41,12 +43,11 @@ def placement_reservations(order, observation):
 
 
 def planning_digest(order, observation, *, now=None):
-    from harbor_web import services
     current = timezone.now() if now is None else now
     binding = order.planning_observation if order.planning_observation_id else observation
-    age = services.constraints(observation.condition.payload).max_observation_age
+    age = constraints(observation.condition.payload).max_observation_age
     elapsed = (current - observation.observed_at).total_seconds()
-    payload = {'queue': services.queue_digest(), 'observation': observation.pk,
+    payload = {'queue': queue_digest(), 'observation': observation.pk,
         'binding': [binding.source_id, binding.condition_id], 'condition': observation.condition_id,
         'policy': observation.condition.payload,
         'reservations': placement_reservations(order, observation)[1] if order.kind == 'INBOUND' else [],
@@ -58,7 +59,6 @@ def planning_digest(order, observation, *, now=None):
 
 def replan_enabled(actor, trigger, *, source_id=None):
     # Called inside each event's serialized atomic transaction; never calls a public mutator.
-    from harbor_web import services
     for order in Order.objects.filter(auto_replan=True).select_related('cargo', 'planning_observation').order_by('pk'):
         binding = order.planning_observation
         if binding is None or (source_id is not None and binding.source_id != source_id):
@@ -77,5 +77,5 @@ def replan_enabled(actor, trigger, *, source_id=None):
         elif Command.objects.exclude(order=order).filter(state__in=ACTIVE_COMMAND_STATES).exists():
             # Command states do not prove physical completion or release of reserved space.
             reason = 'OTHER_COMMAND_REQUIRES_RECONCILIATION'
-        services._calculate_plan(actor, order, observation, now=current, trigger=trigger,
+        _calculate_plan(actor, order, observation, now=current, trigger=trigger,
             input_digest=digest, hold_reason=reason)

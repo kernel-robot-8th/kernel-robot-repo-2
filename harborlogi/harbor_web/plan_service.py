@@ -16,6 +16,12 @@ from harbor_web.service_common import Conflict, _domain, _role, _save
 from harbor_web.site_config import constraints, snapshot, spatial_policy, spatial_snapshot
 from harbor_web.order_queue import open_outbound_orders, queue_digest, queue_snapshot, request_snapshot
 
+DECIDE_ACTION = 'plan.decide'
+
+
+def placement_decision(plan):
+    return Audit.objects.filter(action=DECIDE_ACTION, object_type='Plan', object_id=str(plan.pk)).select_related('actor').first()
+
 
 def _open_outbound_ahead(order):
     """Open outbound orders ahead in priority; a ledger-completed order no longer blocks."""
@@ -101,7 +107,6 @@ def _calculate_plan(actor, order, observation, *, now=None, trigger='manual', in
             proposal = _domain(lambda: plan_placement(yard, incoming_shape,
                 spatial_policy(observation.condition.payload), _outbound_schedule(), now=current, reserved_cells=reserved_cells))
     elif order.kind == 'REARRANGE':
-        from harbor_web.rearrangement import rearrange_proposal
         proposal = rearrange_proposal(observation, rearrange, now=current) if spatial else OutboundProposal(
             'HOLD', 'SPATIAL_OBSERVATION_REQUIRED', yard.revision)
     elif order.kind == 'INBOUND':
@@ -143,7 +148,6 @@ def _calculate_plan(actor, order, observation, *, now=None, trigger='manual', in
     if spatial:
         result['model'] = 'grid-placement-v1'
         if order.kind == 'REARRANGE':
-            from harbor_web.rearrangement import plan_record
             result['plan_kind'] = 'rearrangement'
             result['rearrangement'] = plan_record(proposal, rearrange)
         if order.kind == 'INBOUND':
@@ -167,6 +171,27 @@ def _calculate_plan(actor, order, observation, *, now=None, trigger='manual', in
     return _save(actor, Plan(created_by=actor, order=order, order_version=order.version,
                             observation=observation, condition=observation.condition,
                             queue_digest=queue_digest(), result=result), 'plan.create')
+
+
+def rearrange_proposal(observation, options, *, now):
+    from harbor.spatial import plan_rearrangement
+    if options.get('proposal') is not None:
+        return options['proposal']
+    snapshot = spatial_snapshot(observation)
+    return _domain(lambda: plan_rearrangement(
+        snapshot, spatial_policy(observation.condition.payload), _outbound_schedule(),
+        now=now, expected_revision=snapshot.revision, k=options['k'], max_moves=options['max_moves'],
+        outbound_pending=options['outbound_pending'], requested=options['requested'],
+        pending_inbound=options['pending_inbound']))
+
+
+def plan_record(proposal, options):
+    """Per-plan record: which authorization, B/N before and after, gain, move count."""
+    score = proposal.optimization.score if proposal.optimization else None
+    return dict(authorization_id=options.get('authorization_id'), automatic=bool(options.get('automatic')),
+        blocked_before=score and score.blocked_pairs_before, blocked_after=score and score.blocked_pairs,
+        unknown_before=score and score.unknown_pairs_before, unknown_after=score and score.unknown_pairs,
+        gain=score and score.gain, move_count=len(proposal.moves))
 
 
 def placement_projection(plan):

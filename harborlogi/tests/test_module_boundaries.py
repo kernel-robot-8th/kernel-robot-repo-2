@@ -143,47 +143,20 @@ def _cycle_edges(graph):
 # Import edges inside today's cycles (SCC), one block per cycle. Each refactor PR deletes the lines it breaks.
 # Adding an edge that closes or joins a cycle fails; so does leaving a line that is no longer a cycle edge.
 ALLOWED_CYCLE_EDGES = {
-    # autoplanning, command_binding, commands, evidence, fleet_connection, inbound_decision, order_queue, pipeline, plan_explanation, plan_service, readiness, rearrangement, services, workspace, yard_rows, yard_scene
-    ('harbor_web.autoplanning', 'harbor_web.inbound_decision'),
-    ('harbor_web.autoplanning', 'harbor_web.services'),
-    ('harbor_web.command_binding', 'harbor_web.evidence'),
-    ('harbor_web.command_binding', 'harbor_web.fleet_connection'),
-    ('harbor_web.commands', 'harbor_web.command_binding'),
-    ('harbor_web.commands', 'harbor_web.evidence'),
-    ('harbor_web.commands', 'harbor_web.fleet_connection'),
-    ('harbor_web.commands', 'harbor_web.readiness'),
-    ('harbor_web.commands', 'harbor_web.services'),
-    ('harbor_web.evidence', 'harbor_web.services'),
-    ('harbor_web.fleet_connection', 'harbor_web.services'),
-    ('harbor_web.inbound_decision', 'harbor_web.services'),
-    ('harbor_web.inbound_decision', 'harbor_web.workspace'),
+    # autoplanning, order_queue, plan_service: permanent replan loop. Every order or plan mutation calls replan_enabled
+    # (order_queue/plan_service -> autoplanning), which recalculates through _calculate_plan and queue_digest
+    # (autoplanning -> plan_service/order_queue). Merging them would mix queue state with calculation.
+    ('harbor_web.autoplanning', 'harbor_web.order_queue'),
+    ('harbor_web.autoplanning', 'harbor_web.plan_service'),
     ('harbor_web.order_queue', 'harbor_web.autoplanning'),
-    ('harbor_web.pipeline', 'harbor_web.fleet_connection'),
-    ('harbor_web.plan_explanation', 'harbor_web.yard_rows'),
     ('harbor_web.plan_service', 'harbor_web.autoplanning'),
     ('harbor_web.plan_service', 'harbor_web.order_queue'),
-    ('harbor_web.plan_service', 'harbor_web.rearrangement'),
-    ('harbor_web.readiness', 'harbor_web.command_binding'),
-    ('harbor_web.readiness', 'harbor_web.fleet_connection'),
-    ('harbor_web.rearrangement', 'harbor_web.commands'),
-    ('harbor_web.rearrangement', 'harbor_web.order_queue'),
-    ('harbor_web.rearrangement', 'harbor_web.services'),
-    ('harbor_web.services', 'harbor_web.autoplanning'),
-    ('harbor_web.services', 'harbor_web.order_queue'),
-    ('harbor_web.services', 'harbor_web.plan_service'),
-    ('harbor_web.workspace', 'harbor_web.commands'),
-    ('harbor_web.workspace', 'harbor_web.pipeline'),
-    ('harbor_web.workspace', 'harbor_web.plan_explanation'),
-    ('harbor_web.workspace', 'harbor_web.services'),
-    ('harbor_web.workspace', 'harbor_web.yard_rows'),
-    ('harbor_web.workspace', 'harbor_web.yard_scene'),
-    ('harbor_web.yard_rows', 'harbor_web.services'),
-    ('harbor_web.yard_rows', 'harbor_web.yard_scene'),
-    ('harbor_web.yard_scene', 'harbor_web.services'),
-    ('harbor_web.yard_scene', 'harbor_web.yard_rows'),
     # field_episodes, intake_loop
     ('harbor_web.field_episodes', 'harbor_web.intake_loop'),
     ('harbor_web.intake_loop', 'harbor_web.field_episodes'),
+    # yard_rows, yard_scene
+    ('harbor_web.yard_rows', 'harbor_web.yard_scene'),
+    ('harbor_web.yard_scene', 'harbor_web.yard_rows'),
 }
 
 
