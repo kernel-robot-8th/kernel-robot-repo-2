@@ -15,7 +15,7 @@ from harbor_web.auth import require_roles, roles
 from harbor_web.intake_pages import intake_alert_items
 from harbor_web.models import DepartureIntent, FieldEpisode
 from harbor_web.operations import operations_context
-from harbor_web.views import selected_observation
+from harbor_web.page_helpers import selected_observation
 from harbor_web.work_state import work_state
 
 DEFAULT_RELEASE_OVERDUE_MINUTES = 10.0
