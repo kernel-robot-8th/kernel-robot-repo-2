@@ -6,6 +6,7 @@ import re
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPSHandler, Request, build_opener
 
+from harbor.cell_site_map import decode_cell_site_json
 from harbor.fleet_discovery import _NoRedirect
 
 
@@ -58,6 +59,8 @@ class RosyClient:
             raise ValueError('Invalid Fleet HTTP response') from error
         if len(raw) > 1024 * 1024:
             raise ValueError("Fleet response exceeds 1 MiB")
+        if path == "/api/fleet/pipeline/cell-sites":
+            return decode_cell_site_json(raw)
         value = json.loads(raw)
         if not isinstance(value, dict):
             raise ValueError("Expected a Fleet response object")
@@ -153,6 +156,10 @@ class RosyClient:
     def workcell_observations(self):
         """Read-only D-971 workcell observation and open arm incident status."""
         return self._call("GET", "/api/fleet/workcell-observations", None)
+
+    def cell_sites(self):
+        """Read-only canonical cell site map (rosy.cell-site-map.v1)."""
+        return self._call("GET", "/api/fleet/pipeline/cell-sites", None)
 
     def request_recheck(self, mission_id, recheck_key):
         return self._call("POST", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/rechecks",
