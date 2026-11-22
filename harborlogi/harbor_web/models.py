@@ -41,22 +41,26 @@ class Condition(Immutable):
 
 
 class Observation(Immutable):
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name='+')
     source_id = models.CharField(max_length=96)
     source_revision = models.CharField(max_length=96)
     observed_at = models.DateTimeField()
-    provenance = models.CharField(max_length=12, choices=[('SYNTHETIC', 'Synthetic'), ('DECLARED', 'Declared')])
+    provenance = models.CharField(max_length=12, choices=[('SYNTHETIC', 'Synthetic'), ('DECLARED', 'Declared'), ('PORT_EVENT', 'Port Event')])
     payload = models.JSONField()
     condition = models.ForeignKey(Condition, on_delete=models.PROTECT)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=['source_id', 'source_revision'], name='observation_source_revision_unique')]
+        constraints = [
+            models.UniqueConstraint(fields=['source_id', 'source_revision'], name='observation_source_revision_unique'),
+            models.CheckConstraint(condition=models.Q(created_by__isnull=False) | models.Q(provenance='PORT_EVENT'), name='observation_author_unless_port_event'),
+        ]
 
     @property
     def display_label(self):
         """Short choice label; the raw source revision stays on the source and evidence lines."""
         from django.utils import timezone
         observed = timezone.localtime(self.observed_at) if timezone.is_aware(self.observed_at) else self.observed_at
-        kind = {'SYNTHETIC': '합성 자료', 'DECLARED': '수동 등록'}.get(self.provenance, self.provenance)
+        kind = {'SYNTHETIC': '합성 자료', 'DECLARED': '수동 등록', 'PORT_EVENT': 'ROSY 입고 반영'}.get(self.provenance, self.provenance)
         return f'#{self.pk} · {self.source_id} · {observed:%m-%d %H:%M} 기준 · {kind}'
 
 

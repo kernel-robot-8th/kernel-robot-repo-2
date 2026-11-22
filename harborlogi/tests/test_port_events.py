@@ -7,7 +7,7 @@ import unittest
 from urllib.error import HTTPError
 
 from harbor.departure import DepartureLedger
-from harbor.port_events import IntakeLedger, parse_event
+from harbor.port_events import IntakeLedger, parse_event, parse_slot_ref
 from harbor.rosy_http import RosyClient
 from test_policy import NOW
 
@@ -213,6 +213,24 @@ class PortEventTests(unittest.TestCase):
         self.assertEqual((holds['C-3']['reason'], holds['C-3']['can_attest']), ('LOST', False))
         self.ledger.attest_received('C-1', attested_by='operator-1', now=NOW + timedelta(seconds=5))
         self.assertEqual([row['object_ref'] for row in self.ledger.holds()], ['C-2', 'C-3'])
+
+    def test_parse_slot_ref_and_applied_stored_events(self):
+        self.assertEqual(parse_slot_ref('yard-r1-c4-l2'), ('yard', 1, 4, 2))
+        self.assertEqual(parse_slot_ref('temp_a-r2-c1-l3'), ('temp_a', 2, 1, 3))
+        for bad in ('yard-r0-c1-l1', 'yard-r1-c1', 'yard-r1-c1-l1-x', 'bad area-r1-c1-l1', None, 123):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                parse_slot_ref(bad)
+        self.ledger.expect('C-2', now=NOW)
+        self.poll(
+            received('C-1', 'obs-r1'),
+            stored('C-1', 'obs-s1'),
+            stored('C-UNKNOWN', 'obs-unk'),  # HOLD_UNKNOWN must not appear
+            stored('C-1', 'obs-dup'),        # IGNORED must not appear
+            stored('C-2', 'obs-s2'),
+        )
+        applied = self.ledger.applied_stored_events()
+        self.assertEqual([e['object_ref'] for e in applied], ['C-1', 'C-2'])
+        self.assertEqual([e['slot_ref'] for e in applied], ['yard-r1-c2-l1', 'yard-r1-c2-l1'])
 
 
 if __name__ == '__main__':

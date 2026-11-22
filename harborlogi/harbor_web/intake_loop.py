@@ -63,6 +63,11 @@ def tick(registry, *, now):
             continue
     intake.expire(now=now, connection=registry.config['origin'])  # An R that answered before, then went silent.
     result = intake.poll(client, connection=registry.config['origin'], now=now)
+    try:
+        from harbor_web.port_event_projection import project_stored_events
+        project_stored_events(intake)
+    except Exception:
+        logger.exception('Port event inventory projection failed; poll cursor preserved')
     from harbor_web.field_episodes import prepare_departure_from_release
     from harbor_web.models import FieldEpisode
     latest = FieldEpisode.objects.exclude(state='REASSIGNED').values('vehicle_id').annotate(pk_max=Max('pk')).values('pk_max')

@@ -2,7 +2,7 @@
 <p><a href="/requests/{{ order.pk }}/">{{ order.cargo.code }} 입고 요청 #{{ order.pk }}</a> / 계획 #{{ plan.pk }}</p>
 <span id="yard" aria-hidden="true"></span>
 <div class="page-head"><div><h1>{{ order.cargo.code }} 입고 자동 배치</h1><p>현재 지시 v{{ order.version }} · 계획 기준 v{{ plan.order_version }} · {{ plan.created_at|date:'Y-m-d H:i:s' }}</p></div><span class="badge {{ plan.result.status }}">{{ plan.result.status }}</span></div>
-<p class="notice"><strong>{{ plan_reason }}</strong> · {% if plan.observation.provenance == 'SYNTHETIC' %}합성 시험 자료{% else %}수동 등록 · 출처 인증 미확인{% endif %}. 추천은 실제 배치·로봇 실행을 뜻하지 않습니다.</p>
+<p class="notice"><strong>{{ plan_reason }}</strong> · {% if plan.observation.provenance == 'SYNTHETIC' %}합성 시험 자료{% elif plan.observation.provenance == 'PORT_EVENT' %}ROSY 입고 기록{% else %}수동 등록 · 출처 인증 미확인{% endif %}. 추천은 실제 배치·로봇 실행을 뜻하지 않습니다.</p>
 {% if plan_changes %}<div class="notice"><strong>계산 기준이 달라졌습니다</strong>{% for change in plan_changes %}<p>{{ change.message }}</p>{% endfor %}<a href="/requests/{{ order.pk }}/">현재 요청과 최신 계획 확인</a></div>{% endif %}
 {% include 'auto_planning_status.html' %}
 {% if plan.result.status == 'READY' and plan.result.recommendation %}<section class="panel decision-panel" aria-labelledby="decision-title"><div class="panel-h"><h3 id="decision-title">입고 위치 결정</h3><span class="scope">알고리즘이 계산하고, 사람이 결정합니다</span></div><div class="panel-b">
