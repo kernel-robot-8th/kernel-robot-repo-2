@@ -1,0 +1,133 @@
+{
+  "schema": "rosy.port-site-places.v1",
+  "sources": {
+    "site_map": {
+      "map_id": "world_261026",
+      "version": 348,
+      "sha256": "5bcdf0303fb3bc27fd5cc2d02e445a99098a2881bb3e5aec0c1577af6c69676c"
+    },
+    "site_rules": {
+      "version": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "cell_site_map": {
+      "schema": "rosy.cell-site-map.v1",
+      "revision": 1,
+      "status": "planned_unverified"
+    }
+  },
+  "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "vehicle_places": [
+    {
+      "place_id": "S1",
+      "port_role": "inbound_load",
+      "status": "verified",
+      "dispatchable": true,
+      "label": "S1 주차장 출구·수동 적재 정지선"
+    },
+    {
+      "place_id": "S2",
+      "port_role": "wait",
+      "status": "verified",
+      "dispatchable": true,
+      "label": "S2 주차장 입구 정지선"
+    },
+    {
+      "place_id": "S3",
+      "port_role": "intake_dropoff",
+      "status": "verified",
+      "dispatchable": true,
+      "label": "S3 상단 하역 정지선 (cell_s)"
+    },
+    {
+      "place_id": "S4",
+      "port_role": "wait",
+      "status": "verified",
+      "dispatchable": true,
+      "label": "S4 하단 중앙 대기 정지선"
+    },
+    {
+      "place_id": "S5",
+      "port_role": "wait",
+      "status": "verified",
+      "dispatchable": true,
+      "label": "S5 하단 U턴 전 대기 정지선"
+    },
+    {
+      "place_id": "S_OUT",
+      "port_role": "outbound_pickup",
+      "status": "planned_unverified",
+      "dispatchable": false,
+      "label": "S_OUT 반출대 상차 정지선"
+    },
+    {
+      "place_id": "C1",
+      "port_role": "charge",
+      "status": "verified",
+      "dispatchable": false,
+      "label": "충전 칸 1"
+    },
+    {
+      "place_id": "C2",
+      "port_role": "charge",
+      "status": "verified",
+      "dispatchable": false,
+      "label": "충전 칸 2"
+    },
+    {
+      "place_id": "C3",
+      "port_role": "charge",
+      "status": "verified",
+      "dispatchable": false,
+      "label": "충전 칸 3"
+    }
+  ],
+  "cell_zones": [
+    {
+      "zone_id": "yard",
+      "role": "storage",
+      "status": "planned_unverified",
+      "label": "장치 야드"
+    },
+    {
+      "zone_id": "temp_a",
+      "role": "temporary",
+      "status": "planned_unverified",
+      "label": "임시 장치 A"
+    },
+    {
+      "zone_id": "temp_b",
+      "role": "temporary",
+      "status": "planned_unverified",
+      "label": "임시 장치 B"
+    },
+    {
+      "zone_id": "stand",
+      "role": "outbound",
+      "status": "planned_unverified",
+      "label": "반출대"
+    }
+  ],
+  "intake_handoffs": [
+    {
+      "handoff_id": "s3_cell_s_unload",
+      "vehicle_stop_id": "S3",
+      "intake_point_ref": "intake-s3",
+      "target_cell_zones": ["yard"],
+      "status": "planned_unverified",
+      "dispatchable": false
+    }
+  ],
+  "outbound_handoffs": [
+    {
+      "handoff_id": "outbound_stand_load",
+      "cell_zone_id": "stand",
+      "wire_slot_ref": "stand-r1-c1-l1",
+      "vehicle_pickup_stop_id": "S_OUT",
+      "vehicle_exit_stop_id": "S1",
+      "status": "planned_unverified",
+      "dispatchable": false
+    }
+  ],
+  "not_places": ["belt", "supply_s", "ship_stern", "ship_bow", "vehicle_tray"]
+}
