@@ -6,10 +6,20 @@ import math
 
 from django.core.exceptions import ValidationError
 
+from harbor.cell_site_map import default_calibration_ref, default_name
 from harbor.layout import YardLayout
 from harbor_web import services
 from harbor_web.models import clean_text
+from harbor_web.yard_occupancy import AREA_LABELS
 from harbor_web.yard_scene import area_presentation
+
+
+_DEFAULT_CELL_COORDS = {
+    'yard': (0, 0),
+    'temp_a': (0, -4.2),
+    'temp_b': (0, 4.2),
+    'stand': (7.2, -4.2),
+}
 
 
 def _grid(rows, columns, levels):
@@ -172,3 +182,131 @@ def build_map(source_payload, dto, *, source_id=None):
         return dict(map=normalized, payload=payload, summary=summary, fingerprint=fingerprint, scene=map_scene(payload))
     except (ValueError, TypeError, KeyError, OverflowError) as error:
         raise ValidationError('Invalid map: ' + str(error)) from error
+
+
+def _presentation_for_import(zones):
+    labels = {}
+    for zone in zones:
+        label = zone['label'] if zone.get('label') else AREA_LABELS.get(zone['id'], zone['id'])
+        clean_text(label)
+        labels[zone['id']] = label
+
+    if all(zone['id'] in _DEFAULT_CELL_COORDS for zone in zones):
+        candidate = {
+            zone['id']: dict(label=labels[zone['id']], x=_DEFAULT_CELL_COORDS[zone['id']][0], y=_DEFAULT_CELL_COORDS[zone['id']][1])
+            for zone in zones
+        }
+        overlaps = False
+        for i, left in enumerate(zones):
+            a = candidate[left['id']]
+            for right in zones[i + 1:]:
+                b = candidate[right['id']]
+                if (a['x'] < b['x'] + right['columns'] and b['x'] < a['x'] + left['columns'] and
+                        a['y'] < b['y'] + right['rows'] and b['y'] < a['y'] + left['rows']):
+                    overlaps = True
+                    break
+            if overlaps:
+                break
+        if not overlaps:
+            return candidate
+
+    yard = next(zone for zone in zones if zone['id'] == 'yard')
+    right_x = yard['columns'] + 1.2
+    cursor_y = 0.0
+    result = {'yard': dict(label=labels['yard'], x=0, y=0)}
+    for zone in zones:
+        if zone['id'] == 'yard':
+            continue
+        result[zone['id']] = dict(label=labels[zone['id']], x=right_x, y=round(cursor_y, 2))
+        cursor_y += zone['rows'] + 1.2
+    return result
+
+
+def build_cell_site_import(normalized):
+    """Build an unverified Harbor Condition draft from a normalized rosy.cell-site-map.v1 dict."""
+    try:
+        zones = normalized['zones']
+        yard = next(zone for zone in zones if zone['id'] == 'yard')
+        storage_areas = [zone['id'] for zone in zones if zone['role'] == 'storage']
+        temporary_bays = [zone['id'] for zone in zones if zone['role'] == 'temporary']
+        outbounds = sorted((zone['id'] for zone in zones if zone['role'] == 'outbound'), key=lambda zid: (zid != 'stand', zid))
+        presentation = _presentation_for_import(zones)
+        payload = dict(
+            outbound_stand=outbounds[0],
+            temporary_bays=temporary_bays,
+            conveyor=normalized['conveyor'],
+            allowed_moves=[],
+            arm_reach=[],
+            spatial_moves=[],
+            max_observation_age_seconds=60,
+            slot_cells=normalized['slot_cells'],
+            yard_layout=_grid(yard['rows'], yard['columns'], yard['tiers']),
+            spatial_areas=[
+                dict(area_id=zone['id'], rows=zone['rows'], columns=zone['columns'], levels=zone['tiers'])
+                for zone in zones if zone['id'] != 'yard'
+            ],
+            storage_areas=storage_areas,
+            area_presentation=presentation,
+        )
+        if outbounds[1:]:
+            payload['extra_outbound_stands'] = outbounds[1:]
+        services.constraints(payload)
+        warnings = [
+            *normalized.get('warnings', []),
+            '판단 대기 유지·이동 경로·팔 도달 범위는 비어 있으며, 현장 검증 전까지 계획은 보류됩니다.',
+            '신선도 상한(60초)은 Harbor 기본 유도값입니다.',
+            '등록 후 배치 현황은 grid-placement-v1 형식으로 입력해야 합니다.',
+        ]
+        summary_zones = [
+            dict(
+                id=zone['id'],
+                label=presentation[zone['id']]['label'],
+                role=zone['role'],
+                rosy_role=zone['rosy_role'],
+                rows=zone['rows'],
+                columns=zone['columns'],
+                tiers=zone['tiers'],
+                arms=list(zone['arms']),
+                status=zone['status'],
+                site_count=zone['site_count'],
+            )
+            for zone in zones
+        ]
+        summary = dict(
+            schema=normalized['schema'],
+            revision=normalized['revision'],
+            status=normalized['status'],
+            input_format=normalized['input_format'],
+            fallback_labels=normalized['fallback_labels'],
+            tier_height_mm=normalized['tier_height_mm'],
+            slot_cells=normalized['slot_cells'],
+            site_count=len(normalized['sites']),
+            digest=normalized['digest'],
+            zones=summary_zones,
+            wire_refs=[site['wire_ref'] for site in normalized['sites']],
+            not_places=list(normalized['not_places']),
+            warnings=warnings,
+        )
+        audit_detail = dict(
+            schema=normalized['schema'],
+            revision=normalized['revision'],
+            status=normalized['status'],
+            input_format=normalized['input_format'],
+            fallback_labels=normalized['fallback_labels'],
+            digest=normalized['digest'],
+            tier_height_mm=normalized['tier_height_mm'],
+            slot_cells=normalized['slot_cells'],
+            site_count=len(normalized['sites']),
+            zone_arms={zone['id']: list(zone['arms']) for zone in zones},
+            warnings=list(warnings),
+        )
+        return dict(
+            payload=payload,
+            summary=summary,
+            audit_detail=audit_detail,
+            scene=map_scene(payload),
+            default_name=default_name(normalized),
+            default_calibration_ref=default_calibration_ref(normalized),
+        )
+    except (ValueError, TypeError, KeyError, OverflowError) as error:
+        raise ValidationError('Invalid ROSY cell site map: ' + str(error)) from error

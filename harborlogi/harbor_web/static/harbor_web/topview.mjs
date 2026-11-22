@@ -1,3 +1,30 @@
+function parseCapturedAt(capturedAt) {
+  if (!capturedAt) return null;
+  const text = String(capturedAt).trim();
+  if (!text) return null;
+  let date;
+  if (/^\d+(\.\d+)?$/.test(text)) {
+    const numeric = Number(text);
+    date = new Date(numeric < 1e12 ? numeric * 1000 : numeric);
+  } else {
+    date = new Date(text);
+  }
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function decodeImage(url) {
+  if (typeof Image !== 'function') return Promise.resolve(true);
+  const preloader = new Image();
+  preloader.src = url;
+  if (typeof preloader.decode === 'function') {
+    return preloader.decode().then(() => true, () => false);
+  }
+  return new Promise(resolve => {
+    preloader.onload = () => resolve(true);
+    preloader.onerror = () => resolve(false);
+  });
+}
+
 export function pollDelay(status, hidden) {
   return hidden ? null : status === 200 ? 1000 : 3000;
 }
@@ -5,9 +32,8 @@ export function pollDelay(status, hidden) {
 export function frameStatus(status, capturedAt) {
   if (status === 404) return '그림이 오래됨';
   if (status !== 200) return 'ROSY 연결 안 됨';
-  if (!capturedAt) return '';
-  const captured = new Date(capturedAt);
-  if (Number.isNaN(captured.getTime())) return '';
+  const captured = parseCapturedAt(capturedAt);
+  if (!captured) return '';
   const time = [captured.getHours(), captured.getMinutes(), captured.getSeconds()]
     .map(value => String(value).padStart(2, '0')).join(':');
   return '찍은 시각 ' + time;
@@ -24,6 +50,10 @@ export function mountTopview(panel) {
     image.removeAttribute('src');
     if (imageUrl) URL.revokeObjectURL(imageUrl);
     imageUrl = null;
+  }
+
+  function setStatus(text) {
+    if (statusText.textContent !== text) statusText.textContent = text;
   }
 
   function stop() {
@@ -46,20 +76,33 @@ export function mountTopview(panel) {
       if (response.ok && response.headers.get('Content-Type')?.split(';')[0] === 'image/jpeg') {
         const blob = await response.blob();
         if (request !== current) return;
-        clearImage();
-        imageUrl = URL.createObjectURL(blob);
-        image.src = imageUrl;
-        image.hidden = false;
+        const nextUrl = URL.createObjectURL(blob);
+        const decoded = await decodeImage(nextUrl);
+        if (request !== current) {
+          URL.revokeObjectURL(nextUrl);
+          return;
+        }
+        if (!decoded) {
+          URL.revokeObjectURL(nextUrl);
+          status = 502;
+          clearImage();
+        } else {
+          const previousUrl = imageUrl;
+          imageUrl = nextUrl;
+          image.src = nextUrl;
+          if (image.hidden) image.hidden = false;
+          if (previousUrl) URL.revokeObjectURL(previousUrl);
+        }
       } else {
         if (status === 200) status = 502;
         clearImage();
       }
-      statusText.textContent = frameStatus(status, response.headers.get('X-Frame-Captured-At'));
+      setStatus(frameStatus(status, response.headers.get('X-Frame-Captured-At')));
     } catch (_) {
       if (request !== current) return;
       status = 0;
       clearImage();
-      statusText.textContent = frameStatus(status);
+      setStatus(frameStatus(status));
     } finally {
       if (request === current) {
         request = null;
@@ -73,15 +116,33 @@ export function mountTopview(panel) {
     stop();
     refresh();
   }
-  select?.addEventListener('change', () => { clearImage(); restart(); });
+
+  function onChange() {
+    clearImage();
+    restart();
+  }
+
+  function onPageHide() {
+    stop();
+    clearImage();
+  }
+
+  function onPageShow(event) {
+    if (event.persisted) restart();
+  }
+
+  select?.addEventListener('change', onChange);
   document.addEventListener('visibilitychange', restart);
-  window.addEventListener('pagehide', () => { stop(); clearImage(); });
-  window.addEventListener('pageshow', event => { if (event.persisted) restart(); });
+  window.addEventListener('pagehide', onPageHide);
+  window.addEventListener('pageshow', onPageShow);
   refresh();
   return () => {
     stop();
     clearImage();
+    select?.removeEventListener('change', onChange);
     document.removeEventListener('visibilitychange', restart);
+    window.removeEventListener('pagehide', onPageHide);
+    window.removeEventListener('pageshow', onPageShow);
   };
 }
 
