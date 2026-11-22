@@ -6,7 +6,7 @@ from django.utils import timezone
 from harbor_web.models import Audit, Command, Order, Plan
 from harbor_web.order_queue import completed_order_ids
 from harbor_web.rearrangement import current_authorization
-from harbor_web.views import page
+from harbor_web.page_helpers import page
 from harbor_web.work_state import work_state
 from harbor_web.yard_rows import place_context, placement_text
 
