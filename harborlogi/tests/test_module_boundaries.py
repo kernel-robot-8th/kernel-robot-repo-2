@@ -143,9 +143,6 @@ def _cycle_edges(graph):
 # Import edges inside today's cycles (SCC), one block per cycle. Each refactor PR deletes the lines it breaks.
 # Adding an edge that closes or joins a cycle fails; so does leaving a line that is no longer a cycle edge.
 ALLOWED_CYCLE_EDGES = {
-    # fleet_discovery, rosy_http
-    ('harbor.fleet_discovery', 'harbor.rosy_http'),
-    ('harbor.rosy_http', 'harbor.fleet_discovery'),
     # autoplanning, order_queue, plan_service: permanent replan loop. Every order or plan mutation calls replan_enabled
     # (order_queue/plan_service -> autoplanning), which recalculates through _calculate_plan and queue_digest
     # (autoplanning -> plan_service/order_queue). Merging them would mix queue state with calculation.
@@ -154,53 +151,6 @@ ALLOWED_CYCLE_EDGES = {
     ('harbor_web.order_queue', 'harbor_web.autoplanning'),
     ('harbor_web.plan_service', 'harbor_web.autoplanning'),
     ('harbor_web.plan_service', 'harbor_web.order_queue'),
-    # alert_pages, board, cargo_history, field_pages, inbound_decision, operations, order_timeline, placement_view, planning_pages, views, work_hub, workspace, yard_pages
-    ('harbor_web.alert_pages', 'harbor_web.operations'),
-    ('harbor_web.alert_pages', 'harbor_web.views'),
-    ('harbor_web.board', 'harbor_web.alert_pages'),
-    ('harbor_web.cargo_history', 'harbor_web.workspace'),
-    ('harbor_web.field_pages', 'harbor_web.views'),
-    ('harbor_web.inbound_decision', 'harbor_web.workspace'),
-    ('harbor_web.operations', 'harbor_web.workspace'),
-    ('harbor_web.order_timeline', 'harbor_web.operations'),
-    ('harbor_web.order_timeline', 'harbor_web.workspace'),
-    ('harbor_web.placement_view', 'harbor_web.inbound_decision'),
-    ('harbor_web.placement_view', 'harbor_web.workspace'),
-    ('harbor_web.planning_pages', 'harbor_web.inbound_decision'),
-    ('harbor_web.planning_pages', 'harbor_web.placement_view'),
-    ('harbor_web.planning_pages', 'harbor_web.views'),
-    ('harbor_web.planning_pages', 'harbor_web.work_hub'),
-    ('harbor_web.planning_pages', 'harbor_web.workspace'),
-    ('harbor_web.views', 'harbor_web.board'),
-    ('harbor_web.views', 'harbor_web.cargo_history'),
-    ('harbor_web.views', 'harbor_web.field_pages'),
-    ('harbor_web.views', 'harbor_web.inbound_decision'),
-    ('harbor_web.views', 'harbor_web.operations'),
-    ('harbor_web.views', 'harbor_web.order_timeline'),
-    ('harbor_web.views', 'harbor_web.workspace'),
-    ('harbor_web.views', 'harbor_web.yard_pages'),
-    ('harbor_web.work_hub', 'harbor_web.views'),
-    ('harbor_web.workspace', 'harbor_web.planning_pages'),
-    ('harbor_web.yard_pages', 'harbor_web.inbound_decision'),
-    ('harbor_web.yard_pages', 'harbor_web.workspace'),
-    # command_binding, commands, evidence, fleet_connection, human_evidence, readiness, rearrangement
-    ('harbor_web.command_binding', 'harbor_web.evidence'),
-    ('harbor_web.command_binding', 'harbor_web.fleet_connection'),
-    ('harbor_web.commands', 'harbor_web.command_binding'),
-    ('harbor_web.commands', 'harbor_web.evidence'),
-    ('harbor_web.commands', 'harbor_web.fleet_connection'),
-    ('harbor_web.commands', 'harbor_web.human_evidence'),
-    ('harbor_web.commands', 'harbor_web.readiness'),
-    ('harbor_web.commands', 'harbor_web.rearrangement'),
-    ('harbor_web.evidence', 'harbor_web.commands'),
-    ('harbor_web.fleet_connection', 'harbor_web.commands'),
-    ('harbor_web.human_evidence', 'harbor_web.commands'),
-    ('harbor_web.readiness', 'harbor_web.command_binding'),
-    ('harbor_web.readiness', 'harbor_web.fleet_connection'),
-    ('harbor_web.rearrangement', 'harbor_web.commands'),
-    # command_models, models
-    ('harbor_web.command_models', 'harbor_web.models'),
-    ('harbor_web.models', 'harbor_web.command_models'),
     # field_episodes, intake_loop
     ('harbor_web.field_episodes', 'harbor_web.intake_loop'),
     ('harbor_web.intake_loop', 'harbor_web.field_episodes'),
