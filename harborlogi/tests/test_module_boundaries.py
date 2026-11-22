@@ -76,3 +76,94 @@ class ModuleBoundaryTests(unittest.TestCase):
     def test_spatial_module_does_not_grow_past_ratchet(self):
         lines = (ROOT / 'harbor/spatial.py').read_text(encoding='utf8').splitlines()
         self.assertLessEqual(len(lines), 725)
+
+
+def _module_graph():
+    """Internal import edges of harbor and harbor_web, any depth (lazy imports included), like the SRP measurement."""
+    mods = {}
+    for package in ('harbor', 'harbor_web'):
+        for path in (ROOT / package).rglob('*.py'):
+            if 'migrations' in path.parts or '__pycache__' in path.parts:
+                continue
+            name = '.'.join(path.relative_to(ROOT).with_suffix('').parts)
+            mods[name.removesuffix('.__init__')] = path
+    graph = {name: set() for name in mods}
+    for name, path in mods.items():
+        package = name if path.name == '__init__.py' else name.rpartition('.')[0]
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8-sig'))):
+            if isinstance(node, ast.Import):
+                targets = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                base = node.module or ''
+                if node.level:
+                    parts = package.split('.')[:len(package.split('.')) - (node.level - 1)]
+                    base = '.'.join(parts + ([base] if base else []))
+                targets = [base] + [f'{base}.{a.name}' for a in node.names]
+            else:
+                continue
+            for target in targets:
+                while target and target not in mods:
+                    target = target.rpartition('.')[0]
+                if target and target != name:
+                    graph[name].add(target)
+    return graph
+
+
+def _cycle_edges(graph):
+    """Edges whose two ends lie in one strongly connected component (Tarjan)."""
+    index, low, stack, on_stack, comp_of = {}, {}, [], set(), {}
+
+    def visit(v):
+        index[v] = low[v] = len(index)
+        stack.append(v)
+        on_stack.add(v)
+        for w in graph[v]:
+            if w not in index:
+                visit(w)
+                low[v] = min(low[v], low[w])
+            elif w in on_stack:
+                low[v] = min(low[v], index[w])
+        if low[v] == index[v]:
+            members = []
+            while True:
+                w = stack.pop()
+                on_stack.discard(w)
+                members.append(w)
+                if w == v:
+                    break
+            for w in members:
+                comp_of[w] = v
+
+    for v in graph:
+        if v not in index:
+            visit(v)
+    return {(a, b) for a in graph for b in graph[a] if comp_of[a] == comp_of[b]}
+
+
+# Import edges inside today's cycles (SCC), one block per cycle. Each refactor PR deletes the lines it breaks.
+# Adding an edge that closes or joins a cycle fails; so does leaving a line that is no longer a cycle edge.
+ALLOWED_CYCLE_EDGES = {
+    # autoplanning, order_queue, plan_service: permanent replan loop. Every order or plan mutation calls replan_enabled
+    # (order_queue/plan_service -> autoplanning), which recalculates through _calculate_plan and queue_digest
+    # (autoplanning -> plan_service/order_queue). Merging them would mix queue state with calculation.
+    ('harbor_web.autoplanning', 'harbor_web.order_queue'),
+    ('harbor_web.autoplanning', 'harbor_web.plan_service'),
+    ('harbor_web.order_queue', 'harbor_web.autoplanning'),
+    ('harbor_web.plan_service', 'harbor_web.autoplanning'),
+    ('harbor_web.plan_service', 'harbor_web.order_queue'),
+    # field_episodes, intake_loop
+    ('harbor_web.field_episodes', 'harbor_web.intake_loop'),
+    ('harbor_web.intake_loop', 'harbor_web.field_episodes'),
+    # yard_rows, yard_scene
+    ('harbor_web.yard_rows', 'harbor_web.yard_scene'),
+    ('harbor_web.yard_scene', 'harbor_web.yard_rows'),
+}
+
+
+class ImportCycleRatchetTests(unittest.TestCase):
+    def test_import_cycle_edges_match_allow_list(self):
+        edges = _cycle_edges(_module_graph())
+        new = sorted(edges - ALLOWED_CYCLE_EDGES)
+        stale = sorted(ALLOWED_CYCLE_EDGES - edges)
+        self.assertFalse(new, f'new import cycle edges (break the cycle instead of listing them): {new}')
+        self.assertFalse(stale, f'edges no longer in a cycle; delete these lines from ALLOWED_CYCLE_EDGES: {stale}')
