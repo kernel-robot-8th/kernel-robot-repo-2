@@ -16,6 +16,7 @@ OBJECT_LABELS = {
     'EvidenceProducerSetting': '실행 자료 연결 설정',
     'RearrangeAuthorization': '자동 재배치 설정',
     'HumanAttestation': '사람 확인',
+    'Intake': '입고 기록',
 }
 
 ACTION_SENTENCES = {
@@ -24,6 +25,8 @@ ACTION_SENTENCES = {
     'condition.register': '설치 기준을 등록했습니다.',
     'condition.map.register': '현장 지도를 등록했습니다.',
     'observation.record': '야드 현황을 등록했습니다.',
+    'observation.port_event': 'ROSY 입고 결과를 야드 현황에 반영했습니다.',
+    'observation.port_event_rejected': 'ROSY 입고 결과를 야드 현황에 반영하지 못했습니다.',
     'measurement.record': '측정 자료를 등록했습니다.',
     'order.create': '업무를 등록했습니다.',
     'order.update': '업무 지시를 변경했습니다.',

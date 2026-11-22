@@ -30,6 +30,15 @@ REASONS = {"MISMATCH", "UNREADABLE", "LOST", "DAMAGED"}
 IDENTITIES = {"observed", "attested"}
 RANK = {"EXPECTED": 0, "TRIP_ARRIVED": 1, "RECEIVED_AT_INTAKE": 2, "STORING": 3, "COMPLETED": 4}
 WAITING_ON_ROSY = ("TRIP_ARRIVED", "STORING")  # RECEIVED_AT_INTAKE waits on Harbor's own storing request.
+SLOT_REF_RE = re.compile(r"^(?P<area>[A-Za-z0-9_]+)-r(?P<row>[1-9]\d*)-c(?P<col>[1-9]\d*)-l(?P<level>[1-9]\d*)$")
+
+
+def parse_slot_ref(slot_ref):
+    """Parse one canonical slot reference (<area>-r<row>-c<col>-l<level>) into 1-based integers."""
+    match = SLOT_REF_RE.fullmatch(slot_ref) if isinstance(slot_ref, str) else None
+    if match is None:
+        raise ValueError("Invalid slot reference")
+    return match.group("area"), int(match.group("row")), int(match.group("col")), int(match.group("level"))
 
 
 def _ref(value, limit=128):
@@ -108,6 +117,14 @@ class IntakeLedger:
         with closing(self._connect()) as c:
             return [json.loads(r["payload"]) for r in c.execute(
                 "SELECT payload FROM port_events WHERE outcome='HOLD_UNKNOWN' ORDER BY rowid")]
+
+    def applied_stored_events(self):
+        """Applied container.stored events in ledger consumption order."""
+        with closing(self._connect()) as c:
+            rows = c.execute(
+                "SELECT payload FROM port_events WHERE kind='container.stored' AND outcome='APPLIED' ORDER BY rowid"
+            ).fetchall()
+        return [parse_event(json.loads(r["payload"])) for r in rows]
 
     def holds(self):
         """Intake rows waiting for human review (HOLD or UNREADABLE attention), oldest update first."""
