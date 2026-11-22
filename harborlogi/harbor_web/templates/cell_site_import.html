@@ -1,0 +1,52 @@
+{% extends 'base.html' %}{% block title %}ROSY 셀 맵 가져오기{% endblock %}{% block content %}
+<div class="page-head"><div><h1>ROSY 셀 맵 가져오기</h1><p>ROSY 정본 JSON 또는 Fleet 읽기 경로에서 구역·자리 구성을 미리보고 설치 기준으로 등록합니다.</p></div><a class="button quiet" href="/settings/">설정으로 돌아가기</a></div>
+<p class="notice info">가져오기는 구역 크기와 자리 구성만 등록합니다. 팔 도달 범위·허용 이동·실행 승인은 비워 둔 상태로 저장되며 현장 검증 전까지 계획은 보류됩니다.</p>
+{% if errors %}<ul class="errorlist" role="alert">{% for err in errors %}<li>{{ err }}</li>{% endfor %}</ul>{% endif %}
+
+<div class="comparison">
+<section class="form-panel">
+<h2>1. Fleet에서 불러오기</h2>
+{% if fleet_ready %}
+<p>설정된 ROSY Fleet 주소(<code>{{ fleet_cfg.origin }}</code>)에서 <code>/api/fleet/pipeline/cell-sites</code> 구성을 조회해 미리봅니다.</p>
+<form method="post" action="/settings/maps/import/">{% csrf_token %}<input type="hidden" name="source" value="fleet"><div class="actions"><button type="submit">Fleet 셀 맵 미리보기</button></div></form>
+{% else %}
+<p class="muted">Fleet 연결 주소·허용 출처 또는 <code>HARBOR_FLEET_TOKEN</code>이 설정되지 않았습니다.</p>
+<p><a href="/settings/integration/">ROSY 연동 조건 확인</a></p>
+{% endif %}
+</section>
+
+<section class="form-panel">
+<h2>2. 정본 JSON 파일에서 불러오기</h2>
+<p><code>rosy.cell-site-map.v1</code> JSON 파일(최대 1 MiB, UTF-8)을 올려 미리봅니다.</p>
+<form method="post" action="/settings/maps/import/" enctype="multipart/form-data">{% csrf_token %}<input type="hidden" name="source" value="file"><div><label for="id_map_file">셀 맵 JSON 파일<input id="id_map_file" type="file" name="map_file" accept=".json,application/json" required></label></div><div class="actions"><button type="submit">파일 미리보기</button></div></form>
+</section>
+</div>
+
+{% if preview %}
+<section aria-label="셀 맵 미리보기 결과">
+<h2>미리보기 요약</h2>
+<dl class="facts">
+<div><dt>불러온 경로</dt><dd>{% if preview.source == 'fleet' %}ROSY Fleet API{% else %}정본 JSON 파일{% endif %} ({{ preview.input_format }})</dd></div>
+<div><dt>스키마 · 개정</dt><dd>{{ preview.schema }} · rev{{ preview.revision }}</dd></div>
+<div><dt>맵 상태 · 총 자리 수</dt><dd>{{ preview.status }} · {{ preview.site_count }}개</dd></div>
+<div><dt>층 높이 · 슬롯 폭</dt><dd>{{ preview.tier_height_mm }} mm · {{ preview.slot_cells }}칸</dd></div>
+<div><dt>검증 요약 지문</dt><dd><code>{{ preview.digest|slice:":16" }}</code></dd></div>
+<div><dt>설비 제외 요소</dt><dd>{% for item in preview.not_places %}{{ item.label }} ({{ item.id }}){% if not forloop.last %}, {% endif %}{% empty %}없음{% endfor %}</dd></div>
+</dl>
+
+{% if preview.warnings %}<div class="notice"><ul>{% for warn in preview.warnings %}<li>{{ warn }}</li>{% endfor %}</ul></div>{% endif %}
+
+<div class="table-wrap"><table><caption>구역 구성 및 팔 후보</caption><thead><tr><th scope="col">구역 ID</th><th scope="col">표시 이름</th><th scope="col">역할</th><th scope="col">행 × 열 × 층</th><th scope="col">팔 후보(참조)</th><th scope="col">자리 수</th><th scope="col">상태</th></tr></thead><tbody>{% for zone in preview.zones %}<tr><td><code>{{ zone.id }}</code></td><td>{{ zone.label }}</td><td>{{ zone.rosy_role }} ({{ zone.role }})</td><td>{{ zone.rows }} × {{ zone.columns }} × {{ zone.tiers }}</td><td>{{ zone.arms|join:', ' }}</td><td class="number">{{ zone.site_count }}</td><td>{{ zone.status }}</td></tr>{% endfor %}</tbody></table></div>
+
+<details class="fold"><summary>{{ preview.site_count }}개 자리 주소 목록 보기</summary><p class="covered-addresses">{% for ref in preview.wire_refs %}<code>{{ ref }}</code>{% if not forloop.last %} · {% endif %}{% endfor %}</p></details>
+
+<form class="form-panel" method="post" action="/settings/maps/import/save/">{% csrf_token %}<input type="hidden" name="import_token" value="{{ import_token }}">
+<h2>설치 기준으로 등록</h2>
+<p>미리본 구성을 새 불변 설치 기준으로 저장합니다. 저장 시에는 Fleet을 다시 조회하지 않습니다.</p>
+<div><label for="id_import_name">기준 이름<input id="id_import_name" type="text" name="name" maxlength="120" required value="{{ default_name }}"></label></div>
+<div><label for="id_import_ref">보정·검증 참조<input id="id_import_ref" type="text" name="calibration_ref" maxlength="192" required value="{{ default_calibration_ref }}"></label></div>
+<div class="actions"><button type="submit">설치 기준으로 등록</button><a class="button quiet" href="/settings/maps/import/">다시 선택</a></div>
+</form>
+</section>
+{% endif %}
+{% endblock %}
