@@ -196,3 +196,17 @@
   gap: var(--primitive-space-4);
   padding-bottom: var(--primitive-space-4);
 }
+
+.topview-orientation {
+  margin-top: var(--primitive-space-3);
+}
+
+.site-places-panel {
+  margin-top: var(--primitive-space-4);
+}
+
+.site-places-tables {
+  display: grid;
+  gap: var(--primitive-space-4);
+  margin-top: var(--primitive-space-3);
+}

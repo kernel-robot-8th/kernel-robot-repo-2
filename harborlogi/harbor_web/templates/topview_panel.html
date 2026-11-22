@@ -4,6 +4,7 @@
   <div class="panel-b">
     {% if topview.sources|length > 1 %}<label>카메라 선택<select data-topview-source>{% for camera in topview.sources %}<option value="{{ camera.url }}"{% if forloop.first %} selected{% endif %}>{{ camera.source_id }}</option>{% endfor %}</select></label>{% endif %}
     <p role="status" data-topview-status>{{ topview.status }}</p>
+    <p class="helptext topview-orientation">탑뷰 시점은 야드 평면과 180° 반전 방향입니다 (위쪽 컨베이어·반출대, 오른쪽 팔 A).</p>
     {% if topview.sources %}<img data-topview-image alt="ROSY 카메라의 최신 야드 탑뷰" hidden><noscript><p>탑뷰를 보려면 JavaScript를 켜세요.</p></noscript>{% endif %}
   </div>
 </section>

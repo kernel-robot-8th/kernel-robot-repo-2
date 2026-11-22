@@ -161,6 +161,10 @@ class RosyClient:
         """Read-only canonical cell site map (rosy.cell-site-map.v1)."""
         return self._call("GET", "/api/fleet/pipeline/cell-sites", None)
 
+    def site_places(self):
+        """Read-only geometry-free port site places (rosy.port-site-places.v1)."""
+        return self._call("GET", "/api/fleet/site-points?view=port", None)
+
     def request_recheck(self, mission_id, recheck_key):
         return self._call("POST", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/rechecks",
                           {"recheck_key": recheck_key})
