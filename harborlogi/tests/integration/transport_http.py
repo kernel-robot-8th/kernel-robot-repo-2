@@ -8,9 +8,16 @@ import time
 import unittest
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 from uuid import uuid4
 
+from harbor.cell_site_map import normalize_cell_site_map
 from harbor.rosy_http import RosyClient
+from harbor.site_places import (
+    parse_site_places,
+    resolve_intake_destination,
+    resolve_outbound_dispatch_stops,
+)
 from harbor.transport import TripIntent, TransportLedger
 
 
@@ -79,3 +86,49 @@ class TransportHttpTests(unittest.TestCase):
         self.assertEqual((status, body), (400, {'detail': {'code': 'PORT_EVENT_CURSOR_INVALID'}}))
         page = client.port_events(limit=1)
         self.assertEqual(set(page), {'events', 'cursor', 'complete'})
+
+    def test_site_places_and_cell_sites_against_the_real_fleet(self):
+        """Consume real ROSY GET /api/fleet/site-points?view=port and /api/fleet/pipeline/cell-sites."""
+        config = json.loads(Path(os.environ['HARBOR_INTEGRATION_CONFIG']).read_text(encoding='utf-8'))
+        client = RosyClient(config['origin'], config['operator'])
+        viewer = RosyClient(config['origin'], config['viewer'])
+
+        raw = client.site_places()
+        places = parse_site_places(raw)
+        self.assertEqual(places.schema, 'rosy.port-site-places.v1')
+        s_out = places.vehicle_place('S_OUT')
+        self.assertIsNotNone(s_out)
+        self.assertEqual(s_out.port_role, 'outbound_pickup')
+        self.assertEqual(s_out.status, 'planned_unverified')
+        self.assertFalse(s_out.dispatchable)
+        self.assertEqual({z.zone_id for z in places.cell_zones}, {'yard', 'temp_a', 'temp_b', 'stand'})
+        self.assertIn('belt', places.not_places)
+        self.assertIsNone(resolve_intake_destination(places)[0])
+        self.assertIsNone(resolve_outbound_dispatch_stops(places)[0])
+        self.assertEqual(parse_site_places(viewer.site_places()).digest, places.digest)
+
+        with self.assertRaises(HTTPError) as denied_places:
+            RosyClient(config['origin'], 'not-a-token').site_places()
+        self.assertEqual(denied_places.exception.code, 401)
+
+        req = Request(
+            config['origin'].rstrip('/') + '/api/fleet/site-points?view=full',
+            headers={'Authorization': 'Bearer ' + config['operator']},
+        )
+        with urlopen(req, timeout=10) as resp:
+            full_doc = json.loads(resp.read().decode('utf-8'))
+        self.assertEqual(full_doc['schema'], 'rosy.site-points.v1')
+        with self.assertRaises(ValueError):
+            parse_site_places(full_doc)
+
+        raw_cells = client.cell_sites()
+        normalized = normalize_cell_site_map(raw_cells)
+        self.assertEqual(normalized['schema'], 'rosy.cell-site-map.v1')
+        self.assertEqual(normalized['input_format'], 'fleet_zones')
+        self.assertEqual(len(normalized['sites']), 37)
+        self.assertEqual({z['id'] for z in normalized['zones']}, {'yard', 'temp_a', 'temp_b', 'stand'})
+        self.assertEqual(normalize_cell_site_map(viewer.cell_sites())['digest'], normalized['digest'])
+
+        with self.assertRaises(HTTPError) as denied_cells:
+            RosyClient(config['origin'], 'not-a-token').cell_sites()
+        self.assertEqual(denied_cells.exception.code, 401)
