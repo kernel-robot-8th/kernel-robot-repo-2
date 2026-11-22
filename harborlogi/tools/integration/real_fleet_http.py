@@ -51,6 +51,8 @@ def main(argv=None):
     mode.add_argument('--arm-only', action='store_true', help='Verify neutral ARM with an independent observer and real UDS')
     mode.add_argument('--evidence-only', action='store_true', help='Verify immutable physical evidence and single-move business confirmation')
     mode.add_argument('--web-arm-only', action='store_true', help='Verify authenticated Django over actual Fleet HTTP')
+    mode.add_argument('--web-read-only', action='store_true',
+                      help='Verify authenticated Django read panels (/inventory/, /settings/maps/import/) over actual Fleet HTTP')
     mode.add_argument('--full-flow', action='store_true', help='Run the first flow stages on one Fleet serving TRIP and ARM (D-927)')
     mode.add_argument('--arm-via-r', action='store_true',
                       help='Run the neutral ARM test through integrated control R relaying to a separate cell Fleet (D-965)')
@@ -88,13 +90,14 @@ def main(argv=None):
                      request_keys=[f'{FULL_FLOW_KEY}:{move}' for move in range(len(FULL_FLOW_MOVES))]) if args.full_flow else
                  harness.ArmFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet', request_key_path=request_key_path,
                                   sim=args.sim_arm) if (args.arm_only or args.web_arm_only) else
-                 harness.RealFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet', transport_only=args.transport_only))
+                 harness.RealFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet',
+                                   transport_only=args.transport_only or args.web_read_only))
         if args.evidence_only:
             fleet.include_joint_evidence = True
         try:
             fleet.start()
             ref, artifact = {}, None
-            if not args.transport_only and not arm:
+            if not args.transport_only and not args.web_read_only and not arm:
                 ref = next(iter(fleet.transfers.values()))
                 with fleet.client() as client:
                     response = client.post('/api/fleet/cell-app/compile', json=ref)
@@ -135,13 +138,30 @@ def main(argv=None):
                 config['schema'] = 'harbor.web-arm-http-test/1'
                 config['request_key_path'] = str(request_key_path)
                 config.pop('viewer')
+            if args.web_read_only:
+                config = {
+                    'schema': 'harbor.web-read-http-test/1',
+                    'simulation': True,
+                    'origin': fleet.url,
+                    'operator': fleet.tokens['service'],
+                    'principal': fleet.principals['service'][0],
+                    'platform_sha': platform_sha,
+                    'app_sha': app_sha,
+                }
             path = Path(temporary) / 'http-test.json'
             path.write_text(json.dumps(config), encoding='utf-8')
             path.chmod(0o600)
             env = dict(os.environ, HARBOR_INTEGRATION='1', HARBOR_INTEGRATION_CONFIG=str(path))
             env.pop('PYTHONPATH', None)
             print(f'Platform {platform_sha}; Harbor (with harness) {app_sha}', flush=True)
-            pattern = 'full_flow_http.py' if args.full_flow else 'product_web_http.py' if args.web_arm_only else 'arm_http.py' if arm else 'transport_http.py' if args.transport_only else 'test_real_fleet_http.py'
+            pattern = (
+                'full_flow_http.py' if args.full_flow
+                else 'product_web_http.py' if args.web_arm_only
+                else 'web_read_http.py' if args.web_read_only
+                else 'arm_http.py' if arm
+                else 'transport_http.py' if args.transport_only
+                else 'test_real_fleet_http.py'
+            )
             return subprocess.run([str(args.app_python) if args.app_python else sys.executable, '-m', 'unittest', 'discover', '-s', 'tests/integration', '-p', pattern, '-v'],
                                   cwd=app_root, env=env, timeout=900 if args.sim_arm else 180).returncode
         finally:
