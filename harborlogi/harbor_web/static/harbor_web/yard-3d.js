@@ -1,7 +1,7 @@
 import {mountLinkedGrid, selectionFor, atPosition, slotLabel, topBoxes} from './yard-selection.mjs';
 import {cloneBoxes, transit, moveBox, placementFromWorld} from './yard-model.mjs';
 import {DraftSession} from './yard-draft.mjs';
-import {bindUpcomingPlans, stageButtonSpecs} from './yard-inline.mjs';
+import {applyYardView, bindUpcomingPlans, stageButtonSpecs} from './yard-inline.mjs';
 
 function fallback(figure) {
   const preview = figure.closest('[data-yard-preview]');
@@ -21,7 +21,6 @@ export async function mountYardViewer(figure) {
   const preview = figure.closest('[data-yard-preview]');
   let scene = JSON.parse(document.getElementById(figure.dataset.scene).textContent);
   const canvas = figure.querySelector('canvas');
-  const flat = preview.querySelector('[data-yard-flat]');
   const views = preview.querySelector('[data-yard-views]');
   const stagesHost = preview.querySelector('[data-yard-stages]');
   const statusEl = preview.querySelector('[data-yard-status]');
@@ -292,21 +291,18 @@ export async function mountYardViewer(figure) {
     }
   }
   const desktop = matchMedia('(min-width: 1200px)');
-  let flatView = false;
+  const inline = preview.hasAttribute('data-yard-upcoming-preview');
+  let flatView = inline;
   function showFlat(value) {
     flatView = value;
-    if (!desktop.matches) {
+    if (inline || !desktop.matches) {
       stop();
       if (!draft) selectFrame(index, false);
     }
-    figure.hidden = !desktop.matches && value && !draft;
-    figure.classList.toggle('flat-edit', !desktop.matches && value && Boolean(draft));
-    if (linked) linked.grid.hidden = !desktop.matches && !value;
-    flat.hidden = true;
-    views.querySelectorAll('[data-yard-view]').forEach(button => button.setAttribute('aria-pressed', String((button.dataset.yardView === 'flat') === value)));
+    applyYardView(preview, {flat: value, desktop: desktop.matches, editing: Boolean(draft)});
     if (!figure.hidden) renderer.resize();
   }
-  on(desktop, 'change', () => showFlat(flatView));
+  if (!inline) on(desktop, 'change', () => showFlat(flatView));
   const makeLinked = () => mountLinkedGrid(preview, scene, value => {
     if (animation || playing) { stop(); selectFrame(index, false); }
     if (draft && selected && !value.cargoId) {
@@ -400,11 +396,15 @@ export async function mountYardViewer(figure) {
     editButton.disabled = scene.kind === 'map-definition';
     loadPlan.hidden = scene.kind === 'outbound-chain' || !isPlanReplay();
     playIdle();
-    if (autoplay && figure.hidden) showFlat(false);
+    if (inline) flatView = !autoplay;
+    else if (autoplay && figure.hidden) showFlat(false);
     selectFrame(0, false);
     showFlat(flatView);
     renderer.resize();
     renderer.fit();
+    if (inline && !matchMedia('(min-width: 1100px)').matches) {
+      (autoplay ? canvas : preview).scrollIntoView({block: 'start'});
+    }
     if (autoplay && isPlanReplay()) startPlayback();
   }
   on(editor, 'submit', event => {
@@ -476,7 +476,7 @@ export async function mountYardViewer(figure) {
   loadPlan.hidden = scene.kind === 'outbound-chain' || !isPlanReplay();
   figure.querySelector('[data-scene-action="fullscreen"]').hidden = !document.fullscreenEnabled;
   preview.classList.add('yard-linked');
-  paint(current); fillCargo(); syncLinked(); views.hidden = false; showFlat(false);
+  paint(current); fillCargo(); syncLinked(); views.hidden = false; showFlat(flatView);
   canvas.dataset.moving = 'false'; figure.dataset.ready = 'true'; figure.dataset.renderer = 'webgl'; renderer.resize(); renderer.fit();
   return {destroy, setScene};
 }

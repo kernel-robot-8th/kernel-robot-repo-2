@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  applyYardView,
   arrowsFromScene,
   bindUpcomingPlans,
   renderArrows,
@@ -49,7 +50,18 @@ class FakeElement {
     this.hidden = false;
     this.textContent = '';
   }
+  get classList() {
+    return {
+      contains: name => this.className.split(' ').includes(name),
+      toggle: (name, enabled) => {
+        const names = new Set(this.className.split(' ').filter(Boolean));
+        if (enabled) names.add(name); else names.delete(name);
+        this.className = [...names].join(' ');
+      },
+    };
+  }
   setAttribute(name, value) { this.attributes[name] = String(value); }
+  hasAttribute(name) { return name in this.attributes; }
   getAttribute(name) { return this.attributes[name] ?? null; }
   addEventListener(type, fn) {
     if (!this.listeners.has(type)) this.listeners.set(type, []);
@@ -81,6 +93,7 @@ class FakeElement {
   querySelector(selector) {
     if (selector === 'strong' && this.tagName === 'STRONG') return this;
     for (const child of this.childNodes) {
+      if (child._match === selector) return child;
       if (selector === 'strong' && child.tagName === 'STRONG') return child;
       const found = child.querySelector?.(selector);
       if (found) return found;
@@ -179,5 +192,47 @@ assert.equal(arrowsBox.childNodes[0].textContent, '기본 안내');
 // renderArrows empty state clears cleanly.
 renderArrows(arrowsBox, [], {emptyText: '비어 있음'});
 assert.equal(arrowsBox.childNodes[0].textContent, '비어 있음');
+
+// Inline inventory uses one view at a time, even on a desktop. Switching must
+// retain the canvas and its position so WebGL state and keyboard focus survive.
+preview.className = 'inventory-yard yard-inline-3d yard-linked';
+preview.setAttribute('data-yard-upcoming-preview', '');
+figure.className = 'yard-3d model-workbench';
+const linkedFlat = new FakeElement('div', fakeDoc);
+linkedFlat._match = '[data-yard-linked-flat]';
+const originalFlat = new FakeElement('div', fakeDoc);
+originalFlat._match = '[data-yard-flat]';
+const views = new FakeElement('div', fakeDoc);
+views._match = '[data-yard-views]';
+const viewButtons = ['3d', 'flat'].map(view => {
+  const button = new FakeElement('button', fakeDoc);
+  button.dataset.yardView = view;
+  return button;
+});
+views.querySelectorAll = () => viewButtons;
+preview.append(views, figure, originalFlat, linkedFlat);
+const originalChildren = [...preview.childNodes];
+for (const desktop of [true, false]) {
+  applyYardView(preview, {flat: true, desktop});
+  assert.equal(figure.hidden, true, 'Default and closed inline view shows the flat yard');
+  assert.equal(linkedFlat.hidden, false);
+  assert.equal(originalFlat.hidden, true, 'Keep the fallback hidden after WebGL mounts');
+  applyYardView(preview, {flat: false, desktop});
+  assert.equal(figure.hidden, false, 'Selected plan shows 3D on every screen width');
+  assert.equal(linkedFlat.hidden, true, 'Flat yard must not leave a tall gap before 3D');
+  assert.equal(viewButtons[0].getAttribute('aria-pressed'), 'true');
+  applyYardView(preview, {flat: true, desktop, editing: true});
+  assert.equal(figure.hidden, false, 'Keep virtual editing available in flat view');
+  assert.equal(figure.classList.contains('flat-edit'), true);
+  assert.equal(figure.classList.contains('model-workbench'), true);
+  assert.deepEqual(preview.childNodes, originalChildren, 'View changes keep 3D in the preview beside upcoming plans');
+}
+// Other workbenches retain the existing paired desktop view.
+delete preview.attributes['data-yard-upcoming-preview'];
+preview.className = 'inventory-yard yard-inline-3d yard-linked';
+applyYardView(preview, {flat: false, desktop: true});
+assert.equal(figure.hidden, false);
+assert.equal(linkedFlat.hidden, false);
+assert.equal(figure.classList.contains('flat-edit'), false);
 
 console.log('Yard inline 3D scene switching, arrow updates and toggle-restore passed');

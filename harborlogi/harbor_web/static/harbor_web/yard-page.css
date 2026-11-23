@@ -31,16 +31,52 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
-@media (min-width: 1280px) {
-  .yard-page-layout .yard-topview {
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-  }
-}
-
 .yard-inline-3d {
   max-width: none;
   margin-bottom: 0;
   min-width: 0;
+}
+
+/* This preview already shares the page with upcoming plans; do not split it again. */
+[data-yard-upcoming-preview],
+[data-yard-upcoming-preview] canvas {
+  scroll-margin-top: calc(var(--primitive-size-topbar) + var(--primitive-space-4));
+}
+
+[data-yard-upcoming-preview].yard-linked {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--primitive-space-4);
+}
+
+[data-yard-upcoming-preview] > [data-yard-3d] {
+  order: -1;
+}
+
+[data-yard-upcoming-preview] > .linked-flat {
+  order: 0;
+}
+
+[data-yard-upcoming-preview] > [data-yard-edit-tools] {
+  order: 1;
+}
+
+[data-yard-upcoming-preview] > [data-yard-views]:not([hidden]) {
+  display: flex;
+}
+
+[data-yard-upcoming-preview] .model-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+[data-yard-upcoming-preview] [data-yard-3d]:not(:fullscreen) canvas {
+  min-height: 22.5rem;
+}
+
+[data-yard-upcoming-preview] .model-inspector {
+  border-left: 0;
+  border-top: var(--primitive-border-thin) solid var(--semantic-border-divider);
 }
 
 .yard-inline-3d[data-active-plan] {
