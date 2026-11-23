@@ -113,7 +113,7 @@ class OperationsTests(TestCase):
         self.assertEqual(context['inventory']['occupancy_percent'], round(2 * 100 / 6))
         html = render_to_string('operations_summary.html', dict(operations=context))
         for text in ('확인이 필요한 것 0건', f'야드 현황 #{plan.observation.pk} 기준', '재취급이 필요한 반출',
-                     '1<small> / 계획된 반출 1건</small>', '지시 전 계획 · 실적 아님', '계획한 재취급 이동 1회', '공급암 S',
+                     '1<small> / 계획된 반출 1건</small>', '계획한 재취급 이동 1회',
                      '계획한 팔(주·대안)', '미집계', '>점유율<'):
             self.assertIn(text, html)
         for text in ('반출 1건당', '관측 점유율', '선택 관측'):
@@ -126,7 +126,7 @@ class OperationsTests(TestCase):
         self.assertIsNone(context['workload']['rehandle_per_outbound'])
         html = render_to_string('operations_summary.html', dict(operations=context))
         self.assertIn('유효한 반출 계획 없음', html)
-        self.assertIn('야드 현황 다시 확인', html)
+        self.assertIn('야드 현황이 오래돼 이 계획은 쓸 수 없습니다.', html)
         services.record_observation(self.admin, source_id=plan.observation.source_id,
             source_revision='new', observed_at=self.now, provenance='DECLARED',
             condition=plan.condition, payload=plan.observation.payload)
@@ -213,7 +213,7 @@ class OperationsTests(TestCase):
         finished, cancelled = rows[-1], next(r for r in rows if r['order'].pk == other.pk)
         self.assertEqual((finished['status_label'], finished['action']), ('업무 완료', '완료 기록 보기'))
         self.assertTrue(finished['href'].startswith(f'/requests/{plan.order_id}/timeline/'))
-        self.assertEqual((cancelled['status_label'], cancelled['action']), ('취소됨', '최신 기준으로 검토'))
+        self.assertEqual((cancelled['status_label'], cancelled['action']), ('취소됨', '계획 다시 짜기'))
         self.assertTrue(cancelled['href'].startswith(f'/requests/{other.pk}/'))
 
     def test_overview_prefetches_inbound_episodes_without_n_plus_one_queries(self):

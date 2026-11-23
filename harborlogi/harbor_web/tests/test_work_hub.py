@@ -46,7 +46,7 @@ class WorkHubTests(TestCase):
     def test_empty_hub_has_four_sections_and_no_estimates_or_actions(self):
         response = self.get_hub()
         for text in ('<h1>작업</h1>', '오늘 시간표', '반출 순서', '입고 자리', '자동 재배치',
-                     '등록된 작업이 없습니다', '상태는 ROSY 실행 결과로 바뀜', '연동 전',
+                     '등록된 작업이 없습니다',
                      '<a href="/rearrangement/">자동 재배치 상세</a>'):
             self.assertContains(response, text)
         body = response.content.decode().split('<main', 1)[1]
@@ -164,7 +164,7 @@ class WorkHubTests(TestCase):
             **result['recommendation'], 'row': 1}})
         response = self.get_hub()
         self.assertEqual(response.context['inbound'][0]['place'], '1행 3층')
-        self.assertContains(response, '추천 자리 · 실제 적재는 실행 후 반영')
+        self.assertNotContains(response, '추천 자리 · 실제 적재는 실행 후 반영')
         self.assertContains(response, f'/plans/{latest.pk}/')
         self.plan(incoming, result={'status': 'HOLD'})
         response = self.get_hub()

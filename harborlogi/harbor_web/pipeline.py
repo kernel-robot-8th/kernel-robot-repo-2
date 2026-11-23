@@ -76,7 +76,7 @@ def pipeline_for(order, plan=None, command=None, detail=None):
 
     stages = [
         stage('plan', '업무·계획 검토', 'Harbor 관제', bool(plan),
-              '저장한 원본과 지시 revision으로 검토합니다. 계획 READY는 실행 허가가 아닙니다.',
+              '',
               not plan, f'/requests/{order.pk}/'),
         stage('proposal', '제안 제출', 'Harbor 운영자', submitted,
               COMMAND_LABELS.get(state, '검토한 계획에서 인계를 준비하세요.'), bool(command and not submitted)),

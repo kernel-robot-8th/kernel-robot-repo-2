@@ -78,7 +78,7 @@ class ProductPagesTests(TestCase):
 
     def test_invalid_input_preserved_and_empty_state(self):
         self.client.force_login(self.operator)
-        self.assertContains(self.client.get('/'), '조치')
+        self.assertContains(self.client.get('/'), '처리할 것')
         response = self.client.post('/cargo/new/', dict(code='작성중', name='', weight_kg='-1', volume_m3='', destination=''))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '작성중')
@@ -103,7 +103,7 @@ class ProductPagesTests(TestCase):
             ledger_identity='test-ledger', fleet_origin='http://127.0.0.1:9999', fleet_principal='test-principal',
             body_digest='a' * 64, binding={}, state='UNKNOWN')
         home = self.client.get('/')
-        self.assertContains(home, '제출 결과가 불명입니다')
+        self.assertContains(home, 'ROSY 응답을 확인하지 못했습니다')
         self.assertContains(home, f'/work/{command.pk}/')
         self.assertEqual(self.client.get('/inventory/').status_code, 200)
         self.assertEqual(self.client.get('/settings/').status_code, 403)

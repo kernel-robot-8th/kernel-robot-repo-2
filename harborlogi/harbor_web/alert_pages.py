@@ -45,10 +45,10 @@ def _has_release_permit(episode):
 
 ATTENTION_TEXT = {
     '관측 없음': ('야드 현황이 없습니다', '야드 연결 상태를 확인해야 합니다.', '야드 보기'),
-    '관측 유효 시간 밖': ('야드 현황을 새로 받아야 합니다', '유효 시간이 지나 최신 야드 현황이 필요합니다.', '현황 선택'),
-    '같은 출처에 새 관측 있음': ('더 최근 야드 현황이 있습니다', '새 야드 현황으로 계획을 다시 살펴보세요.', '현황 선택'),
-    'HOLD 계획': ('계획이 막힘', '현재 계획에서 진행할 수 없는 이유를 살펴보세요.', '계획 보기'),
-    '재검토로 이동 집계 제외': ('계획 재검토 필요', '업무나 순서가 바뀌어 계획을 다시 살펴봐야 합니다.', '계획 보기'),
+    '관측 유효 시간 밖': ('야드 현황을 새로 받아야 합니다', '야드 현황이 오래돼 이 계획은 쓸 수 없습니다.', '현황 선택'),
+    '같은 출처에 새 관측 있음': ('새 야드 현황 있음', '', '최신으로 보기'),
+    'HOLD 계획': ('이 일은 지금 못 합니다', '', '이유 보기'),
+    '계획 다시 짜야 함': ('계획 다시 짜야 함', '계획을 짠 뒤 순서나 야드가 바뀌었습니다.', '계획 다시 짜기'),
 }
 COMMAND_TEXT = {
     'UNKNOWN': 'ROSY 응답을 확인하지 못했습니다. 자동으로 다시 보내지 않습니다.',
@@ -79,6 +79,10 @@ def alerts_context(request, *, observation=None, operations=None):
             else:
                 title, detail, action = ATTENTION_TEXT.get(item['label'],
                     ('업무 상태 확인 필요', '현재 업무 상태를 살펴보세요.', '상세 보기'))
+            if item['label'] == 'HOLD 계획':
+                detail = item['reason']
+            if item['label'] == '같은 출처에 새 관측 있음':
+                href = '/'
             if href.startswith('#'):
                 href = f'/?observation={observation.pk}{href}'
             alerts.append(dict(title=title, detail=detail, count=item['count'], href=href, action=action))

@@ -79,13 +79,15 @@ class SituationBoardTests(TestCase):
         response = self.client.get('/')
         self.assertEqual(response.status_code, 200)
         board = response.context['board']
-        self.assertEqual(board['drive_label'], '자동 운전 중')
-        self.assertEqual(board['drive_tone'], 'good')
+        self.assertEqual(board['drive_label'], '자동 진행 꺼짐')
+        self.assertEqual(board['drive_tone'], 'neutral')
         self.assertEqual(board['alert_total'], 0)
         self.assertEqual(board['alerts'], [])
 
         html = response.content.decode()
         self.assertNotIn('class="panel board-alerts"', html)
+        self.assertNotIn('class="fold board-support"', html)
+        self.assertNotIn('상태는 ROSY 실행 결과로 바뀜', html)
         self.assertNotIn('<span aria-hidden="true">→</span>', html)
         self.assertNotIn('알고리즘이 정한 순서', html)
         self.assertNotIn('2행×3열×3층', html)
@@ -99,7 +101,6 @@ class SituationBoardTests(TestCase):
             main_html.index('class="board-counts"'),
             main_html.index('class="board-section board-even"'),
             main_html.index('class="panel board-jobs"'),
-            main_html.index('<details class="fold board-support">'),
         ]
         self.assertEqual(positions, sorted(positions))
 
@@ -119,7 +120,7 @@ class SituationBoardTests(TestCase):
         resp = self.client.get('/')
         html = resp.content.decode()
         self.assertIn('class="panel board-alerts"', html)
-        self.assertIn('자동 운전 중 · 처리할 것 1건', html)
+        self.assertIn('자동 진행 꺼짐 · 처리할 것 1건', html)
         self.assertIn('처리할 것 1건 보기', html)
         self.assertIn('href="/alerts/"', html)
 
@@ -130,7 +131,6 @@ class SituationBoardTests(TestCase):
             main_html.index('class="panel board-alerts"'),
             main_html.index('class="board-section board-even"'),
             main_html.index('class="panel board-jobs"'),
-            main_html.index('<details class="fold board-support">'),
         ]
         self.assertEqual(positions, sorted(positions))
 
@@ -155,11 +155,23 @@ class SituationBoardTests(TestCase):
         )
         resp = self.client.get('/')
         self.assertEqual(resp.context['board']['alert_total'], 2)
-        self.assertEqual(resp.context['board']['drive_label'], '자동 운전 중 · 처리할 것 2건')
+        self.assertEqual(resp.context['board']['drive_label'], '자동 진행 꺼짐 · 처리할 것 2건')
         self.assertEqual(resp.context['board']['drive_tone'], 'attention')
         outside_details = resp.content.decode().split('<main ', 1)[1].split('>', 1)[1].split('<details class="fold board-support">', 1)[0]
         visible_text = re.sub(r'<[^>]+>', ' ', outside_details)
         self.assertNotRegex(visible_text, r'관측|원본|인계|대조|회차|#\d+|READY|HOLD|BLOCKED')
+
+    def test_drive_label_follows_executor_status(self):
+        for enabled, label, tone in ((True, '자동 진행 켜짐', 'good'),
+                                     (False, '자동 진행 꺼짐', 'neutral')):
+            with self.subTest(enabled=enabled), patch('harbor_web.executor.status',
+                    return_value=dict(enabled=enabled, label=label, tone=tone)):
+                response = self.client.get('/')
+                drive = '자동 운전 중' if enabled else label
+                self.assertEqual(response.context['board']['drive_label'], f'{drive} · 처리할 것 1건')
+                self.assertEqual(response.context['status_strip']['executor_label'], label)
+                if not enabled:
+                    self.assertNotContains(response, '자동 운전 중')
 
     def test_next_jobs_capped_at_five_and_completed_waiting_next(self):
         obs = self._observe([self._placement(self._cargo('K1').code, 1, 1, 1)], revision='cap')

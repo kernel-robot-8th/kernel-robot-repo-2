@@ -19,7 +19,7 @@ class ReviewFlowTests(TestCase):
         self.client.force_login(self.operator)
         overview = self.client.get(f'/?observation={selected.pk}')
         self.assertContains(overview, f'href="/outbound/?observation={selected.pk}"')
-        self.assertContains(overview, f'href="/requests/{plan.order_id}/?observation={selected.pk}"')
+        self.assertContains(overview, f'href="/plans/{plan.pk}/?observation={selected.pk}"')
         listing = self.client.get(f'/outbound/?observation={selected.pk}&q=C1')
         self.assertContains(listing, f'name="observation" value="{selected.pk}"')
         self.assertContains(listing, f'href="/requests/{plan.order_id}/?observation={selected.pk}"')

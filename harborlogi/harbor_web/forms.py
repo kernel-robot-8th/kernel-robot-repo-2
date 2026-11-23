@@ -2,6 +2,7 @@ from django import forms
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db.models import Q
+from django.utils.html import format_html
 from harbor_web.models import Cargo, Condition, Measurement, Observation, Order
 
 
@@ -97,7 +98,7 @@ class PlanForm(forms.Form):
     expected_version = forms.IntegerField(widget=forms.HiddenInput)
     observation = forms.ModelChoiceField(label='검토할 관측 원본', queryset=Observation.objects.none(), empty_label='관측을 선택하세요')
     automatic = forms.BooleanField(label='지시·관측이 바뀌면 자동 재계획', required=False, initial=True,
-        help_text='선택한 출처와 설치 기준에 결속합니다. 계산 결과만 새 버전으로 보존하며 이미 인계한 실행은 바꾸지 않습니다. 해제 후 계산하면 자동 재계획을 끕니다.')
+        help_text=format_html('<details><summary>계산 상세</summary>{}</details>', '선택한 출처와 설치 기준에 결속합니다. 계산 결과만 새 버전으로 보존하며 이미 인계한 실행은 바꾸지 않습니다. 해제 후 계산하면 자동 재계획을 끕니다.'))
 
     def __init__(self, *args, **kwargs):
         review_observation = kwargs.pop('review_observation', None)
@@ -115,7 +116,7 @@ class ConditionForm(forms.ModelForm):
         fields = ['name', 'calibration_ref', 'payload']
         labels = dict(name='설치 기준 이름', calibration_ref='보정·검증 기록 참조', payload='이동·도달 조건 (JSON)')
         widgets = {'payload': forms.Textarea(attrs={'rows': 15, 'spellcheck': 'false'})}
-        help_texts = {'payload': 'outbound_stand, temporary_bays, allowed_moves, max_observation_age_seconds, conveyor, arm_reach가 필요합니다. yard_layout으로 행·열·높이와 각 칸 ID의 행·열을 지정합니다. 등록은 실행 허가나 도달 검증을 뜻하지 않습니다.'}
+        help_texts = {'payload': format_html('<details><summary>계산 상세</summary>{}</details>', 'outbound_stand, temporary_bays, allowed_moves, max_observation_age_seconds, conveyor, arm_reach가 필요합니다. yard_layout으로 행·열·높이와 각 칸 ID의 행·열을 지정합니다. 등록은 실행 허가나 도달 검증을 뜻하지 않습니다.')}
 
 
 class ObservationForm(forms.ModelForm):
@@ -124,7 +125,7 @@ class ObservationForm(forms.ModelForm):
         fields = ['condition', 'source_id', 'source_revision', 'observed_at', 'provenance', 'payload']
         labels = dict(condition='설치 조건', source_id='원본 출처', source_revision='출처 revision', observed_at='관측 시각', provenance='자료 구분', payload='관측 원본 (JSON)')
         widgets = {'observed_at': forms.DateTimeInput(attrs={'type': 'datetime-local'}, format='%Y-%m-%dT%H:%M'), 'payload': forms.Textarea(attrs={'rows': 12, 'spellcheck': 'false'})}
-        help_texts = {'payload': '기존 관측은 bays와 holdings를 사용하며 cargo 순서는 아래→위입니다. 다칸 관측은 schema=grid-placement-v1과 observed_areas, placements, holdings를 사용하고 각 배치에 footprint_revision을 지정합니다. 이 수동 등록은 인증된 운영 관측으로 승격되지 않습니다.'}
+        help_texts = {'payload': format_html('<details><summary>계산 상세</summary>{}</details>', '기존 관측은 bays와 holdings를 사용하며 cargo 순서는 아래→위입니다. 다칸 관측은 schema=grid-placement-v1과 observed_areas, placements, holdings를 사용하고 각 배치에 footprint_revision을 지정합니다. 이 수동 등록은 인증된 운영 관측으로 승격되지 않습니다.')}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

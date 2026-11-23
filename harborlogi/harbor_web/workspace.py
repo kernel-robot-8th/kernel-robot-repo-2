@@ -22,12 +22,12 @@ def plan_changes(order, plan, *, current_queue_digest=None):
     if current_queue_digest is None:
         current_queue_digest = services.queue_digest()
     if order.version != plan.order_version or plan.queue_digest != current_queue_digest:
-        changes.append(dict(code='PLAN_QUEUE_CHANGED', message='검토 후 업무 지시가 변경되었습니다. 최신 지시로 계획을 다시 검토하세요.'))
+        changes.append(dict(code='PLAN_QUEUE_CHANGED', message='이 계획을 짠 뒤 요청 내용이나 반출 순서가 바뀌었습니다. 지금 순서로 다시 짜세요.'))
     if Observation.objects.filter(source_id=plan.observation.source_id, pk__gt=plan.observation_id).exists():
-        changes.append(dict(code='OBSERVATION_REVISION_CHANGED', message='같은 출처에 새 관측이 있습니다. 아래 그림은 계획에 고정된 이전 원본입니다.'))
+        changes.append(dict(code='OBSERVATION_REVISION_CHANGED', message='야드 현황이 새로 들어왔습니다. 아래 그림은 이전 현황 기준입니다.'))
     age = timezone.now() - plan.observation.observed_at
     if not timezone.timedelta(0) <= age <= services.constraints(plan.condition.payload).max_observation_age:
-        changes.append(dict(code='OBSERVATION_NOT_FRESH', message='계획 기준 관측의 유효 시간이 지났거나 시각을 확인할 수 없습니다. 최신 원본이 필요합니다.'))
+        changes.append(dict(code='OBSERVATION_NOT_FRESH', message='야드 현황이 오래됐습니다. 새 현황을 받아야 계획할 수 있습니다.'))
     return changes
 
 
@@ -122,13 +122,13 @@ def workspace_context(order, plan=None, *, priority_form=None, plan_form=None, r
             }.get(command.state, '원래 실행의 상태와 근거를 확인하세요.'),
             href=f'/work/{command.pk}/', label='원래 작업 대조', tone='attention')
     elif changes:
-        decision = dict(title='계획 재검토 필요', body=changes[0]['message'], href='#planning', label='최신 원본으로 검토', tone='attention')
+        decision = dict(title='계획 다시 짜야 함', body='계획을 짠 뒤 순서나 야드가 바뀌었습니다.', href=f'/requests/{order.pk}/#planning', label='계획 다시 짜기', tone='attention')
     elif plan and plan.result['status'] == 'HOLD':
-        decision = dict(title='반출 계획 보류', body=reason_text(plan.result['reason']), href='#planning', label='계획 조건 확인', tone='attention')
+        decision = dict(title='이 일은 지금 못 합니다', body=reason_text(plan.result['reason']), href='#moves-title', label='이유 보기', tone='attention')
     elif plan:
         decision = dict(title='계획 검토 완료 · 실행 인계 대기', body=gate_text(gate['reason']) or '관측과 예상 이동을 검토한 뒤 현재 단계의 인계를 준비하세요.', href='#execution', label='실행 인계 조건 확인', tone='info')
     else:
-        decision = dict(title='관측 기준으로 계획 검토', body='대상 화물의 현재 위치와 재취급 공간을 확인한 뒤 반출 계획을 만드세요.', href='#planning', label='관측 선택·계획 검토', tone='info')
+        decision = dict(title='관측 기준으로 계획 검토', body='대상 화물의 현재 위치와 재취급 공간을 확인한 뒤 반출 계획을 만드세요.', href='#planning', label='계획 짜기', tone='info')
 
     plan_ids = [str(pk) for pk in plans.values_list('pk', flat=True)]
     audit_scope = (Q(object_type='Order', object_id=str(order.pk)) |

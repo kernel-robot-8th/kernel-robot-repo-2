@@ -43,7 +43,7 @@ def episode_status(episode, *, now=None):
     elif episode.state == 'REASSIGNED':
         label, action, reason = '이전 회차', '현재 배정 확인', '이 회차는 교체되었습니다. 새 배정의 현장 확인을 사용하세요.'
     else:
-        label, action, reason = '현장 확인 대기', '배정·확인 진행 보기', '배정된 현장 담당자의 직접 확인을 기다립니다.'
+        label, action, reason = '현장 확인 중', '배정·확인 진행 보기', f'현장 확인 중 · 담당 {episode.assigned_to.get_full_name() or episode.assigned_to.username}'
     return dict(confirmation=confirmation, departure=departure, confirmation_fresh=fresh,
                 confirmation_expires_at=confirmation.observed_at + timedelta(minutes=5) if confirmation else None,
                 needs_new_confirmation=bool(needs_new), can_prepare_departure=fresh and not departure,
