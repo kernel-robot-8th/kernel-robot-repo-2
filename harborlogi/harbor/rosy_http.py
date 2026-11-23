@@ -2,12 +2,18 @@ import ipaddress
 import http.client
 import json
 import math
+import os
 import re
+from urllib.error import HTTPError
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPSHandler, Request, build_opener
 
 from harbor.cell_site_map import decode_cell_site_json
 from harbor.fleet_discovery import _NoRedirect
+from harbor.site_recognition import parse_site_recognition
+
+# D-1075 확정 전 제안 경로. ROSY가 경로를 정하면 이 값만 바꾼다.
+SITE_RECOGNITION_PATH_PROPOSED = '/api/fleet/cell-site-recognition'
 
 
 class FleetIdentityError(ValueError):
@@ -15,7 +21,10 @@ class FleetIdentityError(ValueError):
 
 
 class RosyClient:
-    def __init__(self, base_url=None, token=None, *, timeout=10, transport=None, ca_file=None):
+    def __init__(self, base_url=None, token=None, *, timeout=10, transport=None, ca_file=None,
+                 site_recognition_path=None):
+        self._site_recognition_path = (site_recognition_path if site_recognition_path is not None else
+            os.environ.get('HARBOR_ROSY_SITE_RECOGNITION_PATH', SITE_RECOGNITION_PATH_PROPOSED))
         if transport is not None:
             self._request = transport
             return
@@ -161,6 +170,14 @@ class RosyClient:
         """Read-only canonical cell site map (rosy.cell-site-map.v1)."""
         return self._call("GET", "/api/fleet/pipeline/cell-sites", None)
 
+    def site_recognition(self, *, known_site_refs=None):
+        """Read and validate a proposed D-1075 snapshot; never updates the ledger."""
+        path = self._site_recognition_path
+        if (not isinstance(path, str) or not path.startswith('/') or path.startswith('//')
+                or any(c.isspace() or ord(c) < 32 or c in '\\?#' for c in path)):
+            raise ValueError('INVALID_SITE_RECOGNITION_PATH: expected an origin-relative path')
+        return parse_site_recognition(self._call('GET', path, None), known_site_refs=known_site_refs)
+
     def site_places(self):
         """Read-only geometry-free port site places (rosy.port-site-places.v1)."""
         return self._call("GET", "/api/fleet/site-points?view=port", None)
@@ -173,6 +190,28 @@ class RosyClient:
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 192 or any(ord(c) < 32 for c in reason):
             raise ValueError('Expected a short cancellation reason')
         return self._call('POST', '/api/fleet/arm-transfers/jobs/' + quote(mission_id, safe='') + '/cancel', {'reason': reason})
+
+
+def load_site_recognition(client=None, *, known_site_refs=None):
+    """Optional read entry point for future UI use: (snapshot or None, status text)."""
+    if os.environ.get('HARBOR_ROSY_SITE_RECOGNITION') != '1':
+        return None, 'ROSY 인식 연동 전'
+    if client is None:
+        origin, token = os.environ.get('HARBOR_FLEET_ORIGIN'), os.environ.get('HARBOR_FLEET_TOKEN')
+        if not origin or not token:
+            return None, 'ROSY 인식 연동 전'
+        client = RosyClient(origin, token, ca_file=os.environ.get('HARBOR_FLEET_CA_FILE') or None)
+    try:
+        return client.site_recognition(known_site_refs=known_site_refs), ''
+    except HTTPError as error:
+        error.close()
+        return None, 'ROSY에 아직 인식 API 없음' if error.code == 404 else 'ROSY 인식 연결 오류'
+    except FleetIdentityError:
+        return None, 'ROSY 인식 연결 오류'
+    except ValueError:
+        return None, 'ROSY 인식 응답 형식 오류'
+    except OSError:
+        return None, 'ROSY 인식 연결 오류'
 
 
 def _clean_text(value, limit=200):
