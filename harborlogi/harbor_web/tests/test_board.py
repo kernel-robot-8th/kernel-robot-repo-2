@@ -97,8 +97,8 @@ class SituationBoardTests(TestCase):
         positions = [
             main_html.index('class="panel board-run"'),
             main_html.index('class="board-counts"'),
-            main_html.index('class="board-row"'),
             main_html.index('class="board-section board-even"'),
+            main_html.index('class="panel board-jobs"'),
             main_html.index('<details class="fold board-support">'),
         ]
         self.assertEqual(positions, sorted(positions))
@@ -128,8 +128,8 @@ class SituationBoardTests(TestCase):
             main_html.index('class="panel board-run"'),
             main_html.index('class="board-counts"'),
             main_html.index('class="panel board-alerts"'),
-            main_html.index('class="board-row"'),
             main_html.index('class="board-section board-even"'),
+            main_html.index('class="panel board-jobs"'),
             main_html.index('<details class="fold board-support">'),
         ]
         self.assertEqual(positions, sorted(positions))
@@ -198,6 +198,27 @@ class SituationBoardTests(TestCase):
         self.assertEqual(board['day_progress'], {'completed': 1, 'total': 7, 'remaining': 6})
         self.assertEqual(len(board['next_jobs']), 5)
         self.assertEqual([j['title'] for j in board['next_jobs']], [f'K{i} 반출' for i in range(2, 7)])
+
+    def test_work_sequence_keeps_current_and_next_details_in_one_panel(self):
+        board = {
+            'current_job': dict(title='현재 화물', state='진행 중', tone='info',
+                href='/work/1/', source='야드', destination='반출대', cargo='K1', arm='A'),
+            'next_jobs': [dict(title='다음 화물', kind_label='입고', state='대기', tone='neutral',
+                href='/requests/2/', route_text='반입대 → 야드', arm='B')],
+        }
+        html = render_to_string('overview.html', {'board': board})
+        sequence = html.split('aria-labelledby="h-board-jobs"', 1)[1].split('</section>', 1)[0]
+        self.assertIn('<h2 id="h-board-jobs">작업 순서</h2>', sequence)
+        self.assertIn('aria-labelledby="h-board-jobs" tabindex="0"', sequence)
+        current, upcoming = sequence.split('class="board-next-item"', 1)
+        for text in ('지금', '현재 화물', '진행 중', '야드 → 반출대', '팔 A', 'href="/work/1/"'):
+            self.assertIn(text, current)
+        for text in ('다음 1', '입고', '다음 화물', '대기', '반입대 → 야드', '팔 B', 'href="/requests/2/"'):
+            self.assertIn(text, upcoming)
+        empty = render_to_string('overview.html', {'board': {'current_job': None, 'next_jobs': []}})
+        self.assertIn('하는 일 없음', empty)
+        self.assertNotIn('class="board-next-item"', empty)
+        self.assertNotIn('다음 일 없음', empty)
 
     def test_counts_deduplicate_by_order_and_exclude_empty_rearrange(self):
         obs = self._observe([self._placement(self._cargo('K1').code, 1, 1, 1)], revision='cnt')
@@ -339,7 +360,7 @@ class SituationBoardTests(TestCase):
     def test_board_even_container_css_tokens_and_slot_card_backwards_compat(self):
         self.assertIsNotNone(finders.find('harbor_web/board.css'))
         css = (ROOT / 'harbor_web/static/harbor_web/board.css').read_text(encoding='utf-8')
-        for selector in ('.board-row', '.yard-topview.board-even', '.board-counts', '.board-run', '.slot-card.is-move-slot', '.slot-ghost'):
+        for selector in ('.board-job-list', '.yard-topview.board-even', '.board-counts', '.board-run', '.slot-card.is-move-slot', '.slot-ghost'):
             self.assertIn(selector, css)
         self.assertIn('@media (min-width: 1100px)', css)
         self.assertNotRegex(css, r'#[0-9a-fA-F]{3,8}')

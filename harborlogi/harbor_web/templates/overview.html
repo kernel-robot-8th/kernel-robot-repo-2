@@ -43,43 +43,6 @@
   </section>
   {% endif %}
 
-  <div class="board-row">
-    <section class="panel board-current" aria-labelledby="h-board-current">
-      <div class="panel-h"><h2 id="h-board-current">지금 하는 일</h2>{% if board.current_job %}<span class="board-pill tone-{{ board.current_job.tone }}">{{ board.current_job.state }}</span>{% endif %}</div>
-      <div class="panel-b">
-        {% if board.current_job %}
-          <div class="board-job-head">{% if board.current_job.href %}<a class="board-job-title" href="{{ board.current_job.href }}">{{ board.current_job.title }}</a>{% else %}<strong class="board-job-title">{{ board.current_job.title }}</strong>{% endif %}</div>
-          {% if board.current_job.source and board.current_job.destination %}<p class="board-job-route">{% if board.current_job.cargo %}<span class="board-job-cargo">{{ board.current_job.cargo }}</span> · {% endif %}{{ board.current_job.source }} → {{ board.current_job.destination }}</p>{% endif %}
-          {% if board.current_job.arm %}<p class="board-job-meta">팔 {{ board.current_job.arm }}</p>{% endif %}
-        {% else %}
-          <p class="muted">하는 일 없음</p>
-        {% endif %}
-      </div>
-    </section>
-
-    <section class="panel board-next" aria-labelledby="h-board-next">
-      <div class="panel-h"><h2 id="h-board-next">다음 일</h2><span class="scope">추천 순서</span></div>
-      <div class="panel-b">
-        {% if board.next_jobs %}
-          <ol class="board-next-list">
-            {% for job in board.next_jobs %}
-            <li class="board-next-item">
-              <div class="board-next-main">
-                <span class="chip">{{ job.kind_label }}</span>
-                {% if job.href %}<a class="board-next-title" href="{{ job.href }}">{{ job.title }}</a>{% else %}<strong class="board-next-title">{{ job.title }}</strong>{% endif %}
-                <span class="board-pill tone-{{ job.tone }}">{{ job.state }}</span>
-              </div>
-              {% if job.route_text or job.arm %}<div class="board-next-meta">{% if job.route_text %}<span>{{ job.route_text }}</span>{% endif %}{% if job.arm %}<span>팔 {{ job.arm }}</span>{% endif %}</div>{% endif %}
-            </li>
-            {% endfor %}
-          </ol>
-        {% else %}
-          <p class="muted">다음 일 없음</p>
-        {% endif %}
-      </div>
-    </section>
-  </div>
-
   <section class="board-section board-even" aria-labelledby="h-board-yard">
     <div class="yard-topview">
       <section class="panel yard-panel" aria-labelledby="h-board-yard">
@@ -94,6 +57,35 @@
         </div>
       </section>
       {% include 'topview_panel.html' %}
+    </div>
+  </section>
+
+  <section class="panel board-jobs" aria-labelledby="h-board-jobs">
+    <div class="panel-h"><h2 id="h-board-jobs">작업 순서</h2><span class="scope">추천 순서</span></div>
+    <div class="panel-b">
+      <ol class="board-job-list" aria-labelledby="h-board-jobs" tabindex="0">
+        <li class="board-current">
+          <span class="board-job-label">지금</span>
+          {% if board.current_job %}
+            <div class="board-job-head">{% if board.current_job.href %}<a class="board-job-title" href="{{ board.current_job.href }}">{{ board.current_job.title }}</a>{% else %}<strong class="board-job-title">{{ board.current_job.title }}</strong>{% endif %}</div>
+            <span class="board-pill tone-{{ board.current_job.tone }}">{{ board.current_job.state }}</span>
+            {% if board.current_job.source and board.current_job.destination %}<p class="board-job-route">{% if board.current_job.cargo %}<span class="board-job-cargo">{{ board.current_job.cargo }}</span> · {% endif %}{{ board.current_job.source }} → {{ board.current_job.destination }}</p>{% endif %}
+            {% if board.current_job.arm %}<p class="board-job-meta">팔 {{ board.current_job.arm }}</p>{% endif %}
+          {% else %}
+            <p class="muted">하는 일 없음</p>
+          {% endif %}
+        </li>
+        {% for job in board.next_jobs %}
+        <li class="board-next-item">
+          <span class="board-job-label">다음 {{ forloop.counter }}</span>
+          <div class="board-next-main"><span class="chip">{{ job.kind_label }}</span></div>
+          {% if job.href %}<a class="board-next-title" href="{{ job.href }}">{{ job.title }}</a>{% else %}<strong class="board-next-title">{{ job.title }}</strong>{% endif %}
+          <span class="board-pill tone-{{ job.tone }}">{{ job.state }}</span>
+          {% if job.route_text %}<p class="board-job-route">{{ job.route_text }}</p>{% endif %}
+          {% if job.arm %}<p class="board-job-meta">팔 {{ job.arm }}</p>{% endif %}
+        </li>
+        {% endfor %}
+      </ol>
     </div>
   </section>
 

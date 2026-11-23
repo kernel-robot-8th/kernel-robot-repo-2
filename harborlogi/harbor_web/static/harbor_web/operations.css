@@ -234,6 +234,7 @@ button.slot-level[aria-pressed=true] {outline:3px solid var(--primitive-color-or
 .work-flow {display:flex;flex-wrap:wrap;gap:var(--primitive-space-3);list-style:none;margin:0;padding:0;counter-reset:none}
 .work-flow li {display:grid;gap:var(--primitive-space-1);max-width:100%;overflow-wrap:anywhere}
 .work-chip {display:flex;flex-wrap:wrap;align-items:center;gap:var(--primitive-space-2);padding:var(--primitive-space-2) var(--primitive-space-3);border:1px solid var(--semantic-border-divider);border-radius:var(--primitive-radius-control)}
+.work-hub #wk-out-actions {margin-top:var(--primitive-space-4)}
 .work-flow small {color:var(--semantic-text-secondary)}
 .work-inbound {list-style:none;margin:0;padding:0}
 .work-inbound li {display:flex;flex-wrap:wrap;gap:var(--primitive-space-2) var(--primitive-space-4);padding-block:var(--primitive-space-3);border-bottom:1px solid var(--semantic-border-divider);overflow-wrap:anywhere}

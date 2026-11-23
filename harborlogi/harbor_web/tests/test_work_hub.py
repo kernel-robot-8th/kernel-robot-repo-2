@@ -46,7 +46,8 @@ class WorkHubTests(TestCase):
     def test_empty_hub_has_four_sections_and_no_estimates_or_actions(self):
         response = self.get_hub()
         for text in ('<h1>작업</h1>', '오늘 시간표', '반출 순서', '입고 자리', '자동 재배치',
-                     '등록된 작업이 없습니다', '상태는 ROSY 실행 결과로 바뀜', '연동 전'):
+                     '등록된 작업이 없습니다', '상태는 ROSY 실행 결과로 바뀜', '연동 전',
+                     '<a href="/rearrangement/">자동 재배치 상세</a>'):
             self.assertContains(response, text)
         body = response.content.decode().split('<main', 1)[1]
         for text in ('type="submit"', 'draggable=', '예정 시각', '희망 시각', '진행률', 'READY', 'HOLD', '#번호'):

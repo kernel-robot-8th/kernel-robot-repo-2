@@ -275,7 +275,7 @@ function mountReorderEditor(editor) {
           validation = null;
           render();
         },
-      }, '순서 바꾸기(예외)'));
+      }, '순서 바꾸기'));
       if (readUndo()) {
         actions.append(el('span', {class: 'helptext', text: '적용함 ·'}));
         actions.append(el('button', {

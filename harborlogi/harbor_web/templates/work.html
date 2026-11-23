@@ -44,7 +44,7 @@
     <p>자동 운전 실행 연동 전 · 실행은 ROSY Fleet에서 승인한 뒤 시작됩니다.</p>
     {% if authorization %}<p>저장된 허용 범위: 이동 최대 {{ authorization.max_moves }}개 · 하루 최대 {{ authorization.daily_limit }}건 · {{ authorization.valid_until|date:'m-d H:i' }}까지</p>{% else %}<p>저장된 자동 재배치 허용 범위가 없습니다.</p>{% endif %}
     {% if rearrangements %}<ul>{% for row in rearrangements %}<li><a href="{{ row.href }}">재배치 작업 보기</a> <span class="work-state">{{ row.state }}</span></li>{% endfor %}</ul>{% else %}<p>남은 재배치 작업이 없습니다</p>{% endif %}
-    <a href="/rearrangement/">자동 재배치 상세{% if can_operate %}(예외){% endif %}</a>
+    <a href="/rearrangement/">자동 재배치 상세</a>
   </div>
 </details>
 </div>

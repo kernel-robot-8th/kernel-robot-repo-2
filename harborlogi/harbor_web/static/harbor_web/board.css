@@ -114,18 +114,54 @@
   background: var(--semantic-status-warning-background);
 }
 
-/* 4. 지금 하는 일 & 다음 일 */
-.board-row {
+/* 4. 야드 : ROSY 탑뷰 (3:2) */
+.yard-topview.board-even,
+.board-even .yard-topview {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--primitive-space-4);
   align-items: start;
 }
-.board-row > * {
+.yard-topview.board-even > *,
+.board-even .yard-topview > * {
   min-width: 0;
 }
-.board-job-head {
-  margin-bottom: var(--primitive-space-2);
+
+/* 5. 작업 순서: 좁은 화면에서도 한 줄로 탐색 */
+.board-jobs {
+  min-width: 0;
+}
+.board-job-list {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: var(--primitive-space-3);
+  overflow-x: auto;
+  list-style: none;
+  margin: 0;
+  padding: var(--primitive-space-1);
+}
+.board-job-list > li {
+  flex: 0 0 18rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--primitive-space-2);
+  padding: var(--primitive-space-4);
+  border: var(--primitive-border-thin) solid var(--semantic-border-divider);
+  border-radius: var(--primitive-radius-control);
+  overflow-wrap: anywhere;
+}
+.board-job-list > .board-current {
+  flex-basis: 24rem;
+  border: var(--primitive-border-focus) solid var(--semantic-border-selected);
+  background: var(--semantic-surface-selected);
+}
+.board-job-label {
+  font-size: var(--primitive-font-label);
+  font-weight: var(--primitive-font-strong);
+  color: var(--semantic-text-secondary);
 }
 .board-job-title {
   font-size: var(--primitive-font-section);
@@ -133,11 +169,12 @@
   line-height: var(--primitive-font-heading-line);
   text-decoration: none;
 }
-.board-job-title:hover {
+.board-job-title:hover,
+.board-next-title:hover {
   text-decoration: underline;
 }
 .board-job-route {
-  margin: var(--primitive-space-1) 0;
+  margin: 0;
   font-size: var(--primitive-font-body);
   color: var(--semantic-text-primary);
 }
@@ -150,60 +187,9 @@
   font-size: var(--primitive-font-label);
   color: var(--semantic-text-secondary);
 }
-.board-next-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--primitive-space-2);
-}
-.board-next-item {
-  display: flex;
-  flex-direction: column;
-  gap: var(--primitive-space-1);
-  padding: var(--primitive-space-2) 0;
-  border-top: var(--primitive-border-thin) solid var(--semantic-border-divider);
-}
-.board-next-item:first-child {
-  padding-top: 0;
-  border-top: 0;
-}
-.board-next-item:last-child {
-  padding-bottom: 0;
-}
-.board-next-main {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--primitive-space-2);
-}
 .board-next-title {
   font-weight: var(--primitive-font-strong);
   text-decoration: none;
-}
-.board-next-title:hover {
-  text-decoration: underline;
-}
-.board-next-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--primitive-space-1) var(--primitive-space-3);
-  font-size: var(--primitive-font-caption);
-  color: var(--semantic-text-secondary);
-}
-
-/* 5. 야드 : ROSY 탑뷰 (1:1) */
-.yard-topview.board-even,
-.board-even .yard-topview {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--primitive-space-4);
-  align-items: start;
-}
-.yard-topview.board-even > *,
-.board-even .yard-topview > * {
-  min-width: 0;
 }
 
 /* 미니 평면 이동 강조 및 갈 자리 옅은 화물 번호 */
@@ -234,12 +220,9 @@
 }
 
 @media (min-width: 1100px) {
-  .board-row {
-    grid-template-columns: 1fr 1fr;
-  }
   .yard-topview.board-even,
   .board-even .yard-topview {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   }
 }
 
