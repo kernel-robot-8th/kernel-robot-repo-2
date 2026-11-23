@@ -98,7 +98,9 @@ class ReorderValidateTests(TestCase):
         html = self.client.get('/work/').content.decode()
         for text in ('data-reorder-editor', 'data-validate-url="/outbound/validate/"', 'data-reorder-url="/outbound/reorder/"', 'reorder.js'):
             self.assertIn(text, html)
+        self.assertNotIn('<span class="scope">', html.split('id="work-outbound"', 1)[1].split('</section>', 1)[0])
         self.client.force_login(self.viewer)
         viewer_html = self.client.get('/work/').content.decode()
         self.assertNotIn('data-reorder-editor', viewer_html)
         self.assertNotIn('reorder.js', viewer_html)
+        self.assertIn('운영자만 바꿀 수 있음', viewer_html)

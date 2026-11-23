@@ -56,6 +56,11 @@ def hub_context(*, now=None):
             past.append(row)
         else:
             row['place'] = None
+            row['place_hint'] = '자리 결정 대기'
+            if plan and plan.order_version != order.version:
+                row['place_hint'] = '요청 바뀜 · 다시 계산'
+            elif plan and plan.result.get('status') == 'HOLD':
+                row['place_hint'] = '보류 · 요청 확인'
             if (order.kind == 'INBOUND' and plan and plan.order_version == order.version
                     and plan.result.get('status') == 'READY'
                     and plan.result.get('plan_kind') == 'inbound-placement'
@@ -66,6 +71,9 @@ def hub_context(*, now=None):
 
     past.sort(key=lambda row: (row['recorded_at'], row['order'].pk))
     upcoming = sorted(pending, key=lambda row: row['state'] != '진행 중')
+    next_row = next((row for row in upcoming if row['state'] != '진행 중'), None)
+    if next_row is not None:
+        next_row['is_next'] = True
     if past and upcoming and upcoming[0]['state'] == '대기':
         past[-1]['state'] = '완료 · 다음 작업 대기 중'
     return dict(timeline=past + upcoming,
