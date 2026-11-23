@@ -45,7 +45,7 @@
   <section class="board-section board-even" aria-labelledby="h-board-yard">
     <div class="yard-topview">
       <section class="panel board-jobs" aria-labelledby="h-board-jobs">
-        <div class="panel-h"><h2 id="h-board-jobs">작업 순서</h2><span class="scope">추천 순서</span><a class="src button quiet" href="/work/">작업에서 전체 보기</a></div>
+        <div class="panel-h"><h2 id="h-board-jobs">작업 순서</h2><span class="scope">추천 순서</span></div>
         <div class="panel-b">
           <ol class="board-job-list" aria-labelledby="h-board-jobs">
             <li class="board-current">
@@ -69,6 +69,7 @@
             {% endfor %}
           </ol>
         </div>
+        <div class="panel-f board-jobs-more"><a href="/work/">작업에서 전체 보기 →</a></div>
       </section>
       <section class="panel yard-panel" aria-labelledby="h-board-yard">
         <div class="panel-h"><h2 id="h-board-yard">야드</h2><a class="src button quiet" href="/inventory/{% if observation %}?observation={{ observation.pk }}{% endif %}">야드 크게 보기</a></div>

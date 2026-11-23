@@ -131,6 +131,9 @@
 .board-jobs {
   min-width: 0;
 }
+.board-jobs-more {
+  text-align: right;
+}
 .board-job-list {
   display: grid;
   gap: var(--primitive-space-2);
