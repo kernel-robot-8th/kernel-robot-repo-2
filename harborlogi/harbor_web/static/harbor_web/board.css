@@ -114,86 +114,7 @@
   background: var(--semantic-status-warning-background);
 }
 
-/* 4. 지금 하는 일 & 다음 일 */
-.board-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--primitive-space-4);
-  align-items: start;
-}
-.board-row > * {
-  min-width: 0;
-}
-.board-job-head {
-  margin-bottom: var(--primitive-space-2);
-}
-.board-job-title {
-  font-size: var(--primitive-font-section);
-  font-weight: var(--primitive-font-bold);
-  line-height: var(--primitive-font-heading-line);
-  text-decoration: none;
-}
-.board-job-title:hover {
-  text-decoration: underline;
-}
-.board-job-route {
-  margin: var(--primitive-space-1) 0;
-  font-size: var(--primitive-font-body);
-  color: var(--semantic-text-primary);
-}
-.board-job-cargo {
-  font-family: ui-monospace, monospace;
-  font-weight: var(--primitive-font-strong);
-}
-.board-job-meta {
-  margin: 0;
-  font-size: var(--primitive-font-label);
-  color: var(--semantic-text-secondary);
-}
-.board-next-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--primitive-space-2);
-}
-.board-next-item {
-  display: flex;
-  flex-direction: column;
-  gap: var(--primitive-space-1);
-  padding: var(--primitive-space-2) 0;
-  border-top: var(--primitive-border-thin) solid var(--semantic-border-divider);
-}
-.board-next-item:first-child {
-  padding-top: 0;
-  border-top: 0;
-}
-.board-next-item:last-child {
-  padding-bottom: 0;
-}
-.board-next-main {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--primitive-space-2);
-}
-.board-next-title {
-  font-weight: var(--primitive-font-strong);
-  text-decoration: none;
-}
-.board-next-title:hover {
-  text-decoration: underline;
-}
-.board-next-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--primitive-space-1) var(--primitive-space-3);
-  font-size: var(--primitive-font-caption);
-  color: var(--semantic-text-secondary);
-}
-
-/* 5. 야드 : ROSY 탑뷰 (1:1) */
+/* 4. 야드 : ROSY 탑뷰 (3:2) */
 .yard-topview.board-even,
 .board-even .yard-topview {
   display: grid;
@@ -204,6 +125,81 @@
 .yard-topview.board-even > *,
 .board-even .yard-topview > * {
   min-width: 0;
+}
+
+/* 5. 작업 순서: 지금과 다음 다섯 일을 세로로 탐색 */
+.board-jobs {
+  min-width: 0;
+}
+.board-jobs-more {
+  text-align: right;
+}
+.board-job-list {
+  display: grid;
+  gap: var(--primitive-space-2);
+  list-style: none;
+  margin: 0;
+  padding: var(--primitive-space-1);
+}
+.board-job-list > li {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--primitive-space-1) var(--primitive-space-2);
+  padding: var(--primitive-space-3);
+  border: var(--primitive-border-thin) solid var(--semantic-border-divider);
+  border-radius: var(--primitive-radius-control);
+  overflow-wrap: anywhere;
+}
+.board-job-list > .board-current {
+  border: var(--primitive-border-focus) solid var(--semantic-border-selected);
+  background: var(--semantic-surface-selected);
+}
+.board-job-label {
+  font-size: var(--primitive-font-label);
+  font-weight: var(--primitive-font-strong);
+  color: var(--semantic-text-secondary);
+}
+.board-job-title {
+  font-size: var(--primitive-font-body);
+  font-weight: var(--primitive-font-bold);
+  line-height: var(--primitive-font-heading-line);
+  text-decoration: none;
+}
+.board-job-title:hover,
+.board-next-title:hover {
+  text-decoration: underline;
+}
+.board-job-route {
+  margin: 0;
+  flex-basis: 100%;
+  font-size: var(--primitive-font-caption);
+  color: var(--semantic-text-secondary);
+}
+.board-job-cargo {
+  font-family: ui-monospace, monospace;
+  font-weight: var(--primitive-font-strong);
+}
+.board-job-meta {
+  margin: 0;
+  font-size: var(--primitive-font-label);
+  color: var(--semantic-text-secondary);
+}
+.board-job-head,
+.board-next-title {
+  flex: 1;
+  min-width: 0;
+}
+.board-job-list .board-pill {
+  margin-left: auto;
+}
+.board-next-item .board-job-label {
+  font-size: var(--primitive-font-caption);
+}
+.board-next-title {
+  font-weight: var(--primitive-font-strong);
+  text-decoration: none;
 }
 
 /* 미니 평면 이동 강조 및 갈 자리 옅은 화물 번호 */
@@ -233,13 +229,24 @@
   border-radius: var(--primitive-radius-panel);
 }
 
+/* Yard and ROSY top view share the width half and half; the job order is a narrow column beside them. */
 @media (min-width: 1100px) {
-  .board-row {
-    grid-template-columns: 1fr 1fr;
-  }
   .yard-topview.board-even,
   .board-even .yard-topview {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "yard topview" "jobs jobs";
+    grid-template-rows: auto;
+  }
+  .board-even .yard-panel { grid-area: yard; }
+  .board-even .board-jobs { grid-area: jobs; }
+  .board-even .topview-panel { grid-area: topview; }
+}
+
+@media (min-width: 1280px) {
+  .yard-topview.board-even,
+  .board-even .yard-topview {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(15rem, 18rem);
+    grid-template-areas: "yard topview jobs";
   }
 }
 
@@ -251,3 +258,23 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+@media (min-width: 1280px) {
+  .board-even .board-jobs .board-next-title,
+  .board-even .board-jobs .board-job-title { white-space: nowrap; }
+  .board-even .board-jobs .board-job-label { white-space: nowrap; }
+}
+
+/* Board mini yard keeps the real cell map even in a half-width panel: storage yard in the centre,
+   temp A left, temp B right, outbound stand under the yard. The site map's narrow-container rule would stack them. */
+.board-even .yard-panel .site-map { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); gap: var(--primitive-space-2); }
+.board-even .yard-panel .site-left { grid-column: 1; grid-row: 1; }
+.board-even .yard-panel .site-center { grid-column: 2; grid-row: 1; }
+.board-even .yard-panel .site-right { grid-column: 3; grid-row: 1; }
+.board-even .yard-panel .yard-legend-rows { grid-column: 1 / -1; }
+.board-even .yard-panel .site-yard .slot-card,
+.board-even .yard-panel .site-tray .slot-card { min-height: 0; }
+.board-even .yard-panel .slot-card { font-size: var(--primitive-font-caption); }
+.board-even .yard-panel .site-side .tray-slots { grid-template-columns: minmax(0, 1fr); }
+.board-even .yard-panel .site-side .slot-card { flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--primitive-space-1); }
+.board-even .yard-panel .slot-empty { position: static; display: inline; color: var(--semantic-text-secondary); }

@@ -171,7 +171,9 @@ class HumanEvidenceTests(TestCase):
         self.client.force_login(self.operator)
         home = self.client.get('/')
         self.assertEqual(home.context['operations']['actual']['human_attested'], 1)
-        self.assertContains(home, '사람 확인 근거 1건')
+        from django.template.loader import render_to_string
+        summary = render_to_string('operations_summary.html', dict(operations=home.context['operations']))
+        self.assertIn('사람 확인 근거 1건', summary)
         timeline = self.client.get(f'/requests/{command.order_id}/timeline/')
         self.assertContains(timeline, '사람 확인')
         self.assertContains(timeline, '측정값 아님')

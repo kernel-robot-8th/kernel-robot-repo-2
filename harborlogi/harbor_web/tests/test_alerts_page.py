@@ -61,14 +61,14 @@ class AlertsPageTests(TestCase):
         response = self.open()
         self.assertContains(response, '야드 현황이 없습니다')
         self.assertContains(response, 'href="/inventory/"')
-        self.assertNotContains(response, '처리할 것 없음 · 자동 운전 중')
+        self.assertNotContains(response, '처리할 것 없음')
         self.assertEqual(response.context['alert_total'], 1)
 
     def test_empty_with_fresh_yard(self):
         self.cargo()
         self.observation()
         response = self.open()
-        self.assertContains(response, '처리할 것 없음 · 자동 운전 중')
+        self.assertContains(response, '처리할 것 없음')
         self.assertEqual(response.context['alerts'], [])
         self.assertEqual(response.context['alert_total'], 0)
 
@@ -94,7 +94,13 @@ class AlertsPageTests(TestCase):
         services.make_plan(self.operator, order_id=second.pk, expected_version=1,
                           observation_id=plan.observation_id, now=self.now + timedelta(minutes=2))
         response = self.open()
-        self.assertContains(response, '계획이 막힘')
+        self.assertContains(response, '이 일은 지금 못 합니다')
+        blocked = next(row for row in response.context['alerts'] if row['title'] == '이 일은 지금 못 합니다')
+        from harbor_web.presentation import reason_text
+        latest = Plan.objects.filter(order=second).latest('pk')
+        self.assertEqual(blocked['detail'], reason_text(latest.result['reason']))
+        self.assertEqual(blocked['action'], '이유 보기')
+        self.assertEqual(blocked['href'], f'/plans/{latest.pk}/')
         self.assertContains(response, '처리할 것 2건')
         self.assertEqual(response.context['alert_total'], 2)
         self.assertEqual(response.context['alert_total'], sum(row['count'] for row in response.context['alerts']))
@@ -109,9 +115,13 @@ class AlertsPageTests(TestCase):
         response = self.open(query=f'?observation={old.pk}')
         self.assertEqual(response.context['alert_total'], 2)
         self.assertContains(response, '야드 현황을 새로 받아야 합니다')
-        self.assertContains(response, '더 최근 야드 현황이 있습니다')
+        self.assertContains(response, '새 야드 현황 있음')
         for row in response.context['alerts']:
-            self.assertEqual(row['href'], f'/?observation={old.pk}#observation-select')
+            if row['title'] == '새 야드 현황 있음':
+                self.assertEqual(row['action'], '최신으로 보기')
+                self.assertEqual(row['href'], '/')
+            else:
+                self.assertEqual(row['href'], f'/?observation={old.pk}#observation-select')
         self.assertEqual(self.open(query='?observation=invalid').status_code, 404)
 
     def test_open_episodes_only_and_field_assignment_scope(self):
@@ -142,10 +152,14 @@ class AlertsPageTests(TestCase):
         plan = self.job()
         Order.objects.filter(pk=plan.order_id).update(version=2)
         response = self.open()
-        self.assertContains(response, '계획 재검토 필요')
+        self.assertContains(response, '계획 다시 짜야 함')
         self.assertEqual(response.context['alert_total'], 1)
         self.assertEqual(response.context['alerts'][0]['href'],
-                         f'/?observation={plan.observation_id}#proposal-title')
+                         f'/requests/{plan.order_id}/#planning')
+        self.assertContains(self.client.get(f'/requests/{plan.order_id}/'), 'id="planning"')
+        board = self.client.get('/')
+        self.assertContains(board, '계획 다시 짜야 함', count=1)
+        self.assertContains(board, '계획을 짠 뒤 순서나 야드가 바뀌었습니다.', count=1)
 
     def test_visible_copy_uses_operational_terms(self):
         self.job('BLOCKED')
@@ -155,7 +169,7 @@ class AlertsPageTests(TestCase):
         visible = re.sub(r'<[^>]+>', '', content)
         self.assertNotRegex(visible, r'관측|원본|인계|대조|회차|#\d+|READY|HOLD|BLOCKED')
         self.assertNotIn('<form', content)
-        self.assertContains(response, '상태는 ROSY 실행 결과로 바뀜')
+        self.assertNotContains(response, '상태는 ROSY 실행 결과로 바뀜')
 
     def test_page_is_read_only_for_every_role(self):
         command = self.job('UNKNOWN')

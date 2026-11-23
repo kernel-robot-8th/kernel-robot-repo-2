@@ -39,8 +39,8 @@ def overview(request):
     current_queue_digest = services.queue_digest()
     for order in requests:
         plan = plans.get(order.pk)
-        action = '계획 확인' if plan else ('입고 인계 조건 확인' if order.kind == 'INBOUND' else '관측 선택·계획 검토')
-        row = dict(order=order, plan=plan, action=action, reason=reason_text(plan.result['reason']) if plan else ('입고 실행 인계 조건을 확인하세요.' if order.kind == 'INBOUND' else '관측 원본과 반출 순서를 검토하세요.'), status=plan.result['status'] if plan else '', status_label=plan.result['status'] if plan else '계획 전', href=f'/requests/{order.pk}/')
+        action = '계획 확인' if plan else ('입고 인계 조건 확인' if order.kind == 'INBOUND' else '계획 짜기')
+        row = dict(order=order, plan=plan, action=action, reason=reason_text(plan.result['reason']) if plan else ('입고 실행 인계 조건을 확인하세요.' if order.kind == 'INBOUND' else ''), status=plan.result['status'] if plan else '', status_label=plan.result['status'] if plan else '계획 없음', href=f'/requests/{order.pk}/')
         if order.kind == 'INBOUND':
             from harbor_web.field_pages import episode_status
             episode = inbound_episodes.get(order.pk)
@@ -51,8 +51,8 @@ def overview(request):
                 if not has_role(request.user, 'operator', 'admin'):
                     row.update(action='입고 진행 확인', href=f'/requests/{order.pk}/')
             else:
-                row.update(action='현장 확인 배정', reason='차량과 담당자를 지정해 입고 확인 회차를 배정하세요.',
-                           status_label='배정 전', href=f'/requests/{order.pk}/')
+                row.update(action='담당 배정', reason='차량과 담당자를 지정해 입고 확인 회차를 배정하세요.',
+                           status_label='현장 확인 담당 없음', href=f'/field/new/?order={order.pk}')
             if plan and plan.result.get('plan_kind') == 'inbound-placement':
                 row['field_status'] = row['status_label']
                 row.update(action='입고 추천·변경 근거 확인', reason=reason_text(plan.result['reason']),
@@ -65,14 +65,14 @@ def overview(request):
                                action='결정 내용 보기' if decided else '추천 위치 결정')
         changes = plan_changes(order, plan, current_queue_digest=current_queue_digest)
         if changes:
-            row.update(status='HOLD', status_label='계획 재검토', reason=changes[0]['message'], action='최신 기준으로 검토', href=f'/requests/{order.pk}/')
+            row.update(status='HOLD', status_label='계획 다시 짜야 함', reason='계획을 짠 뒤 순서나 야드가 바뀌었습니다.', action='계획 다시 짜기', href=f'/requests/{order.pk}/#planning')
         command = executions.get(order.pk)
         if command:
             row.update(status=command.state, status_label={'UNKNOWN': '결과 불명', 'DISPATCHING': '제출 대조 필요', 'CANCEL_PENDING': '취소 대조 필요', 'BLOCKED': '인계 보류', 'PREPARED': '제안 검토 대기', 'RECONCILED': '원본 대조됨', 'COMPLETED': '업무 완료', 'CANCELLED': '취소됨'}.get(command.state, command.state), action='원래 작업 대조', href=f'/work/{command.pk}/')
             if command.state == 'COMPLETED':
                 row.update(action='완료 기록 보기', href=f'/requests/{order.pk}/timeline/', finished=True)
             elif command.state == 'CANCELLED':
-                row.update(action='최신 기준으로 검토', href=f'/requests/{order.pk}/')
+                row.update(action='계획 다시 짜기', href=f'/requests/{order.pk}/#planning')
             row['reason'] = {
                 'UNKNOWN': '제출 결과가 불명입니다. 새 계획으로 재제출하지 말고 원래 요청을 대조하세요.',
                 'DISPATCHING': '제출 중이거나 응답을 확인하지 못했습니다. 원래 요청을 대조하세요.',
@@ -81,14 +81,15 @@ def overview(request):
                 'PREPARED': '실행 인계 요청이 준비되었습니다. 원래 계획으로 현재 단계 제안을 검토하세요.',
                 'RECONCILED': '실행 원본을 대조했습니다. 실제 수행과 전체 업무 완료 근거를 확인하세요.',
                 'COMPLETED': '업무 장부가 내려놓기·퇴피 근거를 대조해 완료했습니다. 남은 조치는 없습니다.',
-                'CANCELLED': '실행 인계가 취소되었습니다. 필요하면 최신 기준으로 다시 검토하세요.',
+                'CANCELLED': '실행 인계가 취소되었습니다. 필요하면 계획을 다시 짜세요.',
             }.get(command.state, '원래 작업의 상태와 근거를 확인하세요.')
         rows.append(row)
     rows.sort(key=lambda row: row.get('finished', False))  # finished work never outranks open work
     if observation:
         for row in rows:
             if row['href'].startswith(('/requests/', '/plans/')):
-                row['href'] += f'?observation={observation.pk}'
+                path, marker, anchor = row['href'].partition('#')
+                row['href'] = f'{path}?observation={observation.pk}' + (f'#{anchor}' if marker else '')
     from harbor_web.board import board_context
     from harbor_web.operations import operations_context
     operations = operations_context(observation)
@@ -196,10 +197,10 @@ def outbound_queue(request):
     for order in orders:
         command, plan = executions.get(order.pk), plans.get(order.pk)
         changes = plan_changes(order, plan, current_queue_digest=current_queue_digest)
-        label = COMMAND_LABELS.get(command.state, command.state) if command else '계획 재검토' if changes else '계획 보류' if plan and plan.result['status'] == 'HOLD' else '계획 검토됨' if plan else '계획 전'
+        label = COMMAND_LABELS.get(command.state, command.state) if command else '계획 다시 짜야 함' if changes else '계획 보류' if plan and plan.result['status'] == 'HOLD' else '계획 검토됨' if plan else '계획 없음'
         rows.append(dict(order=order, plan=plan, command=command, status_label=label,
             status=command.state if command else 'HOLD' if changes else plan.result['status'] if plan else '',
-            reason='원래 실행의 상태와 업무 근거를 대조하세요.' if command else changes[0]['message'] if changes else reason_text(plan.result['reason']) if plan else '야드 현황을 골라 재취급·반출·복귀를 검토하세요.'))
+            reason='원래 실행의 상태와 업무 근거를 대조하세요.' if command else '계획을 짠 뒤 순서나 야드가 바뀌었습니다.' if changes else reason_text(plan.result['reason']) if plan else '야드 현황을 골라 재취급·반출·복귀를 검토하세요.'))
     lanes = services.outbound_lanes() if not q else []
     if lanes:
         from harbor_web.tier_simulation import tier_recommendations

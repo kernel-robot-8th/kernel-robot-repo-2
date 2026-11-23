@@ -30,7 +30,7 @@ class InboundAlternativeTests(TestCase):
         order, observation, plan = self.enabled()
         self.client.force_login(self.operator)
         page = self.client.get(f'/plans/{plan.pk}/')
-        self.assertContains(page, '<summary>자리 바꾸기(예외)</summary>', html=True)
+        self.assertContains(page, '<summary>자리 바꾸기</summary>', html=True)
         rank = len(plan.result['alternatives'])
         chosen = plan.result['alternatives'][rank - 1]['placement']
         original = plan.result
@@ -45,7 +45,7 @@ class InboundAlternativeTests(TestCase):
         self.assertEqual(self.post_decision(plan, alternative_rank=0).status_code, 409)
         self.assertEqual(Audit.objects.filter(action=DECIDE_ACTION).count(), 1)
         page = self.client.get(f'/plans/{plan.pk}/')
-        self.assertNotContains(page, '자리 바꾸기(예외)')
+        self.assertNotContains(page, '자리 바꾸기')
         self.assertContains(page, page.context['decision_place'])
         self.assertNotEqual(page.context['decision_place'], page.context['recommendation_place'])
         frames = page.context['yard_scene']['frames']
@@ -91,7 +91,7 @@ class InboundAlternativeTests(TestCase):
         for user in (self.admin, viewer):
             with self.subTest(user=user.username):
                 self.client.force_login(user)
-                self.assertNotContains(self.client.get(f'/plans/{plan.pk}/'), '자리 바꾸기(예외)')
+                self.assertNotContains(self.client.get(f'/plans/{plan.pk}/'), '자리 바꾸기')
                 self.assertEqual(self.post_decision(plan, alternative_rank=1).status_code, 403)
                 with self.assertRaises(PermissionDenied):
                     decide_placement(user, plan_id=plan.pk, expected_version=1, alternative_rank=1)
@@ -105,7 +105,7 @@ class InboundAlternativeTests(TestCase):
             with self.assertRaises(services.Conflict):
                 decide_placement(self.operator, plan_id=plan.pk, expected_version=1, alternative_rank=1)
             self.client.force_login(self.operator)
-            self.assertNotContains(self.client.get(f'/plans/{plan.pk}/'), '자리 바꾸기(예외)')
+            self.assertNotContains(self.client.get(f'/plans/{plan.pk}/'), '자리 바꾸기')
         services.make_plan(self.operator, order_id=order.pk, observation_id=observation.pk, expected_version=1)
         with self.assertRaises(services.Conflict):
             decide_placement(self.operator, plan_id=plan.pk, expected_version=1, alternative_rank=1)
@@ -139,7 +139,7 @@ class InboundAlternativeTests(TestCase):
             plan = Plan.objects.create(order=order, order_version=order.version, observation=observation,
                 condition=original.condition, queue_digest=original.queue_digest, created_by=self.operator,
                 result={**original.result, 'status': status, 'alternatives': []})
-            self.assertNotContains(self.client.get(f'/plans/{plan.pk}/'), '자리 바꾸기(예외)')
+            self.assertNotContains(self.client.get(f'/plans/{plan.pk}/'), '자리 바꾸기')
             with self.assertRaises(ValidationError):
                 decide_placement(self.operator, plan_id=plan.pk, expected_version=1, alternative_rank=1)
         self.assertFalse(Audit.objects.filter(action=DECIDE_ACTION).exists())

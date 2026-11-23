@@ -222,8 +222,8 @@ def status_strip(request):
     return dict(
         status_strip=dict(
             alert_count=alert_count,
-            drive_label=f'처리할 것 {alert_count}건' if alert_count else '자동 운전 중',
-            drive_tone='critical' if alert_count else 'good',
+            drive_label=f'처리할 것 {alert_count}건' if alert_count else ('자동 운전 중' if exec_status['enabled'] else exec_status['label']),
+            drive_tone='critical' if alert_count else exec_status['tone'],
             day_progress=progress,
             current_job=current_job,
             yard_updated=yard_updated,
@@ -233,6 +233,5 @@ def status_strip(request):
             executor_label=exec_status['label'],
             executor_tone=exec_status['tone'],
             estop_note='ROSY Fleet에서 정지 · 연동 전',
-            state_note='상태는 ROSY 실행 결과로 바뀜',
         )
     )

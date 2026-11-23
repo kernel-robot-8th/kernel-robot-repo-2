@@ -7,5 +7,5 @@
     {% for area in yard.below %}{% include 'site_area.html' %}{% endfor %}
   </div>
   {% if yard.right %}<div class="site-side site-right">{% for area in yard.right %}{% include 'site_area.html' %}{% endfor %}</div>{% endif %}
-  <ul class="yard-legend-rows" aria-label="야드 평면 범례"><li><i class="sw role-target" aria-hidden="true"></i>반출 대상</li><li><i class="sw role-rehandle" aria-hidden="true"></i>재취급 예정</li><li><i class="sw role-cargo" aria-hidden="true"></i>화물</li><li>자리마다 층별 컨테이너 번호 · 계획 기준 · 실적 아님</li></ul>
+  <ul class="yard-legend-rows" aria-label="야드 평면 범례"><li><i class="sw role-target" aria-hidden="true"></i>반출 대상</li><li><i class="sw role-rehandle" aria-hidden="true"></i>재취급 예정</li><li><i class="sw role-cargo" aria-hidden="true"></i>화물</li></ul>
 </div></div>{% endif %}

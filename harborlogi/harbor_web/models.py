@@ -60,8 +60,7 @@ class Observation(Immutable):
         """Short choice label; the raw source revision stays on the source and evidence lines."""
         from django.utils import timezone
         observed = timezone.localtime(self.observed_at) if timezone.is_aware(self.observed_at) else self.observed_at
-        kind = {'SYNTHETIC': '합성 자료', 'DECLARED': '수동 등록', 'PORT_EVENT': 'ROSY 입고 반영'}.get(self.provenance, self.provenance)
-        return f'#{self.pk} · {self.source_id} · {observed:%m-%d %H:%M} 기준 · {kind}'
+        return f'{observed:%m-%d %H:%M} 야드 현황'
 
 
 class Order(Authored):

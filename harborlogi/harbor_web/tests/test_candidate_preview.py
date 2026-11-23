@@ -111,7 +111,7 @@ class CandidatePreviewTests(TestCase):
         plan.order.version += 1
         plan.order.save(update_fields=['version'])
         response = self.client.get(url)
-        self.assertContains(response, '업무 지시가 변경되었습니다')
+        self.assertContains(response, '이 계획을 짠 뒤 요청 내용이나 반출 순서가 바뀌었습니다')
         self.assertEqual(response.context['plan'].order_version, plan.order_version)
         outsider = get_user_model().objects.create_user('candidate-field')
         outsider.groups.add(Group.objects.get_or_create(name='field')[0])

@@ -24,6 +24,7 @@
 
 {% if preview %}
 <section aria-label="셀 맵 미리보기 결과">
+<details><summary>계산 상세</summary>
 <h2>미리보기 요약</h2>
 <dl class="facts">
 <div><dt>불러온 경로</dt><dd>{% if preview.source == 'fleet' %}ROSY Fleet API{% else %}정본 JSON 파일{% endif %} ({{ preview.input_format }})</dd></div>
@@ -40,6 +41,7 @@
 
 <details class="fold"><summary>{{ preview.site_count }}개 자리 주소 목록 보기</summary><p class="covered-addresses">{% for ref in preview.wire_refs %}<code>{{ ref }}</code>{% if not forloop.last %} · {% endif %}{% endfor %}</p></details>
 
+</details>
 <form class="form-panel" method="post" action="/settings/maps/import/save/">{% csrf_token %}<input type="hidden" name="import_token" value="{{ import_token }}">
 <h2>설치 기준으로 등록</h2>
 <p>미리본 구성을 새 불변 설치 기준으로 저장합니다. 저장 시에는 Fleet을 다시 조회하지 않습니다.</p>

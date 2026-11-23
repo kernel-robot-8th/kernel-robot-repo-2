@@ -183,10 +183,12 @@ class WorkspaceTests(TestCase):
         plan = self.buried_plan()
         self.order(cargo=self.cargo('C3'), priority_group=9)
         self.client.force_login(self.operator)
-        self.assertContains(self.client.get('/outbound/?q=C1'), '계획 재검토')
-        self.assertContains(self.client.get('/'), '계획 재검토')
+        self.assertContains(self.client.get('/outbound/?q=C1'), '계획 다시 짜야 함')
+        self.assertContains(self.client.get('/'), '계획 다시 짜야 함')
         # A fresh queue digest still cannot make an older source current.
         fresh = services.make_plan(self.operator, order_id=plan.order_id, expected_version=1, observation_id=plan.observation_id)
         services.record_observation(self.admin, source_id=fresh.observation.source_id, source_revision='source-10',
             observed_at=timezone.now(), provenance='DECLARED', payload=fresh.observation.payload, condition=fresh.condition)
-        self.assertContains(self.client.get('/outbound/?q=C1'), '같은 출처에 새 관측')
+        self.assertContains(self.client.get('/outbound/?q=C1'), '계획을 짠 뒤 순서나 야드가 바뀌었습니다.')
+        self.assertContains(self.client.get(f'/requests/{plan.order_id}/'),
+                            '야드 현황이 새로 들어왔습니다. 아래 그림은 이전 현황 기준입니다.')

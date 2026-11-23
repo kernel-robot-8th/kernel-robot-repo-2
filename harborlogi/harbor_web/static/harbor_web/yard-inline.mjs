@@ -75,12 +75,14 @@ export function renderArrows(container, arrows, {title = '', emptyText = '예상
 }
 
 export function applyYardView(preview, {flat, desktop, editing = false}) {
-  const paired = desktop && !preview.hasAttribute('data-yard-upcoming-preview');
+  const inline = preview.hasAttribute('data-yard-upcoming-preview');
+  const paired = desktop && !inline;
+  preview.classList.toggle('is-editing', inline && editing);
   const figure = preview.querySelector('[data-yard-3d]');
   figure.hidden = !paired && flat && !editing;
-  figure.classList.toggle('flat-edit', !paired && flat && editing);
+  figure.classList.toggle('flat-edit', !inline && !paired && flat && editing);
   const linked = preview.querySelector('[data-yard-linked-flat]');
-  if (linked) linked.hidden = !paired && !flat;
+  if (linked) linked.hidden = !paired && !flat && !(inline && editing);
   preview.querySelector('[data-yard-flat]').hidden = true;
   preview.querySelector('[data-yard-views]').querySelectorAll('[data-yard-view]').forEach(button =>
     button.setAttribute('aria-pressed', String((button.dataset.yardView === 'flat') === flat)));

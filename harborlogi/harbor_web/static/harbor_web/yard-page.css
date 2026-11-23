@@ -62,8 +62,10 @@
   order: 1;
 }
 
+/* The 3D/flat switch stays above the 3D figure (order -1) so it does not jump when 3D opens. */
 [data-yard-upcoming-preview] > [data-yard-views]:not([hidden]) {
   display: flex;
+  order: -2;
 }
 
 [data-yard-upcoming-preview] .model-layout {
@@ -245,4 +247,119 @@
   display: grid;
   gap: var(--primitive-space-4);
   margin-top: var(--primitive-space-3);
+}
+
+/* Keep the local editor beside a live canvas; normal inline viewing stays unchanged. */
+.yard-page-layout:has([data-yard-upcoming-preview].is-editing) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+[data-yard-upcoming-preview].is-editing {
+  --yard-editor-top: calc(var(--primitive-size-topbar) + var(--primitive-space-4));
+}
+
+[data-yard-upcoming-preview].is-editing [data-yard-3d]:not(:fullscreen) {
+  overflow: visible;
+}
+
+[data-yard-upcoming-preview].is-editing [data-yard-3d]:not(:fullscreen) .model-layout {
+  align-items: start;
+  scroll-margin-top: var(--yard-editor-top);
+}
+
+[data-yard-upcoming-preview].is-editing [data-yard-3d]:not(:fullscreen) .model-viewport {
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: var(--yard-editor-top);
+  z-index: 3;
+  height: 45vh;
+}
+
+[data-yard-upcoming-preview].is-editing [data-yard-3d]:not(:fullscreen) canvas {
+  flex: 1;
+  min-height: 0;
+  height: 0;
+}
+
+[data-yard-upcoming-preview].is-editing .yard-edit-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--primitive-space-3);
+  min-width: 0;
+  max-height: calc(100vh - var(--yard-editor-top) - 45vh - var(--primitive-space-4));
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+[data-yard-upcoming-preview].is-editing .yard-edit-sidebar > * {
+  flex: none;
+  order: 0;
+}
+
+[data-yard-upcoming-preview].is-editing .model-inspector {
+  display: block;
+}
+
+[data-yard-upcoming-preview].is-editing .linked-edit-bar {
+  top: 0;
+}
+
+@media (min-width: 1100px) {
+  [data-yard-upcoming-preview].is-editing .model-layout {
+    grid-template-columns: minmax(0, 3fr) minmax(20rem, 2fr);
+  }
+
+  [data-yard-upcoming-preview].is-editing [data-yard-3d]:not(:fullscreen) .model-viewport {
+    height: min(70vh, 40rem);
+  }
+
+  [data-yard-upcoming-preview].is-editing .yard-edit-sidebar {
+    max-height: calc(100vh - var(--yard-editor-top) - var(--primitive-space-4));
+  }
+}
+
+@media (max-width: 1100px) {
+  /* Camera controls overlay the short viewport so the canvas keeps its 45vh. */
+  [data-yard-upcoming-preview].is-editing [data-yard-3d] .model-tools,
+  [data-yard-upcoming-preview].is-editing [data-yard-3d] .scene-toolbar,
+  [data-yard-upcoming-preview].is-editing [data-yard-3d] .model-viewport > details {
+    position: absolute;
+    left: 0;
+    right: 0;
+  }
+
+  [data-yard-upcoming-preview].is-editing .model-tools {
+    top: 0;
+  }
+
+  [data-yard-upcoming-preview].is-editing .scene-toolbar {
+    bottom: var(--primitive-space-16);
+  }
+
+  [data-yard-upcoming-preview].is-editing .model-viewport > details {
+    bottom: 0;
+    margin: 0;
+    padding: var(--primitive-space-2);
+    background: var(--semantic-surface-canvas);
+  }
+}
+
+[data-yard-upcoming-preview].is-editing [data-yard-3d]:fullscreen .model-layout {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+[data-yard-upcoming-preview].is-editing [data-yard-3d]:fullscreen .yard-edit-sidebar {
+  min-height: 0;
+  max-height: 100%;
+}
+
+@media (max-width: 1100px) {
+  [data-yard-upcoming-preview].is-editing [data-yard-3d]:fullscreen .model-viewport {
+    position: relative;
+  }
+
+  [data-yard-upcoming-preview].is-editing [data-yard-3d]:fullscreen .yard-edit-sidebar {
+    max-height: 50%;
+  }
 }
