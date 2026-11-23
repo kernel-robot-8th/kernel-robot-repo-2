@@ -10,7 +10,7 @@ from datetime import datetime
 from itertools import permutations
 
 from harbor.model import OutboundRequest
-from harbor.spatial import SpatialPolicy, SpatialSnapshot, plan_spatial
+from harbor.spatial import SpatialMove, SpatialPolicy, SpatialSnapshot, plan_spatial
 
 EXACT_LIMIT = 4  # 4! = 24 complete simulations per tier
 
@@ -22,6 +22,9 @@ class RetrievalStep:
     reason: str
     move_count: int = 0
     rehandle_count: int = 0
+    moves: tuple[SpatialMove, ...] = field(default=(), compare=False, repr=False)
+    search_complete: bool | None = field(default=None, compare=False, repr=False)
+    budget_reason: str | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -47,10 +50,15 @@ def _after(snapshot, proposal, target):
 
 def _retrieve(snapshot, policy, code, *, now, ranks):
     proposal = plan_spatial(snapshot, OutboundRequest(code, snapshot.revision), policy, now=now, schedule=ranks)
+    opt = proposal.optimization
+    complete = None if opt is None else opt.search_complete
+    budget = None if opt is None else opt.budget_reason
     if proposal.status != 'READY':
-        return RetrievalStep(code, proposal.status, proposal.reason), None
+        return RetrievalStep(code, proposal.status, proposal.reason,
+                             search_complete=complete, budget_reason=budget), None
     rehandles = next(i for i, move in enumerate(proposal.moves) if move.cargo_id == code)
-    return RetrievalStep(code, 'READY', proposal.reason, len(proposal.moves), rehandles), _after(snapshot, proposal, code)
+    return RetrievalStep(code, 'READY', proposal.reason, len(proposal.moves), rehandles,
+                         moves=proposal.moves, search_complete=complete, budget_reason=budget), _after(snapshot, proposal, code)
 
 
 def _play(snapshot, policy, order, *, now, schedule, group, exhaustive):
