@@ -101,7 +101,7 @@ def intake_review(request, object_ref):
                 ledger_configured=False,
                 status_text='연동 전',
                 yard=None,
-                topview=topview_context(),
+                topview=topview_context(request),
                 cargo=Cargo.objects.filter(code=object_ref).first(),
                 can_operate=has_role(request.user, 'operator'),
                 is_fragment=is_fragment,
@@ -180,7 +180,7 @@ def intake_review(request, object_ref):
             cargo=Cargo.objects.filter(code=object_ref).first(),
             yard=yard_rows(observation),
             observation=observation,
-            topview=topview_context(),
+            topview=topview_context(request),
             is_fragment=is_fragment,
         ),
     )

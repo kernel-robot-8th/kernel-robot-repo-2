@@ -70,11 +70,11 @@ class TopviewProxyTests(TestCase):
         self.assertEqual(response.status_code, 502)
 
     def test_missing_settings(self):
-        for name in ('HARBOR_FLEET_ORIGIN', 'HARBOR_FLEET_TOKEN'):
+        for name, text in (('HARBOR_FLEET_ORIGIN', 'ROSY 연동 전'), ('HARBOR_FLEET_TOKEN', 'ROSY 로그인 필요')):
             with self.subTest(name=name), patch.dict(os.environ, {name: ''}):
                 response = self.client.get(self.url)
                 self.assertEqual(response.status_code, 503)
-                self.assertContains(response, 'ROSY 연동 전', status_code=503)
+                self.assertContains(response, text, status_code=503)
 
     def test_unknown_camera_is_rejected_before_leasing(self):
         response = self.client.get(reverse('topview_frame', args=['unknown']))
@@ -97,3 +97,59 @@ class TopviewProxyTests(TestCase):
                 self.assertEqual(response.status_code, status)
                 self.assertNotIn(b'test-lease-secret', response.content)
                 self.assertNotIn('test-lease-secret', str(dict(response.headers)))
+
+
+class TopviewUserTokenTests(TestCase):
+    """ADR 0037: a person signed in with Rosy reads the topview with their own Rosy access token."""
+
+    def setUp(self):
+        import time
+        self.user = User.objects.create_user('rosy-acc-1')
+        self.user.groups.add(Group.objects.get_or_create(name='viewer')[0])
+        self.client.force_login(self.user)
+        self.settings_override = self.settings(ROSY_ACCOUNT=dict(
+            issuer='https://hub.example', client_id='harbor', resource='site:test', callback='https://harbor.example/cb'))
+        self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
+        self.now = time.time()
+        self.env = patch.dict(os.environ, {'HARBOR_FLEET_ORIGIN': 'https://fleet.example', 'HARBOR_FLEET_TOKEN': '',
+                                           'HARBOR_FLEET_CA_FILE': ''})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        reader = patch('harbor_web.topview_proxy.RosyClient')
+        self.reader_class = reader.start()
+        self.addCleanup(reader.stop)
+        self.reader_class.return_value.workcell_observations.return_value = {
+            'workcells': [{'cameras': [{'source_id': 'test-cam'}]}]}
+        vision = patch('harbor_web.topview_proxy.VisionClient')
+        self.vision_class = vision.start()
+        self.addCleanup(vision.stop)
+        camera = self.vision_class.return_value
+        camera.lease.return_value = {'source_id': 'test-cam', 'lease': 'l', 'frame_path': '/api/vision/sources/test-cam/frame'}
+        camera.fetch_frame.return_value = (b'jpeg-user', {})
+        self.url = reverse('topview_frame', args=['test-cam'])
+
+    def sign_in(self, exp):
+        session = self.client.session
+        session['rosy_account'] = {'access': 'user-access-jwt', 'refresh': 'r', 'exp': exp, 'sub': 'acc-1',
+                                   'checked': self.now}
+        session.save()
+
+    def test_the_signed_in_persons_token_reads_the_frame(self):
+        self.sign_in(self.now + 300)
+        response = self.client.get(self.url)
+        self.assertEqual((response.status_code, response.content), (200, b'jpeg-user'))
+        self.assertEqual(self.vision_class.call_args.args[1], 'user-access-jwt')
+        self.assertEqual(self.reader_class.call_args.args[1], 'user-access-jwt')
+        self.assertNotIn('user-access-jwt', str(dict(response.headers)))
+
+    def test_an_expired_token_or_no_rosy_session_asks_to_sign_in(self):
+        self.sign_in(self.now - 1)
+        response = self.client.get(self.url)
+        self.assertEqual((response.status_code, response.content.decode()), (503, 'ROSY 로그인 필요'))
+        self.vision_class.assert_not_called()
+
+    def test_local_accounts_keep_the_service_token(self):
+        with patch.dict(os.environ, {'HARBOR_FLEET_TOKEN': 'service-token'}):
+            self.assertEqual(self.client.get(self.url).status_code, 200)
+        self.assertEqual(self.vision_class.call_args.args[1], 'service-token')

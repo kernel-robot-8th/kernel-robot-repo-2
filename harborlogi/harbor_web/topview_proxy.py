@@ -6,9 +6,13 @@
 source_id는 GET /api/fleet/workcell-observations의 cameras[].source_id에서
 고른다 — 새 env 변수를 만들지 않는다.
 
+자격(ADR 0037): 로그인한 사람의 Rosy 접근 토큰. Fleet은 같은 site resource의 계정 토큰을
+Bearer로 받는다(rosy-platform site_auth.authorize → account_receiver). 로컬 계정이면
+HARBOR_FLEET_TOKEN(서비스 신원)을 쓴다.
+
 확인 못 함:
   - R이 CELL-A 카메라를 vision sources에 내놓는지
-  - Harbor 서비스 계정이 require_camera_viewer를 통과하는지
+  - 운영 R에서 Harbor client의 resource가 Fleet과 같은 site:<id>인지
   - 그림을 Fleet가 아닌 다른 호스트가 주는지
 """
 import os
@@ -22,12 +26,14 @@ from harbor.rosy_vision import FRAME_HEADERS, StaleFrameError, VisionClient
 from harbor_web.access import EVERYONE
 
 from harbor_web.auth import require_roles
+from harbor_web.rosy_account import access_token
 
 
-def _fleet_settings():
-    """기존 HARBOR_FLEET_ORIGIN, HARBOR_FLEET_TOKEN, HARBOR_FLEET_CA_FILE을 읽는다."""
+def _fleet_settings(request):
+    """HARBOR_FLEET_ORIGIN·HARBOR_FLEET_CA_FILE과 자격. 자격은 로그인한 사람의 Rosy 접근 토큰(ADR 0037),
+    없으면(로컬 계정) 기존 HARBOR_FLEET_TOKEN. 어느 쪽도 브라우저에 내보내지 않는다."""
     origin = os.environ.get("HARBOR_FLEET_ORIGIN", "").rstrip("/")
-    token = os.environ.get("HARBOR_FLEET_TOKEN", "")
+    token = access_token(request) or os.environ.get("HARBOR_FLEET_TOKEN", "")
     ca_file = os.environ.get("HARBOR_FLEET_CA_FILE", "") or None
     return origin, token, ca_file
 
@@ -47,11 +53,13 @@ def _camera_sources(origin, token, ca_file, *, timeout):
         and not any(ord(char) < 32 or ord(char) == 127 for char in source)))
 
 
-def topview_context():
+def topview_context(request):
     """연결 실패는 탑뷰 칸 안에만 표시하고 야드 화면을 계속 연다."""
-    origin, token, ca_file = _fleet_settings()
-    if not origin or not token:
+    origin, token, ca_file = _fleet_settings(request)
+    if not origin:
         return dict(sources=[], status='ROSY 연동 전')
+    if not token:
+        return dict(sources=[], status='ROSY 로그인 필요')
     try:
         sources = _camera_sources(origin, token, ca_file, timeout=2)
         return dict(sources=[dict(source_id=source, url=reverse('topview_frame', args=[source]))
@@ -64,9 +72,10 @@ def topview_context():
 @require_http_methods(['GET'])
 def topview_frame(request, source_id):
     """source_id 카메라의 최신 탑뷰 JPEG 한 장을 프록시한다."""
-    origin, token, ca_file = _fleet_settings()
+    origin, token, ca_file = _fleet_settings(request)
     if not origin or not token:
-        return HttpResponse("ROSY 연동 전", status=503, content_type="text/plain; charset=utf-8")
+        return HttpResponse("ROSY 연동 전" if not origin else "ROSY 로그인 필요", status=503,
+                            content_type="text/plain; charset=utf-8")
 
     try:
         if source_id not in _camera_sources(origin, token, ca_file, timeout=10):
