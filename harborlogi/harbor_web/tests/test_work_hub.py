@@ -169,6 +169,13 @@ class WorkHubTests(TestCase):
         self.assertEqual(loaded_ids, {visible_plan.pk})
         self.assertEqual([row['order'].pk for row in context['timeline']], [visible_plan.order_id])
 
+    def test_automatic_inbound_without_plan_has_no_manual_calculate_link(self):
+        incoming = self.order('AUTO', kind='INBOUND')
+        type(incoming).objects.filter(pk=incoming.pk).update(auto_replan=True)
+        response = self.get_hub()
+        self.assertEqual(response.context['inbound'][0]['place_hint'], '자동 계산 대기')
+        self.assertNotContains(response, '자리 계산하기')
+
     def test_inbound_only_shows_latest_current_recommendation_with_next_action(self):
         incoming = self.order('IN', kind='INBOUND')
         response = self.get_hub()

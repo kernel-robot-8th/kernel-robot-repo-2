@@ -42,6 +42,8 @@ def hub_context(*, now=None):
         completed[order.pk].completed_at is not None and start <= completed[order.pk].completed_at <= now)]
     plans = {p.pk: p for p in Plan.objects.filter(
         pk__in=[o.latest_plan_id for o in orders if o.latest_plan_id]).select_related('condition')}
+    from harbor_web.executor import status as executor_status
+    auto_run = executor_status()['enabled']
     past, pending = [], []
     for order in orders:
         command = completed.get(order.pk) or commands.get(order.pk)
@@ -56,7 +58,9 @@ def hub_context(*, now=None):
             past.append(row)
         else:
             row['place'] = None
-            row['place_hint'] = '자리 결정 대기'
+            # Automatic mode computes placements itself; no manual "calculate" link there.
+            row['auto'] = auto_run or order.auto_replan
+            row['place_hint'] = '자동 계산 대기' if row['auto'] else '자리 결정 대기'
             if plan and plan.order_version != order.version:
                 row['place_hint'] = '요청 바뀜 · 다시 계산'
             elif plan and plan.result.get('status') == 'HOLD':

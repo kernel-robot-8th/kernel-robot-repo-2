@@ -226,16 +226,25 @@
   border-radius: var(--primitive-radius-panel);
 }
 
+/* Yard and ROSY top view share the width half and half; the job order is a narrow column beside them. */
 @media (min-width: 1100px) {
   .yard-topview.board-even,
   .board-even .yard-topview {
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-    grid-template-areas: "yard jobs" "yard topview";
-    grid-template-rows: auto 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "yard topview" "jobs jobs";
+    grid-template-rows: auto;
   }
   .board-even .yard-panel { grid-area: yard; }
   .board-even .board-jobs { grid-area: jobs; }
   .board-even .topview-panel { grid-area: topview; }
+}
+
+@media (min-width: 1280px) {
+  .yard-topview.board-even,
+  .board-even .yard-topview {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(15rem, 18rem);
+    grid-template-areas: "yard topview jobs";
+  }
 }
 
 @media (max-width: 700px) {
@@ -245,4 +254,10 @@
   .board-counts {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+@media (min-width: 1280px) {
+  .board-even .board-jobs .board-next-title,
+  .board-even .board-jobs .board-job-title { white-space: nowrap; }
+  .board-even .board-jobs .board-job-label { white-space: nowrap; }
 }

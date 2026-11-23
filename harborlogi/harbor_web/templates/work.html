@@ -32,7 +32,7 @@
   <div class="panel-h"><h2 id="work-inbound">입고 자리</h2></div>
   <div class="panel-b">
     {% if inbound %}<ul class="work-inbound">
-    {% for row in inbound %}<li class="work-{{ row.tone }}"><a href="{{ row.href }}">{{ row.order.cargo.code }} 입고</a> <span>{{ row.place|default:row.place_hint }}</span> <span class="work-inbound-actions"><span class="work-state">{{ row.state }}</span>{% if row.place %}<a href="/plans/{{ row.plan.pk }}/">자리 결정하기</a>{% else %}<a href="{{ row.href }}">자리 계산하기</a>{% endif %}</span></li>{% endfor %}
+    {% for row in inbound %}<li class="work-{{ row.tone }}"><a href="{{ row.href }}">{{ row.order.cargo.code }} 입고</a> <span>{{ row.place|default:row.place_hint }}</span> <span class="work-inbound-actions"><span class="work-state">{{ row.state }}</span>{% if row.place %}<a href="/plans/{{ row.plan.pk }}/">자리 결정하기</a>{% elif not row.auto %}<a href="{{ row.href }}">자리 계산하기</a>{% endif %}</span></li>{% endfor %}
     </ul>{% else %}<p>남은 입고 작업이 없습니다</p>{% endif %}
   </div>
 </section>
