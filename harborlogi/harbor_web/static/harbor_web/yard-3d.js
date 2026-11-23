@@ -180,6 +180,16 @@ export async function mountYardViewer(figure) {
     editButton.setAttribute('aria-pressed', String(value));
     editButton.textContent = value ? '원본 복원·편집 끝내기' : '가상 배치 편집';
     editor.hidden = !value; renderer.setEditable(value);
+    if (preview.hasAttribute('data-yard-upcoming-preview')) {
+      const sidebar = figure.querySelector('.yard-edit-sidebar');
+      if (value) {
+        sidebar.prepend(editTools);
+        sidebar.append(linked.grid);
+      } else {
+        figure.before(editTools);
+        preview.querySelector('[data-yard-flat]').after(linked.grid);
+      }
+    }
   }
   function toggleEdit(usePlan = false) {
     stop(); cancelAnimationFrame(raf); animation = null; canvas.dataset.moving = 'false';
@@ -201,6 +211,7 @@ export async function mountYardViewer(figure) {
     }
     error.textContent = ''; fillCargo(); select(selected);
     showFlat(flatView);
+    if (draft && inline) figure.querySelector('.model-layout').scrollIntoView({block: 'start'});
   }
   function advance(delay = 550) {
     if (!playing) return;
@@ -462,6 +473,10 @@ export async function mountYardViewer(figure) {
   function destroy() {
     if (destroyed) return;
     destroyed = true; stop(); cancelAnimationFrame(raf); events.abort();
+    if (preview.classList.contains('is-editing')) {
+      lockDraft(false);
+      preview.classList.remove('is-editing');
+    }
     controls.forEach(button => { button.disabled = false; }); renderer?.dispose();
   }
   playIdle();

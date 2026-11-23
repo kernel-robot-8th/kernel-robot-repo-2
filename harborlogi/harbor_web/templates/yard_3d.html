@@ -18,6 +18,7 @@
       <div class="scene-toolbar"><div class="scene-camera" role="group" aria-label="보기 각도"><button class="quiet" type="button" data-scene-camera="iso">입체</button><button class="quiet" type="button" data-scene-camera="front">정면</button><button class="quiet" type="button" data-scene-camera="top">위에서</button></div><div role="group" aria-label="확대"><button class="quiet" type="button" data-scene-zoom="-0.15" aria-label="축소">−</button><button class="quiet" type="button" data-scene-zoom="0.15" aria-label="확대">+</button></div></div>
       <details><summary>조작 방법</summary><p class="model-gestures" id="{{ scene_id }}-keys">드래그: 회전 · 오른쪽 또는 Shift 드래그: 화면 이동 · 휠: 확대 · 터치 두 손가락: 이동·확대 · 키보드: 방향키 이동, Shift 방향키 회전, 더하기·빼기 확대, Home 전체 맞춤 · 아래 목록에서도 화물을 선택할 수 있습니다.</p></details>
     </div>
+    <div class="yard-edit-sidebar">
     <aside class="model-inspector" aria-label="선택 화물 확인과 가상 편집">
       <label class="model-cargo">화물 살펴보기<select data-scene-cargo><option value="">화물 선택</option></select></label>
       <p class="model-info" data-scene-info role="status">선택한 박스의 크기와 위치를 확인합니다.</p>
@@ -29,6 +30,7 @@
         <details><summary>조작 방법</summary><p class="helptext">박스의 화살표 핸들로도 옮길 수 있습니다. {% if yard_scene.slot_cells %}입력은 자리 이름과 다른 셀 좌표입니다. 화면 가로(X)는 셀 행, 세로(Z)는 셀 열, 높이(Y)는 층입니다.{% else %}열(X)·층(Y)·행(Z) 방향입니다.{% endif %}</p></details>
       </fieldset></form><p class="model-error" data-scene-error role="alert"></p>
     </aside>
+    </div>
   </div>
   <footer class="model-footer"><p class="scene-motion" data-scene-motion role="status">{% if section == 'inventory' %}현재 야드 배치{% else %}원본 관측 배치{% endif %}</p><details><summary>조작 방법</summary><p class="helptext">모델과 이동은 계획 이해용입니다. 가상 배치의 논리 지지 검사는 물리 안정성·실제 로봇 경로를 검증하지 않습니다.</p></details></footer>
 </section><p class="notice" data-yard-3d-fallback hidden>이 환경에서는 3D 모델을 표시할 수 없습니다. {% if section == 'inventory' %}같은 배치의 평면도로 확인하세요.{% else %}같은 원본의 평면도로 확인하세요.{% endif %}</p>

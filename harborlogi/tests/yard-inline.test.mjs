@@ -223,7 +223,13 @@ for (const desktop of [true, false]) {
   assert.equal(viewButtons[0].getAttribute('aria-pressed'), 'true');
   applyYardView(preview, {flat: true, desktop, editing: true});
   assert.equal(figure.hidden, false, 'Keep virtual editing available in flat view');
-  assert.equal(figure.classList.contains('flat-edit'), true);
+  assert.equal(figure.classList.contains('flat-edit'), false, 'Inline editing keeps the canvas visible');
+  assert.equal(preview.classList.contains('is-editing'), true);
+  assert.equal(linkedFlat.hidden, false);
+  applyYardView(preview, {flat: false, desktop, editing: true});
+  assert.equal(linkedFlat.hidden, false, 'The editing sidebar keeps the flat yard beside 3D');
+  applyYardView(preview, {flat: false, desktop});
+  assert.equal(preview.classList.contains('is-editing'), false);
   assert.equal(figure.classList.contains('model-workbench'), true);
   assert.deepEqual(preview.childNodes, originalChildren, 'View changes keep 3D in the preview beside upcoming plans');
 }
@@ -234,5 +240,9 @@ applyYardView(preview, {flat: false, desktop: true});
 assert.equal(figure.hidden, false);
 assert.equal(linkedFlat.hidden, false);
 assert.equal(figure.classList.contains('flat-edit'), false);
+
+applyYardView(preview, {flat: true, desktop: false, editing: true});
+assert.equal(figure.classList.contains('flat-edit'), true, 'Other workbenches retain flat editing');
+assert.equal(preview.classList.contains('is-editing'), false);
 
 console.log('Yard inline 3D scene switching, arrow updates and toggle-restore passed');

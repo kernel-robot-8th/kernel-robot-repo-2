@@ -101,6 +101,8 @@ class SituationBoardTests(TestCase):
             main_html.index('class="board-counts"'),
             main_html.index('class="board-section board-even"'),
             main_html.index('class="panel board-jobs"'),
+            main_html.index('class="panel yard-panel"'),
+            main_html.index('class="panel topview-panel"'),
         ]
         self.assertEqual(positions, sorted(positions))
 
@@ -131,6 +133,8 @@ class SituationBoardTests(TestCase):
             main_html.index('class="panel board-alerts"'),
             main_html.index('class="board-section board-even"'),
             main_html.index('class="panel board-jobs"'),
+            main_html.index('class="panel yard-panel"'),
+            main_html.index('class="panel topview-panel"'),
         ]
         self.assertEqual(positions, sorted(positions))
 
@@ -221,7 +225,8 @@ class SituationBoardTests(TestCase):
         html = render_to_string('overview.html', {'board': board})
         sequence = html.split('aria-labelledby="h-board-jobs"', 1)[1].split('</section>', 1)[0]
         self.assertIn('<h2 id="h-board-jobs">작업 순서</h2>', sequence)
-        self.assertIn('aria-labelledby="h-board-jobs" tabindex="0"', sequence)
+        self.assertIn('작업에서 전체 보기', sequence)
+        self.assertIn('href="/work/"', sequence)
         current, upcoming = sequence.split('class="board-next-item"', 1)
         for text in ('지금', '현재 화물', '진행 중', '야드 → 반출대', '팔 A', 'href="/work/1/"'):
             self.assertIn(text, current)

@@ -127,34 +127,29 @@
   min-width: 0;
 }
 
-/* 5. 작업 순서: 좁은 화면에서도 한 줄로 탐색 */
+/* 5. 작업 순서: 지금과 다음 다섯 일을 세로로 탐색 */
 .board-jobs {
   min-width: 0;
 }
 .board-job-list {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: stretch;
-  gap: var(--primitive-space-3);
-  overflow-x: auto;
+  display: grid;
+  gap: var(--primitive-space-2);
   list-style: none;
   margin: 0;
   padding: var(--primitive-space-1);
 }
 .board-job-list > li {
-  flex: 0 0 18rem;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--primitive-space-2);
-  padding: var(--primitive-space-4);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--primitive-space-1) var(--primitive-space-2);
+  padding: var(--primitive-space-3);
   border: var(--primitive-border-thin) solid var(--semantic-border-divider);
   border-radius: var(--primitive-radius-control);
   overflow-wrap: anywhere;
 }
 .board-job-list > .board-current {
-  flex-basis: 24rem;
   border: var(--primitive-border-focus) solid var(--semantic-border-selected);
   background: var(--semantic-surface-selected);
 }
@@ -164,7 +159,7 @@
   color: var(--semantic-text-secondary);
 }
 .board-job-title {
-  font-size: var(--primitive-font-section);
+  font-size: var(--primitive-font-body);
   font-weight: var(--primitive-font-bold);
   line-height: var(--primitive-font-heading-line);
   text-decoration: none;
@@ -175,8 +170,9 @@
 }
 .board-job-route {
   margin: 0;
-  font-size: var(--primitive-font-body);
-  color: var(--semantic-text-primary);
+  flex-basis: 100%;
+  font-size: var(--primitive-font-caption);
+  color: var(--semantic-text-secondary);
 }
 .board-job-cargo {
   font-family: ui-monospace, monospace;
@@ -186,6 +182,17 @@
   margin: 0;
   font-size: var(--primitive-font-label);
   color: var(--semantic-text-secondary);
+}
+.board-job-head,
+.board-next-title {
+  flex: 1;
+  min-width: 0;
+}
+.board-job-list .board-pill {
+  margin-left: auto;
+}
+.board-next-item .board-job-label {
+  font-size: var(--primitive-font-caption);
 }
 .board-next-title {
   font-weight: var(--primitive-font-strong);
@@ -223,7 +230,12 @@
   .yard-topview.board-even,
   .board-even .yard-topview {
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-areas: "yard jobs" "yard topview";
+    grid-template-rows: auto 1fr;
   }
+  .board-even .yard-panel { grid-area: yard; }
+  .board-even .board-jobs { grid-area: jobs; }
+  .board-even .topview-panel { grid-area: topview; }
 }
 
 @media (max-width: 700px) {
