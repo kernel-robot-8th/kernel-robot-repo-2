@@ -18,11 +18,10 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="panel-b" role="status">처리할 것 없음 · 자동 운전 중</p>
+    <p class="panel-b" role="status">처리할 것 없음</p>
     {% endif %}
   </section>
-  {% if intake_status %}<p class="muted">반입 인식 확인 · {{ intake_status }}</p>{% endif %}
-  <p class="muted">상태는 ROSY 실행 결과로 바뀜</p>
+  {% if intake_status and intake_status != '연동 전' %}<p class="muted">반입 인식 확인 · {{ intake_status }}</p>{% endif %}
 </section>
 <dialog id="intake-dialog" class="intake-dialog" aria-modal="true" aria-labelledby="intake-dialog-title">
   <div class="intake-dialog-head">

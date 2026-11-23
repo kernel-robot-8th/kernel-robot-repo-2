@@ -160,7 +160,10 @@ class ScenarioFlowTests(TestCase):
         self.assertIn('id="scenario-state">재배치 시나리오</h3>', page)  # the preview, not the page head
         self.assertIn('+ 결정한 입고 위치', page)
         self.assertIn('name="action" value="request" disabled', page)
-        self.assertContains(self.client.get('/'), '입고 위치 결정됨')
+        rows = self.client.get('/').context['rows']
+        inbound = [row for row in rows if row['order'].kind == 'INBOUND']
+        self.assertEqual(len(inbound), 2)
+        self.assertTrue(all(row['status_label'] == '입고 위치 결정됨' for row in inbound))
 
     def test_stale_decision_is_refused(self):
         self.upload(scenario_import.template_workbook())

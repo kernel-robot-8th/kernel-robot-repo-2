@@ -5,7 +5,7 @@ from django.db.models import CharField, Min, OuterRef, Subquery
 from django.db.models.functions import Cast
 from django.utils import timezone
 
-from harbor_web import access
+from harbor_web import access, executor
 from harbor_web.alert_pages import alerts_context
 from harbor_web.auth import roles
 from harbor_web.models import Audit, Command, Order, Plan
@@ -438,9 +438,11 @@ def board_context(request, *, observation, operations, now=None):
         ghost_cargo=mini_move['move_cargo'] if mini_move else None,
     )
 
+    exec_status = executor.status()
+    drive_label = '자동 운전 중' if exec_status['enabled'] else exec_status['label']
     return dict(
-        drive_label=f'자동 운전 중 · 처리할 것 {alert_total}건' if alert_total else '자동 운전 중',
-        drive_tone='attention' if alert_total else 'good',
+        drive_label=f'{drive_label} · 처리할 것 {alert_total}건' if alert_total else drive_label,
+        drive_tone='attention' if alert_total else exec_status['tone'],
         day_progress=progress,
         counts=counts,
         alerts=alerts,

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from django.contrib.auth.models import Group, User
 from django.test import SimpleTestCase, TestCase
+from django.template.loader import render_to_string
 from django.utils import timezone
 
 from harbor.layout import YardLayout
@@ -203,14 +204,17 @@ class ControlBoardPagesTests(TestCase):
         self.assertEqual(self.plan.result['status'], 'READY')
         response = self.client.get(f'/?observation={self.observation.pk}')
         self.assertEqual(len(response.context['operations']['yard']['yard']['lanes']), 3)
-        html = response.content.decode()
+        self.assertContains(response, 'data-yard-row="yard-R1S1"')
+        self.assertNotContains(response, '자세히(지원 담당자용)')
+        html = render_to_string('operations_summary.html', dict(operations=response.context['operations']))
         for text in ('data-yard-row="yard-R1S1"', 'data-yard-row="yard-R3S1"', f'data-job="{self.plan.pk}"',
                      f'data-job-timeline="{self.plan.pk}"', '반출 C1', 'slot-level role-target', 'slot-level role-rehandle',
-                     '<b>1층</b> C1', '<b>2층</b> C2', '실제 완료량·처리율', 'id="observation-select"', '장비 상태판 · 보류'):
+                     '<b>1층</b> C1', '<b>2층</b> C2', '실제 완료량·처리율'):
             self.assertIn(text, html)
         rows = html.split(f'data-job="{self.plan.pk}" data-rows="', 1)[1].split('"', 1)[0].split()
         self.assertIn('yard-R1S1', rows)
-        self.assertIn('<span class="crumb">상황판</span>', html)
+        self.assertContains(response, '<span class="crumb">상황판</span>')
+        self.assertNotIn('장비 상태판 · 보류', html)
 
     def test_outbound_workspace_shows_the_same_slot_view(self):
         page = self.client.get(f'/requests/{self.order.pk}/')
@@ -247,7 +251,9 @@ class SiteMapPagesTests(TestCase):
         self.assertEqual((inventory['occupied'], inventory['capacity'], inventory['occupancy_percent']), (4, 18, 22))
         self.assertEqual([a['label'] for a in inventory['auxiliary']], ['임시 판 A', '임시 판 B', '반출대'])
         html = response.content.decode()
-        for text in ('장치 야드 4 / 18자리', '장치 야드(배)', '임시 판 A', '임시 판 B', '반출대', 'site-left', 'site-right',
+        self.assertIn('장치 야드 4 / 18자리', render_to_string('operations_summary.html',
+                      dict(operations=response.context['operations'])))
+        for text in ('장치 야드(배)', '임시 판 A', '임시 판 B', '반출대', 'site-left', 'site-right',
                      'data-yard-row="yard-R1S2"', '<span class="slot-name">2열</span>'):
             self.assertIn(text, html)
         self.assertNotIn('2행 × 3열 · 3층', html)

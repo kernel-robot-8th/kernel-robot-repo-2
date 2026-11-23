@@ -4,7 +4,7 @@ from django.utils import timezone
 
 from harbor_web import services
 from harbor_web.models import Audit, Command, Observation, Order, Plan
-from harbor_web.presentation import COMMAND_LABELS
+from harbor_web.presentation import COMMAND_LABELS, reason_text
 from harbor_web.yard_scene import area_presentation
 from harbor_web.yard_rows import DEFAULT_SLOT, place_context, place_label, slot_key, yard_rows
 
@@ -175,9 +175,14 @@ def operations_context(observation, *, now=None):
     if freshness['superseded']:
         attention.append(dict(label='같은 출처에 새 관측 있음', count=1, action='관측 선택', href='#observation-select'))
     if hold:
-        attention.append(dict(label='HOLD 계획', count=hold, action='현재 검토 보기', href='#proposal-title'))
+        blocked = next(row['plan'] for row in rows if row['status'] == 'HOLD')
+        attention.append(dict(label='HOLD 계획', count=hold, action='이유 보기',
+                              reason=reason_text(blocked.result.get('reason', '')),
+                              href=f'/plans/{blocked.pk}/'))
     if excluded and not (freshness['stale'] or freshness['superseded']):  # stale pin already explains them
-        attention.append(dict(label='재검토로 이동 집계 제외', count=excluded, action='현재 검토 보기', href='#proposal-title'))
+        changed = next(row['plan'] for row in rows if row['stale'] and row['status'] != 'HOLD')
+        attention.append(dict(label='계획 다시 짜야 함', count=excluded, action='계획 다시 짜기',
+                              href=f'/requests/{changed.order_id}/#planning'))
     for c in commands:
         if c.state in ATTENTION_STATES:
             attention.append(dict(label=f"전체 인계 · {COMMAND_LABELS[c.state]} · {_cargo_label(c.order)}", count=1,
@@ -233,16 +238,16 @@ def _attention_view(item, observation, commands):
                     why='계획에는 출처 · 시각 · 설치 기준이 있는 야드 현황이 필요합니다.')
     if label == '관측 유효 시간 밖':
         return dict(item, chip='현황 만료', tone='hold', what=f'야드 현황 #{observation.pk}', action='현황 선택',
-                    why='유효 시간이 지나 이 현황으로 낸 계획은 실행 근거가 되지 않습니다.')
+                    why='야드 현황이 오래돼 이 계획은 쓸 수 없습니다.')
     if label == '같은 출처에 새 관측 있음':
-        return dict(item, chip='새 현황 있음', tone='new', what=f'#{observation.pk}보다 최근 야드 현황', action='현황 선택',
-                    why='이 현황에 고정된 계획은 그대로 둡니다. 새 현황으로 바꿔 검토하세요.')
+        return dict(item, chip='새 야드 현황 있음', tone='new', what='', action='최신으로 보기',
+                    href='/', why='')
     if label == 'HOLD 계획':
-        return dict(item, chip='HOLD 계획', tone='hold', what=f'보류된 계획 {item["count"]}건',
-                    why='부분 이동은 만들지 않습니다. 보류 이유는 현재 검토 표에서 확인합니다.')
-    if label == '재검토로 이동 집계 제외':
-        return dict(item, chip='재검토 필요', tone='hold', what=f'계획 {item["count"]}건',
-                    why='검토 뒤 지시나 대기열이 바뀌어 예상 이동 합계에서 뺐습니다.')
+        return dict(item, chip='막힘', tone='hold', what='이 일은 지금 못 합니다',
+                    why=item['reason'])
+    if label == '계획 다시 짜야 함':
+        return dict(item, chip='계획 다시 짜야 함', tone='hold', what='',
+                    why='계획을 짠 뒤 순서나 야드가 바뀌었습니다.')
     if label.startswith('전체 인계 · '):
         _, state, cargo = label.split(' · ', 2)
         command = next((c for c in commands if item['href'] == f'/work/{c.pk}/'), None)

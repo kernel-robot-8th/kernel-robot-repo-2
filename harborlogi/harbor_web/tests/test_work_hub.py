@@ -46,7 +46,8 @@ class WorkHubTests(TestCase):
     def test_empty_hub_has_four_sections_and_no_estimates_or_actions(self):
         response = self.get_hub()
         for text in ('<h1>작업</h1>', '오늘 시간표', '반출 순서', '입고 자리', '자동 재배치',
-                     '등록된 작업이 없습니다', '상태는 ROSY 실행 결과로 바뀜', '연동 전'):
+                     '등록된 작업이 없습니다',
+                     '<a href="/rearrangement/">자동 재배치 상세</a>'):
             self.assertContains(response, text)
         body = response.content.decode().split('<main', 1)[1]
         for text in ('type="submit"', 'draggable=', '예정 시각', '희망 시각', '진행률', 'READY', 'HOLD', '#번호'):
@@ -92,8 +93,22 @@ class WorkHubTests(TestCase):
         self.assertEqual([r['order'].pk for r in response.context['outbound']],
             [urgent.pk, any_order.pk, later.pk, running.pk])
         self.assertNotIn(done.order_id, [r['order'].pk for r in rows])
-        self.assertContains(response, '같은 우선순위 안 순서 미지정')
+        self.assertContains(response, '단계 안 순서 자유')
+        self.assertContains(response, '<span class="helptext">지금</span>', count=1, html=True)
+        self.assertContains(response, '<span class="helptext">다음</span>', count=1, html=True)
+        self.assertEqual([r['order'].pk for r in rows if r.get('is_next')], [urgent.pk])
         self.assertNotContains(response, '알고리즘이 정한 순서')
+
+    def test_only_first_pending_card_is_next_without_running_work(self):
+        done = self.command(self.order('DONE'), 'COMPLETED')
+        self.completion(done, timezone.now())
+        next_order = self.order('NEXT', sequence=2)
+        self.order('LATER', sequence=3)
+        response = self.get_hub()
+        self.assertContains(response, '<span class="helptext">다음</span>', count=1, html=True)
+        self.assertNotContains(response, '<span class="helptext">지금</span>', html=True)
+        self.assertEqual([r['order'].pk for r in response.context['timeline'] if r.get('is_next')],
+            [next_order.pk])
 
     def test_latest_state_and_existing_detail_links(self):
         order = self.order('RETRY')
@@ -154,8 +169,18 @@ class WorkHubTests(TestCase):
         self.assertEqual(loaded_ids, {visible_plan.pk})
         self.assertEqual([row['order'].pk for row in context['timeline']], [visible_plan.order_id])
 
-    def test_inbound_only_shows_latest_current_recommendation_and_labels_it_as_proposed(self):
+    def test_automatic_inbound_without_plan_has_no_manual_calculate_link(self):
+        incoming = self.order('AUTO', kind='INBOUND')
+        type(incoming).objects.filter(pk=incoming.pk).update(auto_replan=True)
+        response = self.get_hub()
+        self.assertEqual(response.context['inbound'][0]['place_hint'], '자동 계산 대기')
+        self.assertNotContains(response, '자리 계산하기')
+
+    def test_inbound_only_shows_latest_current_recommendation_with_next_action(self):
         incoming = self.order('IN', kind='INBOUND')
+        response = self.get_hub()
+        self.assertEqual(response.context['inbound'][0]['place_hint'], '자리 결정 대기')
+        self.assertContains(response, f'<a href="/requests/{incoming.pk}/">자리 계산하기</a>', html=True)
         result = {'status': 'READY', 'plan_kind': 'inbound-placement', 'recommendation': {
             'cargo_id': 'IN', 'area_id': 'yard', 'row': 2, 'column': 1, 'level': 3, 'orientation': 0}}
         self.plan(incoming, result=result)
@@ -163,14 +188,23 @@ class WorkHubTests(TestCase):
             **result['recommendation'], 'row': 1}})
         response = self.get_hub()
         self.assertEqual(response.context['inbound'][0]['place'], '1행 3층')
-        self.assertContains(response, '추천 자리 · 실제 적재는 실행 후 반영')
+        self.assertContains(response, f'<a href="/plans/{latest.pk}/">자리 결정하기</a>', html=True)
+        self.assertNotContains(response, '추천 자리 · 실제 적재는 실행 후 반영')
         self.assertContains(response, f'/plans/{latest.pk}/')
         self.plan(incoming, result={'status': 'HOLD'})
         response = self.get_hub()
         self.assertEqual(response.context['inbound'][0]['place'], None)
-        self.assertContains(response, '자리 결정 대기')
-        self.plan(incoming, result=result, version=2)
-        self.assertEqual(self.get_hub().context['inbound'][0]['place'], None)
+        self.assertEqual(response.context['inbound'][0]['place_hint'], '보류 · 요청 확인')
+        self.assertContains(response, '보류 · 요청 확인')
+        Order.objects.filter(pk=incoming.pk).update(version=2)
+        for status in ('READY', 'HOLD'):
+            with self.subTest(status=status):
+                stale = self.plan(incoming, result={**result, 'status': status})
+                response = self.get_hub()
+                self.assertIsNone(response.context['inbound'][0]['place'])
+                self.assertEqual(response.context['inbound'][0]['place_hint'], '요청 바뀜 · 다시 계산')
+                self.assertContains(response, '요청 바뀜 · 다시 계산')
+                self.assertContains(response, f'<a href="/plans/{stale.pk}/">자리 계산하기</a>', html=True)
 
     def test_access_and_read_only_get_and_post(self):
         order = self.order('C1')

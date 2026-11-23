@@ -51,13 +51,12 @@ class StatusStripTests(TestCase):
         response = self.client.get('/workflow/')
         self.assertEqual(response.status_code, 200)
         expected_time = timezone.localtime(obs.observed_at).strftime('%H:%M')
-        for text in ('aria-label="운전 상태"', '자동 운전 중', '0/0 완료', '하는 일 없음',
+        for text in ('aria-label="운전 상태"', '자동 진행 꺼짐', '0/0 완료', '하는 일 없음',
                      f'{expected_time} 갱신', '장비 상태 연동 전',
-                     'disabled', '비상 정지', 'ROSY Fleet에서 정지 · 연동 전',
-                     '상태는 ROSY 실행 결과로 바뀜'):
+                     'disabled', '비상 정지', 'ROSY Fleet에서 정지 · 연동 전'):
             self.assertContains(response, text)
         strip_html = response.content.decode().split('<section class="status-strip"', 1)[1].split('</section>', 1)[0]
-        for forbidden in ('관측', '원본', '인계', '대조', '회차', 'READY', 'HOLD', '#'):
+        for forbidden in ('상태는 ROSY 실행 결과로 바뀜', '자동 운전 중', '관측', '원본', '인계', '대조', '회차', 'READY', 'HOLD', '#'):
             self.assertNotIn(forbidden, strip_html)
 
     def test_alert_count_and_invalid_observation_query_are_safe(self):

@@ -275,7 +275,7 @@ function mountReorderEditor(editor) {
           validation = null;
           render();
         },
-      }, '순서 바꾸기(예외)'));
+      }, '순서 바꾸기'));
       if (readUndo()) {
         actions.append(el('span', {class: 'helptext', text: '적용함 ·'}));
         actions.append(el('button', {
@@ -291,7 +291,7 @@ function mountReorderEditor(editor) {
         id: 'wk-validate',
         disabled: busy,
         onClick: runValidate,
-      }, busy ? '검증 중…' : '이 순서 검증해 보기'));
+      }, busy ? '검증 중…' : '이 순서로 할 수 있는지 확인'));
       actions.append(el('button', {
         type: 'button',
         class: 'quiet',
