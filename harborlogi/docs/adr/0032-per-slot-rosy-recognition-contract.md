@@ -70,3 +70,17 @@ Harbor 자리 주소 형식은 `<area>-r<n>-c<n>-l<n>` (`harbor/process.py:85-87
 - ROSY 요청 문서: `docs/research/2026-11-20-rosy-contract-requests.md` (항목 1)
 - ADR 0029: 반입 사건 계약(`docs/adr/0029-port-events-and-intake-identity.md`)
 - ADR 0033: 차량별 도착 사건(다른 작업 소관)
+
+## 2026-11-23 갱신
+
+Rosy D-1075(Proposed, rosy-platform PR #601)가 셀 `top` 카메라를 통한 자리별 컨테이너
+인식 생산과 Fleet 읽기 API 제공을 맡는다. API 경로·보관 개수·유효 시간은 아직 미정이다.
+필드 이름은 D-1075 기준으로 `slot_ref` → `site_ref`, `read_state` → `state`,
+`READ` → `OCCUPIED`로 맞춘다. 위 제안 본문은 당시 검토 기록으로 유지한다.
+
+Harbor 수신·엄격 검증·장부 대조는 `harbor/site_recognition.py`, 선택적 읽기는
+`harbor/rosy_http.py`의 `RosyClient.site_recognition()` / `load_site_recognition()`에 있다.
+[응답 예시와 수신 계약](../contracts/rosy-cell-site-recognition.md)을 기준으로 하며,
+기본은 꺼져 있고 `HARBOR_ROSY_SITE_RECOGNITION=1`일 때만 헬퍼가 호출한다.
+대조 결과는 ADR 0036의 화면 표시·사람 확인 보류용이고, 원본 사진으로 판정하거나 장부를
+자동으로 고치지 않는다. 이번에는 UI를 연결하지 않는다.

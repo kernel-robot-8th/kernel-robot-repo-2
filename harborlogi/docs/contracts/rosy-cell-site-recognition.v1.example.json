@@ -1,0 +1,13 @@
+{
+  "schema": "rosy.cell-site-recognition.v1",
+  "snapshot_id": "문자열",
+  "observed_at": "2026-11-23T12:00:00Z",
+  "source_id": "omx_overhead",
+  "calibration_revision": "문자열",
+  "site_map_revision": 1,
+  "sites": [
+    {"site_ref": "yard-r1-c1-l1", "state": "OCCUPIED", "object_class": "orange", "object_ref_read": null, "confidence": 0.93},
+    {"site_ref": "yard-r1-c1-l2", "state": "EMPTY", "object_class": null, "object_ref_read": null, "confidence": 0.88},
+    {"site_ref": "temp_a-r1-c1-l1", "state": "UNREADABLE", "object_class": null, "object_ref_read": null, "confidence": 0.2}
+  ]
+}
