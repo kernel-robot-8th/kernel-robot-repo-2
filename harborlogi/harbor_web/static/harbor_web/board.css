@@ -261,3 +261,17 @@
   .board-even .board-jobs .board-job-title { white-space: nowrap; }
   .board-even .board-jobs .board-job-label { white-space: nowrap; }
 }
+
+/* Board mini yard keeps the real cell map even in a half-width panel: storage yard in the centre,
+   temp A left, temp B right, outbound stand under the yard. The site map's narrow-container rule would stack them. */
+.board-even .yard-panel .site-map { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); gap: var(--primitive-space-2); }
+.board-even .yard-panel .site-left { grid-column: 1; grid-row: 1; }
+.board-even .yard-panel .site-center { grid-column: 2; grid-row: 1; }
+.board-even .yard-panel .site-right { grid-column: 3; grid-row: 1; }
+.board-even .yard-panel .yard-legend-rows { grid-column: 1 / -1; }
+.board-even .yard-panel .site-yard .slot-card,
+.board-even .yard-panel .site-tray .slot-card { min-height: 0; }
+.board-even .yard-panel .slot-card { font-size: var(--primitive-font-caption); }
+.board-even .yard-panel .site-side .tray-slots { grid-template-columns: minmax(0, 1fr); }
+.board-even .yard-panel .site-side .slot-card { flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--primitive-space-1); }
+.board-even .yard-panel .slot-empty { position: static; display: inline; color: var(--semantic-text-secondary); }
