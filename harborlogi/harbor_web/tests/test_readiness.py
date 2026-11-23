@@ -76,6 +76,9 @@ class ReadinessGateTests(TestCase):
         self.check()
         self.target.observation.provenance = 'DECLARED'
         self.assertEqual(self.reason(), 'READINESS_OBSERVATION_UNAUTHENTICATED')
+        self.target.observation.provenance = 'PORT_EVENT'
+        self.assertEqual(self.reason(), 'READINESS_OBSERVATION_UNAUTHENTICATED')
+        self.assertEqual(readiness._observation_state('PORT_EVENT'), 'UNMET')
 
     def test_declared_observation_runs_only_under_human_confirmation(self):
         self.check()

@@ -57,11 +57,11 @@ def human_confirmation_ready():
 
 
 def _observation_state(provenance):
-    if provenance == 'SYNTHETIC':
-        return 'UNMET'
+    if provenance == 'MEASURED':
+        return 'MET'
     if provenance == 'DECLARED':
         return 'MET' if human_confirmation_ready() else 'UNMET'
-    return 'MET'
+    return 'UNMET'
 
 
 def states(plan, check):
@@ -72,8 +72,8 @@ def states(plan, check):
         session='MET' if check and check.detail.get('session') == 'MATCHED' else 'UNKNOWN' if not check else 'UNMET',
         evidence='MET' if found.get('evidence') == found.get('recheck') == 'MET' else
                  'UNMET' if 'UNMET' in (found.get('evidence'), found.get('recheck')) else 'UNKNOWN',
-        # SYNTHETIC never runs in production. A person-DECLARED observation runs only while named-person
-        # confirmation is the evidence producer (user decision 2026-11-04); other provenances are authenticated.
+        # SYNTHETIC and PORT_EVENT never open production alone; MEASURED stands for an authenticated observation
+        # producer, and person-DECLARED runs only while named-person confirmation is enabled (2026-11-04 decision).
         observation='UNKNOWN' if plan is None else _observation_state(plan.observation.provenance))
     value['producer'] = 'MET' if found.get('auto_producer') == 'MET' or human_confirmation_ready() else 'UNMET'
     for key in ('arm', 'arm_live', 'arm_clear', 'proposal', 'port_events'):

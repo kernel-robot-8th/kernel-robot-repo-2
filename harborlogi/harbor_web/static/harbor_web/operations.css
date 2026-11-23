@@ -79,7 +79,7 @@
 .topview-panel img {display:block;width:100%;height:auto;border-radius:var(--primitive-radius-control)}
 .topview-panel img[hidden] {display:none}
 .topview-panel select {width:100%}
-.topview-panel [role="status"] {color:var(--semantic-text-secondary);overflow-wrap:anywhere}
+.topview-panel [role="status"] {min-height:1.4em;color:var(--semantic-text-secondary);overflow-wrap:anywhere}
 .sw.role-cargo {background:var(--primitive-color-navy-soft);color:var(--primitive-color-ink)}
 .sw.role-target {background:var(--primitive-color-navy);color:var(--primitive-color-white)}
 .sw.role-rehandle {background:var(--primitive-color-orange-soft);color:var(--primitive-color-warning-ink);border:2px dashed var(--primitive-color-orange-dark)}
