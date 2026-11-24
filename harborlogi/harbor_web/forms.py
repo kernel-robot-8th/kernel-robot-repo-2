@@ -13,6 +13,15 @@ class FootprintForm(forms.Form):
 
 class CargoForm(forms.ModelForm):
     length_cells = FootprintForm.base_fields['length_cells']
+    tag_kind = forms.ChoiceField(
+        label='태그 종류', required=False, initial='EPC',
+        choices=[('EPC', 'EPC'), ('BARCODE', '바코드'), ('QR', 'QR')],
+    )
+    tag_value = forms.CharField(
+        label='EPC·바코드 태그', max_length=128, required=False,
+        help_text='선택 입력입니다. 등록 후 화물 목록에서도 추가 연결할 수 있습니다.',
+    )
+
     def clean_code(self):
         code = self.cleaned_data['code']
         if Cargo.objects.filter(code=code).exists():
@@ -21,9 +30,12 @@ class CargoForm(forms.ModelForm):
 
     class Meta:
         model = Cargo
-        fields = ['code', 'name', 'weight_kg', 'volume_m3', 'destination']
-        labels = dict(code='화물 ID', name='화물 이름', weight_kg='중량 (kg)', volume_m3='부피 (m³)', destination='목적지')
-        help_texts = dict(code='등록 뒤에도 원래 ID를 유지합니다. 실제 위치는 관측으로 확인합니다.')
+        fields = ['code', 'name', 'weight_kg', 'volume_m3', 'destination', 'shipper_name', 'shipper_tier']
+        labels = dict(
+            code='화물 ID', name='화물 이름', weight_kg='중량 (kg)', volume_m3='부피 (m³)',
+            destination='목적지', shipper_name='화주 이름', shipper_tier='화주 등급',
+        )
+        help_texts = dict(code='등록 뒤에도 원래 ID를 유지합니다. 실제 위치는 야드 현황으로 확인합니다.')
 
 
 class FixedOrderCheckbox(forms.CheckboxInput):
@@ -60,10 +72,15 @@ class OrderForm(forms.ModelForm):
 
     class Meta:
         model = Order
-        fields = ['cargo', 'kind', 'title', 'priority_group', 'sequence', 'tie_policy', 'note']
-        labels = dict(cargo='화물', kind='요청 종류', title='요청 제목', tie_policy=TIE_POLICY_LABEL, note='요청 메모')
+        fields = ['cargo', 'kind', 'title', 'voyage_code', 'cutoff_at', 'priority_group', 'sequence', 'tie_policy', 'note']
+        labels = dict(
+            cargo='화물', kind='요청 종류', title='요청 제목',
+            voyage_code='배편 코드', cutoff_at='출항 마감 시각', tie_policy=TIE_POLICY_LABEL, note='요청 메모',
+        )
         widgets = {'note': forms.Textarea(attrs={'rows': 3}), 'tie_policy': FixedOrderCheckbox(),
-                   'title': forms.TextInput(attrs={'placeholder': '예: 본선 1차 선적분'})}
+                   'title': forms.TextInput(attrs={'placeholder': '예: 본선 1차 선적분'}),
+                   'voyage_code': forms.TextInput(attrs={'placeholder': '예: V-BUSAN-01'}),
+                   'cutoff_at': forms.DateTimeInput(attrs={'type': 'datetime-local'}, format='%Y-%m-%dT%H:%M')}
         help_texts = dict(title='목록에서 화물 ID 대신 먼저 보이는 이름입니다. 비우면 화물 이름을 씁니다.',
                           tie_policy=TIE_POLICY_HELP)
 
@@ -83,6 +100,11 @@ class OrderForm(forms.ModelForm):
 class PriorityForm(forms.Form):
     expected_version = forms.IntegerField(widget=forms.HiddenInput)
     title = forms.CharField(label='요청 제목', max_length=80, required=False)
+    voyage_code = forms.CharField(label='배편 코드', max_length=64, required=False)
+    cutoff_at = forms.DateTimeField(
+        label='출항 마감 시각', required=False,
+        widget=forms.DateTimeInput(attrs={'type': 'datetime-local'}, format='%Y-%m-%dT%H:%M'),
+    )
     priority_group = forms.TypedChoiceField(label='우선순위 단계', coerce=int, choices=TIER_CHOICES, widget=forms.RadioSelect)
     sequence = forms.IntegerField(required=False, min_value=1, widget=forms.HiddenInput)
     tie_policy = forms.ChoiceField(label=TIE_POLICY_LABEL, choices=[('FIXED', '순서 고정'), ('ANY', '단계 안 선택 허용')],

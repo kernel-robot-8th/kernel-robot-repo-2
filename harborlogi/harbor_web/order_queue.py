@@ -34,7 +34,9 @@ def _queue_policy(order):
 def request_snapshot(order):
     return dict(id=order.pk, cargo_id=order.cargo_id, cargo_code=order.cargo.code if order.cargo_id else None, kind=order.kind,
         priority_group=order.priority_group, sequence=order.sequence, tie_policy=order.tie_policy,
-        title=order.title, note=order.note, version=order.version)
+        title=order.title, voyage_code=order.voyage_code,
+        cutoff_at=order.cutoff_at.isoformat() if order.cutoff_at else None,
+        note=order.note, version=order.version)
 
 
 def queue_snapshot():
@@ -43,10 +45,11 @@ def queue_snapshot():
 
 @serialized
 @transaction.atomic
-def create_order(actor, *, cargo, kind, priority_group, sequence, tie_policy, note='', title=''):
+def create_order(actor, *, cargo, kind, priority_group, sequence, tie_policy, note='', title='', voyage_code='', cutoff_at=None):
     _role(actor, 'operator')
     obj = Order(created_by=actor, cargo=cargo, kind=kind, priority_group=priority_group,
-                sequence=sequence, tie_policy=tie_policy, note=note, title=title)
+                sequence=sequence, tie_policy=tie_policy, note=note, title=title,
+                voyage_code=voyage_code or '', cutoff_at=cutoff_at)
     _queue_policy(obj)
     obj.full_clean()
     obj.save()
@@ -59,7 +62,8 @@ def create_order(actor, *, cargo, kind, priority_group, sequence, tie_policy, no
 
 @serialized
 @transaction.atomic
-def update_order(actor, *, order_id, expected_version, priority_group, sequence, tie_policy, note='', title=None):
+def update_order(actor, *, order_id, expected_version, priority_group, sequence, tie_policy, note='', title=None,
+                 voyage_code=None, cutoff_at=None, clear_cutoff=False):
     _role(actor, 'operator')
     obj = Order.objects.get(pk=order_id)
     if obj.version != expected_version:
@@ -69,12 +73,19 @@ def update_order(actor, *, order_id, expected_version, priority_group, sequence,
         setattr(obj, key, value)
     if title is not None:  # None keeps the current title for callers that predate titles
         obj.title = title
+    if voyage_code is not None:
+        obj.voyage_code = voyage_code
+    if clear_cutoff:
+        obj.cutoff_at = None
+    elif cutoff_at is not None:
+        obj.cutoff_at = cutoff_at
     obj.version += 1
     obj.full_clean()
     _queue_policy(obj)
     updated = Order.objects.filter(pk=order_id, version=expected_version).update(
         priority_group=obj.priority_group, sequence=obj.sequence, tie_policy=obj.tie_policy,
-        title=obj.title, note=obj.note, version=obj.version, updated_at=timezone.now())
+        title=obj.title, voyage_code=obj.voyage_code, cutoff_at=obj.cutoff_at,
+        note=obj.note, version=obj.version, updated_at=timezone.now())
     if not updated:
         raise Conflict('Order changed; reload before editing.')
     Audit.objects.create(actor=actor, action='order.update', object_type='Order', object_id=str(obj.pk),

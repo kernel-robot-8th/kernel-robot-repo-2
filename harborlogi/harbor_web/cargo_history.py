@@ -8,7 +8,7 @@ from django.core.exceptions import ValidationError
 from harbor_web import services
 from harbor_web.command_models import EvidenceSubmission
 from harbor_web.models import (
-    Command, CommandFact, DepartureIntent, FieldConfirmation, FieldEpisode, Observation, Order, Plan,
+    ArrivalEvent, CargoTag, Command, CommandFact, DepartureIntent, FieldConfirmation, FieldEpisode, Observation, Order, Plan,
 )
 from harbor_web.presentation import COMMAND_LABELS
 
@@ -47,6 +47,13 @@ def _sightings(cargo):
 
 def cargo_history(cargo):
     events = [dict(at=cargo.created_at, kind='등록', text='화물 등록', source=f'화물 #{cargo.pk}')]
+    for tag in CargoTag.objects.filter(cargo=cargo).order_by('pk'):
+        events.append(dict(at=tag.created_at, kind='태그', source=f'{tag.tag_kind} 연결',
+                           text=f'{tag.tag_kind} {tag.tag_value} 연결'))
+    for arrival in ArrivalEvent.objects.filter(cargo=cargo).order_by('pk'):
+        veh = f' · 차량 {arrival.vehicle_id}' if arrival.vehicle_id else ''
+        events.append(dict(at=arrival.observed_at, kind='도착', source=f'도착 순번 {arrival.pk}',
+                           text=f'{arrival.intake_point}{veh} · {arrival.tag_kind} {arrival.tag_value} ({arrival.get_match_status_display()})'))
     orders = list(Order.objects.filter(cargo=cargo))
     for order in orders:
         events.append(dict(at=order.created_at, kind='요청', source=f'요청 #{order.pk}',

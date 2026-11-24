@@ -85,8 +85,16 @@ class ReadinessGateTests(TestCase):
         self.target.observation.provenance = 'DECLARED'
         bridge.set_human_confirmation(self.admin, enabled=True, expected_version=0)
         self.assertEqual(self.reason(), '')  # user decision 2026-11-04: person-declared + person-confirmed
+        self.target.observation.provenance = 'PORT_EVENT'
+        self.assertEqual(self.reason(), '')
         self.target.observation.provenance = 'SYNTHETIC'
         self.assertEqual(self.reason(), 'READINESS_OBSERVATION_UNAUTHENTICATED')  # never in production
+
+    def test_port_event_observation_opens_when_port_events_route_is_verified(self):
+        self.check(port_events='MET')
+        self.target.observation.provenance = 'PORT_EVENT'
+        self.assertEqual(self.reason(), '')
+        self.assertEqual(readiness._observation_state('PORT_EVENT', port_events_met=True), 'MET')
 
     def test_human_confirmation_needs_admin_switch_and_a_field_user(self):
         self.check(auto_producer='UNMET')

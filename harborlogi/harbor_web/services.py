@@ -25,10 +25,13 @@ def _provenance(provenance):
 
 @serialized
 @transaction.atomic
-def register_cargo(actor, length_cells=1, **validated_fields):
+def register_cargo(actor, length_cells=1, tag_value='', tag_kind='EPC', **validated_fields):
     _role(actor, 'operator')
     cargo = _save(actor, Cargo(created_by=actor, **validated_fields), 'cargo.register')
     register_footprint(actor, cargo_id=cargo.pk, length_cells=length_cells)
+    if isinstance(tag_value, str) and tag_value.strip():
+        from harbor_web.tag_arrivals import bind_cargo_tag
+        bind_cargo_tag(actor, cargo_id=cargo.pk, tag_value=tag_value, tag_kind=tag_kind or 'EPC')
     return cargo
 
 
