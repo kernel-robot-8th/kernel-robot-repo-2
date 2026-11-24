@@ -162,10 +162,10 @@ class TransportHttpTests(unittest.TestCase):
             {'id': 'dock', 'name': 'dock', 'x': 0.0, 'y': 0.0, 'kind': 'junction'},
             {'id': 'inbound', 'name': 'inbound', 'x': 0.5, 'y': 0.0, 'kind': 'junction'},
             {
-                'id': 'S_OUT', 'name': 'S_OUT 반출대', 'x': 0.5, 'y': 0.5, 'yaw': 3.14159, 'kind': 'stop',
+                'id': 'S_OUT', 'name': 'S_OUT 반출대', 'x': 0.5, 'y': 0.5, 'yaw': 1.570796, 'kind': 'stop',
                 'pinned': True, 'stop_zone': [[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.6]], 'approach_m': 0.1,
             },
-            {'id': 'S_EXIT', 'name': 'S_EXIT 출구', 'x': 0.0, 'y': 0.5, 'yaw': 0.0, 'kind': 'stop', 'pinned': True},
+            {'id': 'S_EXIT', 'name': 'S_EXIT 출구', 'x': 0.0, 'y': 0.5, 'yaw': 3.14159, 'kind': 'stop', 'pinned': True},
         ]
         coords = {p['id']: [p['x'], p['y']] for p in ring_places}
         ring_order = ['dock', 'inbound', 'S_OUT', 'S_EXIT', 'dock']
