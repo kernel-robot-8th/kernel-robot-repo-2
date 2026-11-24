@@ -50,6 +50,9 @@ ATTENTION_TEXT = {
     'HOLD 계획': ('이 일은 지금 못 합니다', '', '이유 보기'),
     '계획 다시 짜야 함': ('계획 다시 짜야 함', '계획을 짠 뒤 순서나 야드가 바뀌었습니다.', '계획 다시 짜기'),
 }
+# Short category shown on each alert chip ("야드 현황 1건") instead of a repeated "처리할 것".
+ATTENTION_KIND = {'관측 없음': '야드 현황', '관측 유효 시간 밖': '야드 현황', '같은 출처에 새 관측 있음': '야드 현황',
+                  'HOLD 계획': '작업 막힘', '계획 다시 짜야 함': '계획'}
 COMMAND_TEXT = {
     'UNKNOWN': 'ROSY 응답을 확인하지 못했습니다. 자동으로 다시 보내지 않습니다.',
     'BLOCKED': '설치 조건이나 야드 현황, 복구 조건을 확인해야 합니다.',
@@ -76,22 +79,24 @@ def alerts_context(request, *, observation=None, operations=None):
                     continue
                 title, detail, action = ('완료 기록 확인 필요',
                     '완료 기록에서 반출 이동을 찾지 못했습니다. 작업 기록을 살펴보세요.', '작업 보기')
+                kind = '완료 기록'
             else:
                 title, detail, action = ATTENTION_TEXT.get(item['label'],
                     ('업무 상태 확인 필요', '현재 업무 상태를 살펴보세요.', '상세 보기'))
+                kind = ATTENTION_KIND.get(item['label'], '업무')
             if item['label'] == 'HOLD 계획':
                 detail = item['reason']
             if item['label'] == '같은 출처에 새 관측 있음':
                 href = '/'
             if href.startswith('#'):
                 href = f'/?observation={observation.pk}{href}'
-            alerts.append(dict(title=title, detail=detail, count=item['count'], href=href, action=action))
+            alerts.append(dict(kind=kind, title=title, detail=detail, count=item['count'], href=href, action=action))
         for row in operations['handoffs']:
             command = row['command']
             if work_state(command) != '처리할 것':
                 continue
             cargo = command.order.cargo.code if command.order.cargo_id else '자동 재배치'
-            alerts.append(dict(title=f'{cargo} · 작업 확인 필요',
+            alerts.append(dict(kind='작업 확인', title=f'{cargo} · 작업 확인 필요',
                 detail=COMMAND_TEXT.get(command.state, '작업 상태를 확인해야 합니다.'),
                 count=1, href=f'/work/{command.pk}/', action='작업 보기'))
     can_open_field = bool(held & {'operator', 'admin', 'field'})
@@ -118,12 +123,12 @@ def alerts_context(request, *, observation=None, operations=None):
         else:
             title = f'{cargo} · 적재면 확인 대기'
             detail = f'차량 {episode.vehicle_id}'
-        alerts.append(dict(title=title, detail=detail, count=1,
+        alerts.append(dict(kind='현장 확인', title=title, detail=detail, count=1,
             href=f'/field/{episode.pk}/' if can_open_field else None, action='배정 보기'))
     intake_status = ''
     if can_read:
         intake_items, intake_status = intake_alert_items(can_read)
-        alerts.extend(intake_items)
+        alerts.extend(dict(item, kind='반입 확인') for item in intake_items)
     return dict(alerts=alerts, alert_total=sum(item['count'] for item in alerts), intake_status=intake_status)
 
 

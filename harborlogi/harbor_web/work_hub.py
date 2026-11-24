@@ -7,7 +7,7 @@ from harbor_web.models import Audit, Command, Order, Plan
 from harbor_web.order_queue import completed_order_ids
 from harbor_web.rearrangement import current_authorization
 from harbor_web.page_helpers import page
-from harbor_web.work_state import work_state
+from harbor_web.work_state import work_state, shown_state
 from harbor_web.yard_rows import place_context, placement_text
 
 
@@ -52,7 +52,7 @@ def hub_context(*, now=None):
         state = work_state(command, plan)
         row = dict(order=order, command=command, plan=plan, recorded_at=recorded_at,
             kind={'INBOUND': '입고', 'OUTBOUND': '반출', 'REARRANGE': '재배치'}[order.kind],
-            state=state, tone={'진행 중': 'running', '완료': 'done', '처리할 것': 'attention'}.get(state, 'waiting'),
+            state=shown_state(state, command), tone={'진행 중': 'running', '완료': 'done', '처리할 것': 'attention'}.get(state, 'waiting'),
             href=f'/work/{command.pk}/' if command else f'/plans/{plan.pk}/' if plan else f'/requests/{order.pk}/')
         if recorded_at:
             past.append(row)

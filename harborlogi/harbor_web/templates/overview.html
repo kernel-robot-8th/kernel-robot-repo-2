@@ -33,7 +33,7 @@
     <ul class="attention-list">
       {% for item in board.alerts %}
       <li>
-        <span class="chip tone-hold">처리할 것{% if item.count > 1 %} {{ item.count }}건{% endif %}</span>
+        <span class="chip tone-hold">{{ item.kind|default:"처리할 것" }} {{ item.count }}건</span>
         <span class="attention-text"><span class="what">{{ item.title }}</span><span class="why">{{ item.detail }}</span></span>
         {% if item.href %}<a class="button quiet" href="{{ item.href }}">{{ item.action }}</a>{% endif %}
       </li>
