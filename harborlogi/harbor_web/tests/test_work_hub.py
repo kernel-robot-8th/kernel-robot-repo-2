@@ -222,3 +222,11 @@ class WorkHubTests(TestCase):
         self.client.logout()
         self.assertEqual(self.client.get('/work/').status_code, 302)
         self.assertEqual(before, (Order.objects.count(), Plan.objects.count(), Command.objects.count(), Audit.objects.count()))
+
+
+class ShownStateTests(TestCase):
+    def test_attention_is_named_by_cause(self):
+        from harbor_web.work_state import shown_state
+        self.assertEqual(shown_state('처리할 것', object()), '작업 확인')
+        self.assertEqual(shown_state('처리할 것', None), '작업 막힘')
+        self.assertEqual(shown_state('대기', None), '대기')
