@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from harbor_web import executor, rearrangement, services
-from harbor_web.models import Audit, CargoFootprint, Command, Order, Plan, RearrangeAuthorization
+from harbor_web.models import Audit, CargoFootprint, Command, Observation, Order, Plan, RearrangeAuthorization
 from harbor_web.tests import test_multicell_services as multicell
 
 
@@ -122,10 +122,17 @@ class RearrangementExecutionTests(TestCase):
         self.assertEqual(rearrangement.auto_check(self.now), 'DAILY_LIMIT_REACHED')
         self.assertEqual(Order.objects.filter(kind='REARRANGE').count(), 1)
 
-    def test_pending_outbound_holds(self):
+    def test_queued_outbound_does_not_hold_but_a_running_one_does(self):
+        """ADR 0017 (revised 2026-11-24): only an outbound Command that runs or is unknown holds R2."""
         self.authorize()
-        services.create_order(self.operator, cargo=self.cargo('next', 1), kind='OUTBOUND', priority_group=3,
-                              sequence=1, tie_policy='FIXED')
+        order = services.create_order(self.operator, cargo=self.cargo('next', 1), kind='OUTBOUND', priority_group=3,
+                                      sequence=1, tie_policy='FIXED')
+        self.assertFalse(rearrangement.outbound_pending())
+        plan = Plan.objects.create(order=order, created_by=self.operator, observation=Observation.objects.order_by('-pk').first(),
+                                   condition=self.condition_row, order_version=order.version, queue_digest='q',
+                                   result={'status': 'READY', 'moves': []})
+        Command.objects.create(order=order, plan=plan, actor=self.operator, plan_version=1, state='DISPATCHING',
+            ledger_identity='t', fleet_origin='t', fleet_principal='t', body_digest='b' * 64, binding={})
         self.assertEqual(rearrangement.auto_check(self.now), 'OUTBOUND_PENDING')
         self.assert_no_rearrangement()
         self.assertEqual(self.holds(), ['OUTBOUND_PENDING'])
