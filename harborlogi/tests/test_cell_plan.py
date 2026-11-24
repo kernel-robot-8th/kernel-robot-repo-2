@@ -2,9 +2,20 @@
 import unittest
 
 from harbor.cell_plan import (
+    CellPlanCancelResponse,
+    CellPlanDryRunResponse,
+    CellPlanResponse,
+    CellPlanStepSpec,
+    HarborPlanRequest,
+    RosyDirectiveRequest,
     build_harbor_plan_request,
+    build_harbor_plan_spec,
     build_rosy_directive_request,
+    build_rosy_directive_spec,
     observation_site_state,
+    parse_cell_plan_cancel,
+    parse_cell_plan_dry_run,
+    parse_cell_plan_response,
     validate_cell_plan_response,
 )
 
@@ -107,6 +118,58 @@ class CellPlanUnitTests(unittest.TestCase):
         }
         with self.assertRaises(ValueError):
             validate_cell_plan_response(broken_dep, expected_order_source='harbor')
+
+        first_has_dep = {
+            **good,
+            'tasks': [
+                {**good['tasks'][0], 'depends_on': 'stale-prev'},
+                good['tasks'][1],
+            ],
+        }
+        with self.assertRaises(ValueError):
+            parse_cell_plan_response(first_has_dep, expected_order_source='harbor')
+
+        bad_status = {**good, 'plan': {**good['plan'], 'status': 'UNKNOWN_STATUS'}}
+        with self.assertRaises(ValueError):
+            parse_cell_plan_response(bad_status, expected_order_source='harbor')
+
+        with self.assertRaises(ValueError):
+            parse_cell_plan_response(good, expected_order_source='harbor', expected_plan_id='wrong-id')
+
+    def test_typed_specs_dry_run_and_cancel_parsers(self):
+        obs = self._observation()
+        spec = build_rosy_directive_spec(mode='outbound', observation_payload=obs, cargo_id='C1')
+        self.assertIsInstance(spec, RosyDirectiveRequest)
+        self.assertEqual(spec.to_wire()['mode'], 'outbound')
+
+        with self.assertRaises(ValueError):
+            CellPlanStepSpec(cargo_id='C1', src_site=' ', dst_site='stand-r1-c1-l1')
+        with self.assertRaises(ValueError):
+            observation_site_state({'schema': 'grid-placement-v1', 'placements': [{'cargo_id': 'C1', 'area_id': 'yard', 'row': True, 'column': 1, 'level': 1}]})
+
+        dry_raw = {
+            'ok': True,
+            'schema': 'rosy.cell-plan.v1',
+            'mode': 'outbound',
+            'order_source': 'rosy_r',
+            'moves': [{'src_site': 'yard-r1-c1-l1', 'dst_site': 'stand-r1-c1-l1', 'arm_id': 'arm_a', 'phase_label': '반출'}],
+            'final_state': {'C1': 'stand-r1-c1-l1'},
+        }
+        dry = parse_cell_plan_dry_run(dry_raw, expected_order_source='rosy_r')
+        self.assertIsInstance(dry, CellPlanDryRunResponse)
+        self.assertEqual(dry.moves[0].arm_id, 'arm_a')
+
+        cancel_raw = {
+            'ok': True,
+            'schema': 'rosy.cell-plan.v1',
+            'plan': {'plan_id': 'cp-1', 'order_source': 'harbor', 'total_steps': 1, 'status': 'CANCELLED', 'hold_reason': 'aborted'},
+            'tasks': [{'task_id': 'cp-1-s1', 'depends_on': None, 'status': 'CANCELLED', 'dst_wire_ref': 'stand-r1-c1-l1', 'cancel_reason': 'aborted'}],
+            'cancelled_task_ids': ['cp-1-s1'],
+        }
+        cancelled = parse_cell_plan_cancel(cancel_raw, expected_plan_id='cp-1')
+        self.assertIsInstance(cancelled, CellPlanCancelResponse)
+        self.assertEqual(cancelled.plan.hold_reason, 'aborted')
+        self.assertEqual(cancelled.cancelled_task_ids, ('cp-1-s1',))
 
 
 if __name__ == '__main__':

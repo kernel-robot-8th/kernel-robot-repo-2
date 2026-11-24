@@ -72,6 +72,7 @@ ledger = BusinessLedger(ledger_path, placement_sources=("synthetic-camera",),
    - `dispatch_harbor_plan`: `harbor.cell_plan.build_harbor_plan_request`로 Harbor 계획 순서·`wire_ref` 좌표를 `mode="harbor_plan"`으로 제안한다(`order_source="harbor"`).
    - `dispatch_rosy_directive`: `build_rosy_directive_request`로 `steps` 없이 목표 지시(`outbound`/`rehandle`/`goal`)만 보내 ROSY가 이동 순서와 좌표를 산출한다(`order_source="rosy_r"`).
    - 두 함수 모두 POST 전 `CellPlanDispatch(state='SUBMITTING', request_key=..., request_payload=...)`를 저장하고, 응답 유실 시 `UNCERTAIN`으로 남겨 `executor.tick`이 `GET /api/fleet/pipeline/cell-plans?request_key=<key>`(`reconcile_cell_plan_dispatch`)로만 복구한다.
+   - `preview_harbor_plan`/`preview_rosy_directive`(`/api/fleet/pipeline/cell-plans/dry-run`)와 `cancel_cell_plan_dispatch`(`/api/fleet/pipeline/cell-plans/{plan_id}/cancel`) 및 `hold_reason`·`last_refusal` 사유 동기화는 `harbor/cell_plan.py`·`harbor/fleet_types.py`·`RosyClient.*_typed()`로 타입 검증한다.
 2. `harbor_web/outbound_loop.py`는 완료된 반출 `Command` 또는 `stand` 목적지의 완료된 `CellPlanDispatch`를 받아 2단계 차량 이송(`S_OUT` pickup → `confirm_outbound_loaded` 적재 확인 → 고정 차량 `S_EXIT` departure, `object_ref=''`)을 수행한다. `OutboundDispatch`는 `command`와 `cell_plan_dispatch` 중 정확히 하나만 참조(`outbound_dispatch_exactly_one_source`)하며 `stand_zone_id`당 활성 1건만 허용한다.
 
 근거 제출은 `harbor_web.evidence.submit`(현장 확인 역할)로 들어오며, mission·attempt·계획 revision에 결속되고 신선(기본 5초)하며 아직 소모되지 않은 것만 채택된다. 운영 producer의 전송·자격 계약은 [물리 관측 수용 조건](observation-acceptance.md) 산출물이 열기 전까지 설치 통합 담당 영역이다.

@@ -11,8 +11,12 @@ from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction
 
 from harbor.cell_plan import (
+    CellPlanDryRunResponse,
     build_harbor_plan_request,
     build_rosy_directive_request,
+    parse_cell_plan_cancel,
+    parse_cell_plan_dry_run,
+    parse_cell_plan_response,
     validate_cell_plan_response,
 )
 from harbor_web import services
@@ -105,6 +109,17 @@ def _targets_stand(row: CellPlanDispatch) -> bool:
     return row.directive_mode == 'outbound'
 
 
+def _failure_reason(parsed) -> str:
+    if parsed.plan.hold_reason:
+        return parsed.plan.hold_reason[:192]
+    for task in parsed.tasks:
+        if task.cancel_reason:
+            return task.cancel_reason[:192]
+        if task.last_refusal:
+            return task.last_refusal[:192]
+    return ''
+
+
 def _create_and_submit(
     actor,
     *,
@@ -188,10 +203,11 @@ def _create_and_submit(
         return row
 
     try:
-        response = validate_cell_plan_response(
+        parsed = parse_cell_plan_response(
             raw,
             expected_order_source=order_source,
             expected_step_count=expected_step_count,
+            expected_request_key=request_key,
         )
     except ValueError as error:
         row.state = 'UNCERTAIN'
@@ -199,24 +215,84 @@ def _create_and_submit(
         row.save(update_fields=['state', 'reason', 'updated_at'])
         return row
 
-    rosy_plan = response['plan']
-    tasks = response['tasks']
+    rosy_plan = parsed.plan
     with transaction.atomic():
-        row.rosy_plan_id = rosy_plan['plan_id']
-        row.state = rosy_plan['status']
+        row.rosy_plan_id = rosy_plan.plan_id
+        row.state = rosy_plan.status
         if not row.planned_steps:
-            row.planned_steps = _extract_moves(rosy_plan)
-        row.rosy_task_ids = [t['task_id'] for t in tasks]
-        row.reason = ''
+            row.planned_steps = _extract_moves(raw['plan'])
+        row.rosy_task_ids = [t.task_id for t in parsed.tasks]
+        row.reason = _failure_reason(parsed) if rosy_plan.status in ('PAUSED_HUMAN', 'ABORTED', 'CANCELLED') else ''
         row.save(update_fields=['rosy_plan_id', 'state', 'planned_steps', 'rosy_task_ids', 'reason', 'updated_at'])
         Audit.objects.create(
             actor=actor,
             action='cell_plan.dispatch',
             object_type='CellPlanDispatch',
             object_id=str(row.pk),
-            detail={'mode': dispatch_mode, 'order_source': row.order_source, 'rosy_plan_id': row.rosy_plan_id, 'steps': len(tasks)},
+            detail={'mode': dispatch_mode, 'order_source': row.order_source, 'rosy_plan_id': row.rosy_plan_id, 'steps': len(parsed.tasks)},
         )
     return row
+
+
+def preview_harbor_plan(actor, *, plan_id: int, robot_id: str = 'rosy_01', client=None) -> CellPlanDryRunResponse:
+    """Read-only simulation preview for Mode 1 Harbor plan without persisting ROSY tasks."""
+    services._role(actor, 'operator')
+    plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
+    try:
+        payload = build_harbor_plan_request(
+            plan.result,
+            observation_payload=plan.observation.payload,
+            robot_id=robot_id,
+            cargo_id=plan.order.cargo.code if plan.order.cargo_id else None,
+        )
+    except ValueError as error:
+        raise ValidationError(str(error)) from error
+    rosy_client = client if client is not None else _default_client()
+    try:
+        raw = rosy_client.preview_cell_plan(payload)
+        return parse_cell_plan_dry_run(raw, expected_order_source='harbor')
+    except HTTPError as error:
+        code = _http_error_code(error)
+        raise ValidationError(code or 'CELL_PLAN_DRY_RUN_REJECTED') from error
+    except (URLError, OSError, ValueError) as error:
+        raise ValidationError(str(error) or 'CELL_PLAN_DRY_RUN_FAILED') from error
+
+
+def preview_rosy_directive(
+    actor,
+    *,
+    order_id: int,
+    observation_id: int,
+    directive_mode: str = 'outbound',
+    destination: str = 'stand',
+    goal: dict[str, list[str]] | None = None,
+    robot_id: str = 'rosy_01',
+    client=None,
+) -> CellPlanDryRunResponse:
+    """Read-only simulation preview for Mode 2 autonomous ROSY directive."""
+    services._role(actor, 'operator')
+    order = Order.objects.select_related('cargo').get(pk=order_id)
+    observation = Observation.objects.get(pk=observation_id)
+    try:
+        payload = build_rosy_directive_request(
+            mode=directive_mode,
+            observation_payload=observation.payload,
+            cargo_id=order.cargo.code if order.cargo_id else None,
+            destination=destination,
+            goal=goal,
+            robot_id=robot_id,
+        )
+    except ValueError as error:
+        raise ValidationError(str(error)) from error
+    rosy_client = client if client is not None else _default_client()
+    try:
+        raw = rosy_client.preview_cell_plan(payload)
+        return parse_cell_plan_dry_run(raw, expected_order_source='rosy_r')
+    except HTTPError as error:
+        code = _http_error_code(error)
+        raise ValidationError(code or 'CELL_PLAN_DRY_RUN_REJECTED') from error
+    except (URLError, OSError, ValueError) as error:
+        raise ValidationError(str(error) or 'CELL_PLAN_DRY_RUN_FAILED') from error
 
 
 def dispatch_harbor_plan(actor, *, plan_id: int, robot_id: str = 'rosy_01', client=None) -> CellPlanDispatch:
@@ -323,20 +399,20 @@ def reconcile_cell_plan_dispatch(dispatch_id: int, *, client=None) -> CellPlanDi
         return row
 
     expected_steps = len(row.planned_steps) if row.dispatch_mode == 'HARBOR_PLAN' else None
-    validated = validate_cell_plan_response(
+    parsed = parse_cell_plan_response(
         raw,
         expected_order_source=row.order_source,
         expected_step_count=expected_steps,
+        expected_request_key=row.request_key,
     )
-    rosy_plan = validated['plan']
-    tasks = validated['tasks']
+    rosy_plan = parsed.plan
     with transaction.atomic():
-        row.rosy_plan_id = rosy_plan['plan_id']
-        row.state = rosy_plan['status']
+        row.rosy_plan_id = rosy_plan.plan_id
+        row.state = rosy_plan.status
         if not row.planned_steps:
-            row.planned_steps = _extract_moves(rosy_plan)
-        row.rosy_task_ids = [t['task_id'] for t in tasks]
-        row.reason = ''
+            row.planned_steps = _extract_moves(raw['plan'])
+        row.rosy_task_ids = [t.task_id for t in parsed.tasks]
+        row.reason = _failure_reason(parsed) if rosy_plan.status in ('PAUSED_HUMAN', 'ABORTED', 'CANCELLED') else ''
         row.save(update_fields=['rosy_plan_id', 'state', 'planned_steps', 'rosy_task_ids', 'reason', 'updated_at'])
         Audit.objects.create(
             actor=row.created_by,
@@ -356,15 +432,59 @@ def sync_cell_plan_dispatch(dispatch_id: int, *, client=None) -> CellPlanDispatc
         return row
     rosy_client = client if client is not None else _default_client()
     raw = rosy_client.cell_plan(row.rosy_plan_id)
-    validated = validate_cell_plan_response(
+    parsed = parse_cell_plan_response(
         raw,
         expected_order_source=row.order_source,
         expected_step_count=len(row.rosy_task_ids) or None,
+        expected_plan_id=row.rosy_plan_id,
     )
-    new_state = validated['plan']['status']
+    new_state = parsed.plan.status
+    new_reason = _failure_reason(parsed) if new_state in ('PAUSED_HUMAN', 'ABORTED', 'CANCELLED') else _failure_reason(parsed)
+    update_fields: list[str] = []
     if new_state != row.state:
         row.state = new_state
-        row.save(update_fields=['state', 'updated_at'])
+        update_fields.append('state')
+    if new_reason != row.reason and (new_reason or new_state == 'COMPLETED'):
+        row.reason = '' if new_state == 'COMPLETED' else new_reason
+        update_fields.append('reason')
+    if update_fields:
+        row.save(update_fields=[*update_fields, 'updated_at'])
+    return row
+
+
+def cancel_cell_plan_dispatch(actor, *, dispatch_id: int, reason: str, client=None) -> CellPlanDispatch:
+    """Cancel pending PROPOSED/QUEUED steps for one CellPlanDispatch via POST /cell-plans/{plan_id}/cancel."""
+    services._role(actor, 'operator')
+    row = CellPlanDispatch.objects.select_related('order').get(pk=dispatch_id)
+    if not row.rosy_plan_id or row.state not in ('PROPOSED', 'PARTIALLY_ADMITTED', 'QUEUED'):
+        raise services.Conflict('Cell plan dispatch cannot be cancelled in its current state.')
+    rosy_client = client if client is not None else _default_client()
+    try:
+        raw = rosy_client.cancel_cell_plan(row.rosy_plan_id, reason=reason)
+        parsed = parse_cell_plan_cancel(
+            raw,
+            expected_order_source=row.order_source,
+            expected_plan_id=row.rosy_plan_id,
+        )
+    except HTTPError as error:
+        code = _http_error_code(error)
+        if error.code == 409:
+            raise services.Conflict(code or 'CELL_PLAN_NOT_CANCELLABLE') from error
+        raise ValidationError(code or 'CELL_PLAN_CANCEL_FAILED') from error
+    except (URLError, OSError, ValueError) as error:
+        raise ValidationError(str(error) or 'CELL_PLAN_CANCEL_FAILED') from error
+
+    with transaction.atomic():
+        row.state = parsed.plan.status
+        row.reason = (_failure_reason(parsed) or reason)[:192]
+        row.save(update_fields=['state', 'reason', 'updated_at'])
+        Audit.objects.create(
+            actor=actor,
+            action='cell_plan.cancelled',
+            object_type='CellPlanDispatch',
+            object_id=str(row.pk),
+            detail={'rosy_plan_id': row.rosy_plan_id, 'cancelled_task_ids': list(parsed.cancelled_task_ids), 'reason': row.reason},
+        )
     return row
 
 
@@ -432,6 +552,7 @@ def dispatch_views_for_order(order: Order) -> list[dict]:
             'planned_steps': row.planned_steps,
             'created_at': row.created_at,
             'can_sync': row.state in ACTIVE_CELL_PLAN_STATES,
+            'can_cancel': row.state in ('PROPOSED', 'PARTIALLY_ADMITTED', 'QUEUED') and bool(row.rosy_plan_id),
             'can_start_outbound': row.state == 'COMPLETED' and _targets_stand(row) and od is None,
             'outbound': outbound_view,
         })

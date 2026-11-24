@@ -122,10 +122,35 @@ class _FakeCellPlanClient:
 
     def cell_plan(self, plan_id):
         rec = self.by_id[plan_id]
+        plan_extra = {}
+        if getattr(self, 'hold_reason', None):
+            plan_extra['hold_reason'] = self.hold_reason
         return {
             **rec,
-            'plan': {**rec['plan'], 'status': self.status},
+            'plan': {**rec['plan'], 'status': self.status, **plan_extra},
             'tasks': [{**t, 'status': self.status} for t in rec['tasks']],
+        }
+
+    def preview_cell_plan(self, payload):
+        return {
+            'ok': True,
+            'schema': 'rosy.cell-plan.v1',
+            'mode': payload['mode'],
+            'order_source': 'harbor' if payload['mode'] == 'harbor_plan' else 'rosy_r',
+            'moves': payload.get('steps') or [{'src_site': 'yard-r1-c1-l1', 'dst_site': 'stand-r1-c1-l1', 'arm_id': 'arm_a', 'phase_label': '반출'}],
+            'final_state': {'C1': 'stand-r1-c1-l1'},
+        }
+
+    def cancel_cell_plan(self, plan_id, *, reason):
+        rec = self.by_id[plan_id]
+        self.status = 'CANCELLED'
+        tasks = [{**t, 'status': 'CANCELLED', 'cancel_reason': reason} for t in rec['tasks']]
+        return {
+            'ok': True,
+            'schema': 'rosy.cell-plan.v1',
+            'plan': {**rec['plan'], 'status': 'CANCELLED', 'hold_reason': reason},
+            'tasks': tasks,
+            'cancelled_task_ids': [t['task_id'] for t in tasks],
         }
 
     def cell_plan_request(self, request_key):
@@ -403,3 +428,35 @@ class CellPlanDispatchTests(TestCase):
                 self.assertEqual(r4.status_code, 302)
                 od.refresh_from_db()
                 self.assertEqual(od.state, 'LOADED')
+
+    def test_preview_cancel_and_hold_reason_propagation(self):
+        client = _FakeCellPlanClient()
+        dry1 = cell_plan_dispatch.preview_harbor_plan(self.operator, plan_id=self.plan.pk, client=client)
+        self.assertEqual(dry1.order_source, 'harbor')
+        dry2 = cell_plan_dispatch.preview_rosy_directive(
+            self.operator, order_id=self.order.pk, observation_id=self.observation.pk, client=client,
+        )
+        self.assertEqual(dry2.order_source, 'rosy_r')
+
+        row = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk, client=client)
+        client.status = 'PAUSED_HUMAN'
+        client.hold_reason = 'HUMAN_IN_CELL_ZONE'
+        synced = cell_plan_dispatch.sync_cell_plan_dispatch(row.pk, client=client)
+        self.assertEqual(synced.state, 'PAUSED_HUMAN')
+        self.assertEqual(synced.reason, 'HUMAN_IN_CELL_ZONE')
+
+        client2 = _FakeCellPlanClient()
+        row2 = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk, client=client2)
+        self.client.force_login(self.operator)
+        with self.settings(ROOT_URLCONF='harbor_web.urls'), patch.object(cell_plan_dispatch, '_default_client', return_value=client2):
+            page_html = self.client.get(f'/plans/{self.plan.pk}/').content.decode('utf-8')
+            self.assertIn('셀 계획 취소', page_html)
+            resp = self.client.post(f'/plans/{self.plan.pk}/', {
+                'action': 'cell_plan_cancel',
+                'dispatch_id': row2.pk,
+                'reason': '운영자 현장 취소',
+            })
+            self.assertEqual(resp.status_code, 302)
+        row2.refresh_from_db()
+        self.assertEqual(row2.state, 'CANCELLED')
+        self.assertEqual(row2.reason, '운영자 현장 취소')

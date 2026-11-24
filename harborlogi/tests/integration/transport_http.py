@@ -168,6 +168,14 @@ class TransportHttpTests(unittest.TestCase):
                 with urlopen(req_admit, timeout=10) as resp:
                     self.assertEqual(resp.status, 200)
 
+        # Typed read-model verification against live ROSY endpoints.
+        sess = service.session_typed()
+        self.assertEqual((sess.principal_id, sess.role), ('cell-app-service', 'service'))
+        places_typed = service.site_places_typed()
+        self.assertEqual(places_typed.schema, 'rosy.port-site-places.v1')
+        sites_typed = service.cell_sites_typed()
+        self.assertEqual(len(sites_typed.sites), 37)
+
         # Rule 8 capability probe: unknown request_key returns coded 404 UNKNOWN_CELL_PLAN.
         with self.assertRaises(HTTPError) as missing_probe:
             service.cell_plan_request('harbor-probe-' + uuid4().hex)
@@ -245,6 +253,19 @@ class TransportHttpTests(unittest.TestCase):
 
         admit_plan_tasks(res2['tasks'])
         self.assertEqual(operator.cell_plan(res2['plan']['plan_id'])['plan']['status'], 'QUEUED')
+
+        # Dry-run typed preview (leaves ledger clean) + plan-level cancel (enforces proposer isolation).
+        dry = service.preview_cell_plan_typed(rosy_req, expected_order_source='rosy_r')
+        self.assertEqual(len(dry.moves), 3)
+        cancel_target = service.propose_cell_plan_typed(harbor_req, request_key='harbor-cancel-' + uuid4().hex, expected_order_source='harbor', expected_step_count=3)
+        other_svc = RosyClient(origin, config['approver'])
+        with self.assertRaises(HTTPError) as cancel_denied:
+            other_svc.cancel_cell_plan(cancel_target.plan.plan_id, reason='unauthorized')
+        self.assertEqual(cancel_denied.exception.code, 403)
+        cancelled = service.cancel_cell_plan_typed(cancel_target.plan.plan_id, reason='operator cancelled plan', expected_order_source='harbor')
+        self.assertEqual(cancelled.plan.status, 'CANCELLED')
+        self.assertEqual(cancelled.plan.hold_reason, 'operator cancelled plan')
+        self.assertEqual(list(cancelled.cancelled_task_ids), [t.task_id for t in cancel_target.tasks])
 
     def test_z_outbound_stand_two_leg_pickup_and_exit_over_real_http(self):
         """Outbound Stand (S_OUT) -> Pinky docking & pickup -> Exit (S_EXIT) over real ROSY Fleet HTTP."""

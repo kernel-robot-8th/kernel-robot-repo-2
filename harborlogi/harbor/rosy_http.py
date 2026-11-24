@@ -91,8 +91,10 @@ class RosyClient:
 
     def compile(self, binding):
         result = self._call("POST", "/api/fleet/cell-app/compile", binding.compile_request())
-        candidate, summary = result.get("candidate", {}), result.get("summary", {})
-        if (candidate.get("kind") != "cell_job" or candidate.get("recipe_sha256") != binding.recipe_digest
+        candidate = result.get("candidate") if isinstance(result, dict) else None
+        summary = result.get("summary") if isinstance(result, dict) else None
+        if (not isinstance(candidate, dict) or not isinstance(summary, dict)
+                or candidate.get("kind") != "cell_job" or candidate.get("recipe_sha256") != binding.recipe_digest
                 or candidate.get("cell_sha256") != binding.cell_digest
                 or result.get("process_artifact_digest") != binding.process_artifact_digest
                 or type(summary.get("transfer_count")) is not int or summary["transfer_count"] != 1
@@ -131,8 +133,11 @@ class RosyClient:
         return self._arm_response(self._call("POST", "/api/fleet/arm-transfers/jobs", binding.proposal_request(request_key)))
 
     def _arm_response(self, result):
+        job = result.get('job') if isinstance(result, dict) else None
+        if not isinstance(job, dict):
+            raise ValueError('Invalid ARM transfer response')
         principal = getattr(self, 'expected_principal', None)
-        if principal is not None and result.get('job', {}).get('proposal_principal_id') != principal:
+        if principal is not None and job.get('proposal_principal_id') != principal:
             raise ValueError('Fleet proposal principal differs')
         return result
 
@@ -182,9 +187,15 @@ class RosyClient:
         """Read-only geometry-free port site places (rosy.port-site-places.v1)."""
         return self._call("GET", "/api/fleet/site-points?view=port", None)
 
+    def _checked_key(self, value, label):
+        if (not isinstance(value, str) or not value.strip() or len(value) > 128
+                or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value)):
+            raise ValueError(f'Invalid {label}')
+        return value.strip()
+
     def request_recheck(self, mission_id, recheck_key):
         return self._call("POST", "/api/fleet/arm-transfers/jobs/" + quote(mission_id, safe="") + "/rechecks",
-                          {"recheck_key": recheck_key})
+                          {"recheck_key": self._checked_key(recheck_key, 'recheck_key')})
 
     def cancel_arm(self, mission_id, *, reason):
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 192 or any(ord(c) < 32 for c in reason):
@@ -195,13 +206,84 @@ class RosyClient:
         return self._call('POST', '/api/fleet/pipeline/cell-plans/dry-run', dict(payload))
 
     def propose_cell_plan(self, payload, *, request_key):
-        return self._call('POST', '/api/fleet/pipeline/cell-plans', {**dict(payload), 'request_key': request_key})
+        key = self._checked_key(request_key, 'request_key')
+        return self._call('POST', '/api/fleet/pipeline/cell-plans', {**dict(payload), 'request_key': key})
 
     def cell_plan(self, plan_id):
         return self._call('GET', '/api/fleet/pipeline/cell-plans/' + quote(plan_id, safe=''), None)
 
     def cell_plan_request(self, request_key):
-        return self._call('GET', '/api/fleet/pipeline/cell-plans?request_key=' + quote(request_key, safe=''), None)
+        key = self._checked_key(request_key, 'request_key')
+        return self._call('GET', '/api/fleet/pipeline/cell-plans?request_key=' + quote(key, safe=''), None)
+
+    def cancel_cell_plan(self, plan_id, *, reason):
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 192 or any(ord(c) < 32 for c in reason):
+            raise ValueError('Expected a short cancellation reason')
+        return self._call('POST', '/api/fleet/pipeline/cell-plans/' + quote(plan_id, safe='') + '/cancel', {'reason': reason.strip()})
+
+    def session_typed(self):
+        from harbor.fleet_types import parse_fleet_session
+        return parse_fleet_session(self.session())
+
+    def execution_profile_typed(self):
+        from harbor.fleet_types import parse_execution_profile
+        return parse_execution_profile(self.execution_profile())
+
+    def workcell_observations_typed(self):
+        from harbor.fleet_types import parse_workcell_observations
+        return parse_workcell_observations(self.workcell_observations())
+
+    def site_places_typed(self):
+        return parse_site_places(self.site_places())
+
+    def cell_sites_typed(self):
+        from harbor.fleet_types import parse_cell_site_map
+        return parse_cell_site_map(self.cell_sites())
+
+    def port_events_typed(self, *, after=None, limit=100):
+        from harbor.fleet_types import parse_port_event_page
+        return parse_port_event_page(self.port_events(after=after, limit=limit))
+
+    def preview_cell_plan_typed(self, payload, *, expected_order_source=None):
+        from harbor.cell_plan import parse_cell_plan_dry_run
+        raw = payload.to_wire() if hasattr(payload, 'to_wire') else payload
+        return parse_cell_plan_dry_run(self.preview_cell_plan(raw), expected_order_source=expected_order_source)
+
+    def propose_cell_plan_typed(self, payload, *, request_key, expected_order_source, expected_step_count=None):
+        from harbor.cell_plan import parse_cell_plan_response
+        raw = payload.to_wire() if hasattr(payload, 'to_wire') else payload
+        return parse_cell_plan_response(
+            self.propose_cell_plan(raw, request_key=request_key),
+            expected_order_source=expected_order_source,
+            expected_step_count=expected_step_count,
+            expected_request_key=request_key,
+        )
+
+    def cell_plan_typed(self, plan_id, *, expected_order_source, expected_step_count=None):
+        from harbor.cell_plan import parse_cell_plan_response
+        return parse_cell_plan_response(
+            self.cell_plan(plan_id),
+            expected_order_source=expected_order_source,
+            expected_step_count=expected_step_count,
+            expected_plan_id=plan_id,
+        )
+
+    def cell_plan_request_typed(self, request_key, *, expected_order_source, expected_step_count=None):
+        from harbor.cell_plan import parse_cell_plan_response
+        return parse_cell_plan_response(
+            self.cell_plan_request(request_key),
+            expected_order_source=expected_order_source,
+            expected_step_count=expected_step_count,
+            expected_request_key=request_key,
+        )
+
+    def cancel_cell_plan_typed(self, plan_id, *, reason, expected_order_source=None):
+        from harbor.cell_plan import parse_cell_plan_cancel
+        return parse_cell_plan_cancel(
+            self.cancel_cell_plan(plan_id, reason=reason),
+            expected_order_source=expected_order_source,
+            expected_plan_id=plan_id,
+        )
 
 
 def load_site_recognition(client=None, *, known_site_refs=None):

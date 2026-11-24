@@ -99,6 +99,19 @@ def plan_detail(request, pk):
                 return render(request, 'error.html', dict(heading='적재 확인을 기록할 수 없습니다', reason='도킹 상태나 버전이 바뀌었습니다. 화면을 새로 열어 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
             messages.info(request, '차량 적재를 확인했습니다. 출구 이동이 준비됩니다.')
             return redirect(f'/plans/{pk}/')
+        if request.POST.get('action') == 'cell_plan_cancel':
+            try:
+                dispatch_id = int(request.POST.get('dispatch_id', ''))
+            except (TypeError, ValueError):
+                return render(request, 'error.html', dict(reason='셀 계획 식별자가 올바르지 않습니다.', return_url=f'/plans/{pk}/'), status=400)
+            target_row = get_object_or_404(CellPlanDispatch, pk=dispatch_id, order_id=plan.order_id)
+            reason = (request.POST.get('reason') or '운영자 취소 요청').strip() or '운영자 취소 요청'
+            try:
+                cancelled = cell_plan_dispatch.cancel_cell_plan_dispatch(request.user, dispatch_id=target_row.pk, reason=reason)
+            except (services.Conflict, ValidationError, OSError, ValueError) as exc:
+                return render(request, 'error.html', dict(heading='셀 계획을 취소할 수 없습니다', reason=exc.messages[0] if getattr(exc, 'messages', None) else '이미 실행되었거나 취소할 수 없는 상태입니다.', return_url=f'/plans/{pk}/'), status=409)
+            messages.info(request, f'셀 계획을 취소했습니다: {cell_plan_dispatch._STATE_LABELS.get(cancelled.state, cancelled.state)}')
+            return redirect(f'/plans/{pk}/')
         if request.POST.get('action') == 'decide':  # a person accepts the algorithm's inbound placement (ADR 0012)
             from harbor_web.inbound_decision import PlacementDecisionForm, decide_placement
             decision_form = PlacementDecisionForm(request.POST)
