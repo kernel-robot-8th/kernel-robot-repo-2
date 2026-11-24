@@ -79,6 +79,8 @@
 .topview-panel img {display:block;width:100%;height:auto;border-radius:var(--primitive-radius-control);transform:rotate(180deg)} /* camera looks from the far side: turn it to the yard plan's direction */
 .topview-panel img[hidden] {display:none}
 .topview-panel select {width:100%}
+.topview-panel .topview-controls {margin-left:auto;display:flex;gap:var(--primitive-space-2);align-items:center}
+.topview-panel .topview-controls select {width:auto;max-width:14rem}
 .topview-panel .topview-camera {margin-left:auto}.topview-panel .topview-camera select {width:auto;max-width:14rem}
 .topview-panel [role="status"] {min-height:1.4em;color:var(--semantic-text-secondary);overflow-wrap:anywhere}
 .sw.role-cargo {background:var(--primitive-color-navy-soft);color:var(--primitive-color-ink)}

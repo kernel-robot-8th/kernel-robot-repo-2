@@ -29,14 +29,15 @@ export function pollDelay(status, hidden) {
   return hidden ? null : status === 200 ? 1000 : 3000;
 }
 
-export function frameStatus(status, capturedAt) {
+export function frameStatus(status, capturedAt, rectified = null) {
   if (status === 404) return '그림이 오래됨';
   if (status !== 200) return 'ROSY 연결 안 됨';
+  const modePrefix = rectified === 'map-overlay' ? '실제 환경 + 좌표' : rectified === 'map' ? '버드뷰 평면' : '';
   const captured = parseCapturedAt(capturedAt);
-  if (!captured) return '';
+  if (!captured) return modePrefix;
   const time = [captured.getHours(), captured.getMinutes(), captured.getSeconds()]
     .map(value => String(value).padStart(2, '0')).join(':');
-  return '찍은 시각 ' + time;
+  return modePrefix ? `${modePrefix} · 찍은 시각 ${time}` : '찍은 시각 ' + time;
 }
 
 const FRAME_ROTATIONS = [0, 90, 180, 270];
@@ -52,7 +53,18 @@ export function mountTopview(panel) {
   const image = panel.querySelector('[data-topview-image]');
   const statusText = panel.querySelector('[data-topview-status]');
   const select = panel.querySelector('[data-topview-source]');
+  const modeSelect = panel.querySelector('[data-topview-mode]');
+  const orientationText = panel.querySelector('[data-topview-orientation]');
+  const defaultOrientation = orientationText?.textContent ?? '';
   let timer, request, imageUrl;
+
+  function requestUrl() {
+    const base = select?.value || panel.dataset.topviewUrl;
+    if (modeSelect?.value === 'raw') {
+      return `${base}${base.includes('?') ? '&' : '?'}view=raw`;
+    }
+    return base;
+  }
 
   function clearImage() {
     image.hidden = true;
@@ -77,7 +89,7 @@ export function mountTopview(panel) {
     request = current;
     let status = 0;
     try {
-      const response = await fetch(select?.value || panel.dataset.topviewUrl, {
+      const response = await fetch(requestUrl(), {
         cache: 'no-store', signal: current.signal, credentials: 'same-origin',
       });
       if (request !== current) return;
@@ -107,7 +119,16 @@ export function mountTopview(panel) {
         if (status === 200) status = 502;
         clearImage();
       }
-      setStatus(frameStatus(status, response.headers.get('X-Frame-Captured-At')));
+      const rawRectified = response.headers.get('X-Frame-Rectified');
+      const rectified = rawRectified === 'map-overlay' || rawRectified === 'map' ? rawRectified : null;
+      if (orientationText && defaultOrientation) {
+        orientationText.textContent = rectified === 'map-overlay'
+          ? '버드뷰 실제 환경 + 좌표 (지도 +X 오른쪽 · +Y 위)'
+          : rectified === 'map'
+            ? '버드뷰 평면 (지도 +X 오른쪽 · +Y 위)'
+            : defaultOrientation;
+      }
+      setStatus(frameStatus(status, response.headers.get('X-Frame-Captured-At'), rectified));
     } catch (_) {
       if (request !== current) return;
       status = 0;
@@ -142,6 +163,7 @@ export function mountTopview(panel) {
   }
 
   select?.addEventListener('change', onChange);
+  modeSelect?.addEventListener('change', onChange);
   document.addEventListener('visibilitychange', restart);
   window.addEventListener('pagehide', onPageHide);
   window.addEventListener('pageshow', onPageShow);
@@ -150,6 +172,7 @@ export function mountTopview(panel) {
     stop();
     clearImage();
     select?.removeEventListener('change', onChange);
+    modeSelect?.removeEventListener('change', onChange);
     document.removeEventListener('visibilitychange', restart);
     window.removeEventListener('pagehide', onPageHide);
     window.removeEventListener('pageshow', onPageShow);

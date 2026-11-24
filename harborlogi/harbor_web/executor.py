@@ -44,6 +44,11 @@ def _setting(name, default):
     return value if math.isfinite(value) and value > 0 else default
 
 
+def clear_backoff():
+    with _failures_guard:
+        _failures.clear()
+
+
 def _eligible(command_id, now):
     with _failures_guard:
         _, until = _failures.get(command_id, (0, None))

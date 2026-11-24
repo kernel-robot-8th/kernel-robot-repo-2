@@ -9,7 +9,14 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
 
-from harbor.rosy_vision import MAP_RECTIFICATION, PlaneUnavailableError, StaleFrameError, VisionClient
+from harbor.rosy_vision import (
+    MAP_OVERLAY_RECTIFICATION,
+    MAP_RECTIFICATION,
+    PlaneUnavailableError,
+    RectificationUnsupportedError,
+    StaleFrameError,
+    VisionClient,
+)
 
 
 # ── 가짜 Vision 서버 ──
@@ -361,6 +368,15 @@ class VisionClientTests(unittest.TestCase):
         self.assertEqual(meta["X-Frame-Seq"], "7")
         # Bearer로 lease 토큰을 보냈는지 확인
         self.assertEqual(calls[0][2]["Authorization"], "Bearer my-lease")
+
+    def test_lease_422_raises_rectification_unsupported(self):
+        client = VisionClient(
+            base_url='https://fleet.example',
+            token='tok',
+            transport=lambda *args: (422, {}, b'unsupported'),
+        )
+        with self.assertRaises(RectificationUnsupportedError):
+            client.lease('test-cam', rectification=MAP_OVERLAY_RECTIFICATION)
 
 
 if __name__ == "__main__":
