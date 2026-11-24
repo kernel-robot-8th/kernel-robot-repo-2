@@ -24,12 +24,11 @@ class TopviewPagesTests(TestCase):
         })
         env.start()
         self.addCleanup(env.stop)
-        reader = patch('harbor_web.topview_proxy.RosyClient')
+        reader = patch('harbor_web.topview_proxy.VisionClient')
         self.reader_class = reader.start()
         self.addCleanup(reader.stop)
         self.reader = self.reader_class.return_value
-        self.reader.workcell_observations.return_value = {
-            'workcells': [{'cameras': [{'source_id': 'cam-one'}, {'source_id': 'cam-two'}]}]}
+        self.reader.sources.return_value = {'sources': ['cam-one', 'cam-two']}
 
     def pages(self):
         for path in ('/', '/inventory/'):
@@ -44,7 +43,7 @@ class TopviewPagesTests(TestCase):
                 for response in self.pages():
                     self.assertContains(response, status)
                     self.assertNotContains(response, 'data-topview-source')
-        self.reader.workcell_observations.assert_not_called()
+        self.reader.sources.assert_not_called()
 
     def test_shared_panel_and_camera_selection_next_to_observed_yard(self):
         self.observe(self.condition(), self.payload(self.cargo()))
@@ -60,37 +59,30 @@ class TopviewPagesTests(TestCase):
         self.assertEqual(self.reader_class.call_args.kwargs['timeout'], 2)
 
     def test_one_camera_starts_directly_without_selector(self):
-        self.reader.workcell_observations.return_value = {
-            'workcells': [{'cameras': [{'source_id': 'cam-one'}, {'source_id': 'cam-one'}]}]}
+        self.reader.sources.return_value = {'sources': ['cam-one', 'cam-one']}
         for response in self.pages():
             self.assertContains(response, 'data-topview-url="/topview/cam-one/frame/"')
             self.assertNotContains(response, 'data-topview-source')
 
     def test_invalid_peer_sources_do_not_hide_a_valid_camera(self):
-        self.reader.workcell_observations.return_value = {'workcells': [{'cameras': [
-            {}, {'source_id': None}, {'source_id': 'bad/source'}, {'source_id': '.'},
-            {'source_id': '..'}, {'source_id': 'cam-one'},
-        ]}]}
+        self.reader.sources.return_value = {'sources': [None, '', 'bad/source', '.', '..', 'ceiling_north']}
         for response in self.pages():
-            self.assertContains(response, 'data-topview-url="/topview/cam-one/frame/"')
+            self.assertContains(response, 'data-topview-url="/topview/ceiling_north/frame/"')
             self.assertNotContains(response, 'data-topview-source')
 
     def test_connection_errors_leave_both_pages_available(self):
         for error in (OSError('test-fleet-secret'), ValueError('invalid response')):
             with self.subTest(error=type(error).__name__):
-                self.reader.workcell_observations.side_effect = error
+                self.reader.sources.side_effect = error
                 for response in self.pages():
                     self.assertContains(response, 'ROSY 연결 안 됨')
                     self.assertNotContains(response, 'test-fleet-secret')
 
     def test_empty_or_malformed_cameras_leave_both_pages_available(self):
-        for snapshot in ({}, {'workcells': None}, {'workcells': [None]},
-                         {'workcells': [{'cameras': {}}]}, {'workcells': [{'cameras': [None]}]},
-                         {'workcells': [{'cameras': [{'source_id': None}]}]},
-                         {'workcells': [{'cameras': [{'source_id': 'bad/source'}]}]},
-                         {'workcells': []}):
+        for snapshot in ({}, {'sources': None}, {'sources': {}}, {'sources': [None]},
+                         {'sources': ['bad/source']}, {'sources': []}):
             with self.subTest(snapshot=snapshot):
-                self.reader.workcell_observations.return_value = snapshot
+                self.reader.sources.return_value = snapshot
                 for response in self.pages():
                     self.assertContains(response, 'ROSY 연결 안 됨')
 
@@ -106,7 +98,7 @@ class TopviewPagesTests(TestCase):
         self.assertEqual((redirect_response.status_code, redirect_response['Location']), (302, '/alerts/'))
         self.assertEqual(self.client.get('/alerts/').status_code, 200)
         self.assertEqual(self.client.get('/settings/').status_code, 403)
-        self.reader.workcell_observations.assert_not_called()
+        self.reader.sources.assert_not_called()
         inventory_response = self.client.get('/inventory/')
         self.assertEqual(inventory_response.status_code, 200)
         self.assertContains(inventory_response, 'ROSY 탑뷰', count=1)
