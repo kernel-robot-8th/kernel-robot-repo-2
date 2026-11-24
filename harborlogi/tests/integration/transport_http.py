@@ -257,15 +257,35 @@ class TransportHttpTests(unittest.TestCase):
         # Dry-run typed preview (leaves ledger clean) + plan-level cancel (enforces proposer isolation).
         dry = service.preview_cell_plan_typed(rosy_req, expected_order_source='rosy_r')
         self.assertEqual(len(dry.moves), 3)
-        cancel_target = service.propose_cell_plan_typed(harbor_req, request_key='harbor-cancel-' + uuid4().hex, expected_order_source='harbor', expected_step_count=3)
-        other_svc = RosyClient(origin, config['approver'])
+        op_plan = operator.propose_cell_plan_typed(
+            {**harbor_req, 'propose': True},
+            request_key='harbor-op-cancel-' + uuid4().hex,
+            expected_order_source='harbor',
+            expected_step_count=3,
+        )
         with self.assertRaises(HTTPError) as cancel_denied:
-            other_svc.cancel_cell_plan(cancel_target.plan.plan_id, reason='unauthorized')
+            service.cancel_cell_plan(op_plan.plan.plan_id, reason='unauthorized')
         self.assertEqual(cancel_denied.exception.code, 403)
-        cancelled = service.cancel_cell_plan_typed(cancel_target.plan.plan_id, reason='operator cancelled plan', expected_order_source='harbor')
+        self.assertEqual(json.loads(cancel_denied.exception.read())['detail']['code'], 'CELL_PLAN_CANCEL_FORBIDDEN')
+
+        cancel_target = service.propose_cell_plan_typed(
+            harbor_req,
+            request_key='harbor-cancel-' + uuid4().hex,
+            expected_order_source='harbor',
+            expected_step_count=3,
+        )
+        cancelled = service.cancel_cell_plan_typed(
+            cancel_target.plan.plan_id,
+            reason='operator cancelled plan',
+            expected_order_source='harbor',
+        )
         self.assertEqual(cancelled.plan.status, 'CANCELLED')
         self.assertEqual(cancelled.plan.hold_reason, 'operator cancelled plan')
         self.assertEqual(list(cancelled.cancelled_task_ids), [t.task_id for t in cancel_target.tasks])
+        with self.assertRaises(HTTPError) as cancel_again:
+            service.cancel_cell_plan(cancel_target.plan.plan_id, reason='duplicate cancel')
+        self.assertEqual(cancel_again.exception.code, 409)
+        self.assertEqual(json.loads(cancel_again.exception.read())['detail']['code'], 'CELL_PLAN_NOT_CANCELLABLE')
 
     def test_z_outbound_stand_two_leg_pickup_and_exit_over_real_http(self):
         """Outbound Stand (S_OUT) -> Pinky docking & pickup -> Exit (S_EXIT) over real ROSY Fleet HTTP."""
