@@ -17,7 +17,13 @@ from django.http import HttpResponse
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods
 
-from harbor.rosy_vision import FRAME_HEADERS, StaleFrameError, VisionClient
+from harbor.rosy_vision import (
+    FRAME_HEADERS,
+    MAP_RECTIFICATION,
+    PlaneUnavailableError,
+    StaleFrameError,
+    VisionClient,
+)
 from harbor_web.access import EVERYONE
 
 from harbor_web.auth import require_roles
@@ -76,8 +82,12 @@ def topview_frame(request, source_id):
         if source_id not in _camera_sources(origin, token, ca_file, timeout=10):
             return HttpResponse('frame unavailable', status=404, content_type='text/plain; charset=utf-8')
         client = VisionClient(origin, token, timeout=10, ca_file=ca_file)
-        lease_response = client.lease(source_id)
-        jpeg, metadata = client.fetch_frame(lease_response)
+        try:
+            lease_response = client.lease(source_id, rectification=MAP_RECTIFICATION)
+            jpeg, metadata = client.fetch_frame(lease_response)
+        except PlaneUnavailableError:
+            lease_response = client.lease(source_id)
+            jpeg, metadata = client.fetch_frame(lease_response)
         response = HttpResponse(jpeg, content_type="image/jpeg")
         response["Cache-Control"] = "no-store"
         for key in FRAME_HEADERS:

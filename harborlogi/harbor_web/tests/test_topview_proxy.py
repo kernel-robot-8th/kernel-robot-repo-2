@@ -6,7 +6,7 @@ from django.contrib.auth.models import Group, User
 from django.test import TestCase
 from django.urls import reverse
 
-from harbor.rosy_vision import StaleFrameError
+from harbor.rosy_vision import MAP_RECTIFICATION, PlaneUnavailableError, StaleFrameError
 
 
 class TopviewProxyTests(TestCase):
@@ -90,12 +90,33 @@ class TopviewProxyTests(TestCase):
             'frame_path': '/api/vision/sources/ceiling_north/frame'}
         allowed = self.client.get(reverse('topview_frame', args=['ceiling_north']))
         self.assertEqual((allowed.status_code, allowed.content), (200, b'jpeg-test'))
-        self.camera.lease.assert_called_once_with('ceiling_north')
+        self.camera.lease.assert_called_once_with('ceiling_north', rectification=MAP_RECTIFICATION)
 
         self.camera.lease.reset_mock()
         rejected = self.client.get(reverse('topview_frame', args=['unapproved-cam']))
         self.assertEqual(rejected.status_code, 404)
         self.camera.lease.assert_not_called()
+
+    def test_falls_back_to_raw_frame_when_map_plane_rectification_is_unavailable(self):
+        self.camera.lease.side_effect = [
+            {'source_id': 'test-cam', 'lease': 'map-lease-secret',
+             'frame_path': '/api/vision/sources/test-cam/frame'},
+            {'source_id': 'test-cam', 'lease': 'raw-lease-secret',
+             'frame_path': '/api/vision/sources/test-cam/frame'},
+        ]
+        self.camera.fetch_frame.side_effect = [
+            PlaneUnavailableError('map plane unavailable'),
+            (b'jpeg-raw-fallback', {'X-Frame-Seq': '43', 'X-Frame-Rectified': 'false'}),
+        ]
+        response = self.client.get(self.url)
+        self.assertEqual((response.status_code, response.content), (200, b'jpeg-raw-fallback'))
+        self.assertEqual(response['X-Frame-Rectified'], 'false')
+        self.assertEqual(
+            [call.kwargs for call in self.camera.lease.call_args_list],
+            [{'rectification': MAP_RECTIFICATION}, {}],
+        )
+        self.assertNotIn('map-lease-secret', str(dict(response.headers)))
+        self.assertNotIn('raw-lease-secret', str(dict(response.headers)))
 
     def test_stale_and_network_errors_do_not_expose_credentials(self):
         for error, status in ((StaleFrameError('test-lease-secret'), 404),
