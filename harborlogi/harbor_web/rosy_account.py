@@ -248,15 +248,18 @@ class RosyAccountMiddleware:
 
     def __call__(self, request):
         tokens = request.session.get(_SESSION) if settings.ROSY_ACCOUNT else None
-        if tokens and request.user.is_authenticated and time.time() - tokens['checked'] >= CHECK_EVERY_S:
-            self._check(request, tokens)
+        if tokens and request.user.is_authenticated:
+            remaining = tokens['exp'] - time.time()
+            if time.time() - tokens['checked'] >= CHECK_EVERY_S or 0 < remaining < 40:
+                self._check(request, tokens)
         return self.get_response(request)
 
     def _check(self, request, tokens):
         config = settings.ROSY_ACCOUNT
         try:
             status, body = _call('introspect', {'token': tokens['access']})
-            if status == 200 and body.get('active') is True and body.get('sub') == tokens['sub']:
+            if (status == 200 and body.get('active') is True and body.get('sub') == tokens['sub']
+                    and tokens['exp'] - time.time() >= 40):
                 request.session[_SESSION] = dict(tokens, checked=time.time())
                 return
             status, body = _call('token', {'grant_type': 'refresh_token', 'client_id': config['client_id'],

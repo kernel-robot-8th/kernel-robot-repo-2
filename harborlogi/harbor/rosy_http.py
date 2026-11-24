@@ -334,7 +334,7 @@ def open_arm_incident_holds(snapshot):
             for inc in incidents:
                 if not isinstance(inc, dict):
                     raise ValueError("Invalid arm incident entry")
-                if inc.get("state") == "cleared":
+                if inc.get("state") == "cleared" or inc.get("held") is False:
                     continue
                 decision = inc.get("decision")
                 # Fail closed like Fleet's ArmIncidentStore._holds: missing or malformed decision stays held.
