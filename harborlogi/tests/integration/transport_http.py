@@ -244,3 +244,128 @@ class TransportHttpTests(unittest.TestCase):
             second = intake.poll(client, connection=config['origin'], now=now)
             self.assertEqual(second['outcomes'], {})
             self.assertIs(second['complete'], True)
+
+    def test_z_outbound_stand_two_leg_pickup_and_exit_over_real_http(self):
+        """Outbound Stand (S_OUT) -> Pinky docking & pickup -> Exit (S_EXIT) over real ROSY Fleet HTTP."""
+        config = json.loads(Path(os.environ['HARBOR_INTEGRATION_CONFIG']).read_text(encoding='utf-8'))
+        service_token = config.get('service')
+        if not service_token:
+            self.skipTest('Service token not provided in harness config')
+        operator_token = config['operator']
+        approver_token = config['approver']
+        proposer = RosyClient(config['origin'], service_token)
+        proposer.expected_principal, proposer.expected_role = 'cell-app-service', 'service'
+
+        # Default RealFleet map has unverified S_OUT: fail closed before commissioning.
+        self.assertIsNone(resolve_outbound_dispatch_stops(parse_site_places(proposer.site_places()))[0])
+
+        def call(token, method, path, body=None):
+            req = Request(
+                config['origin'].rstrip('/') + path,
+                data=None if body is None else json.dumps(body).encode('utf-8'),
+                method=method,
+                headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+            )
+            with urlopen(req, timeout=10) as resp:
+                return json.load(resp)
+
+        # Commission a free-mode ring containing verified S_OUT (stop_zone + approach_m + pinned) and S_EXIT.
+        ring_places = [
+            {'id': 'dock', 'name': 'dock', 'x': 0.0, 'y': 0.0, 'kind': 'junction'},
+            {'id': 'inbound', 'name': 'inbound', 'x': 0.5, 'y': 0.0, 'kind': 'junction'},
+            {
+                'id': 'S_OUT', 'name': 'S_OUT 반출대', 'x': 0.5, 'y': 0.5, 'yaw': 1.570796, 'kind': 'stop',
+                'pinned': True, 'stop_zone': [[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.6]], 'approach_m': 0.1,
+            },
+            {'id': 'S_EXIT', 'name': 'S_EXIT 출구', 'x': 0.0, 'y': 0.5, 'yaw': 3.14159, 'kind': 'stop', 'pinned': True},
+        ]
+        coords = {p['id']: [p['x'], p['y']] for p in ring_places}
+        ring_order = ['dock', 'inbound', 'S_OUT', 'S_EXIT', 'dock']
+        site_map_doc = {
+            'schema': 'rosy.site_map/1',
+            'map_id': 'harbor-outbound-e2e',
+            'places': ring_places,
+            'edges': [
+                {
+                    'id': f'{a}-{b}', 'from': a, 'to': b, 'polyline': [coords[a], coords[b]],
+                    'width_m': 0.2, 'speed_cap_mps': 0.2, 'drive_mode': 'free', 'pinned': True,
+                }
+                for a, b in zip(ring_order, ring_order[1:])
+            ],
+        }
+        rules_doc = {
+            'return': {'exit_place': 'S_EXIT'},
+            'stops': [{'place': 'S_OUT', 'role': 'load'}, {'place': 'S_EXIT', 'role': 'wait'}],
+        }
+        draft = call(operator_token, 'PUT', '/api/fleet/site-map/draft', {
+            'map': site_map_doc,
+            'expected_revision': call(operator_token, 'GET', '/api/fleet/site-map/draft').get('revision'),
+        })
+        call(operator_token, 'POST', '/api/fleet/site-map/activate', {'expected_revision': draft['revision']})
+        rdraft = call(operator_token, 'PUT', '/api/fleet/site-rules/draft', {
+            'rules': rules_doc,
+            'expected_revision': call(operator_token, 'GET', '/api/fleet/site-rules/draft').get('revision'),
+        })
+        call(operator_token, 'POST', '/api/fleet/site-rules/activate', {'expected_revision': rdraft['revision']})
+
+        places_after = parse_site_places(proposer.site_places())
+        s_out_place = places_after.vehicle_place('S_OUT')
+        s_exit_place = places_after.vehicle_place('S_EXIT')
+        self.assertIsNotNone(s_out_place)
+        self.assertTrue(s_out_place.status == 'verified' and s_out_place.dispatchable)
+        self.assertIsNotNone(s_exit_place)
+        self.assertEqual((s_exit_place.port_role, s_exit_place.status, s_exit_place.dispatchable),
+                         ('outbound_exit', 'verified', True))
+        # Real cell-site-map.json keeps stand planned_unverified until cell calibration; resolve_outbound_dispatch_stops
+        # fail-closes with OUTBOUND_ZONE_UNVERIFIED while the commissioned vehicle stops execute the 2-leg trip.
+        self.assertEqual(resolve_outbound_dispatch_stops(places_after), (None, 'OUTBOUND_ZONE_UNVERIFIED'))
+        stops = (s_out_place.place_id, s_exit_place.place_id)
+
+        with tempfile.TemporaryDirectory() as folder:
+            ledger = TransportLedger(Path(folder) / 'outbound.sqlite3')
+            leg1_key = 'harbor-out-leg1-' + uuid4().hex
+            leg1 = TripIntent(leg1_key, tuple(config['candidates']), stops[0], object_ref='')
+            ledger.prepare(leg1)
+            p1 = ledger.propose(leg1_key, proposer)
+            self.assertNotIn('object_ref', p1)
+            gen = call(approver_token, 'GET', '/api/fleet/dispatch-control')['generation']
+            with self.assertRaises(HTTPError) as self_admit:
+                call(service_token, 'POST', f"/api/fleet/trip-proposals/{p1['proposal_id']}/admit", {
+                    'expected_proposal_digest': p1['proposal_digest'], 'expected_generation': gen,
+                })
+            self.assertEqual(self_admit.exception.code, 403)
+            call(approver_token, 'POST', f"/api/fleet/trip-proposals/{p1['proposal_id']}/admit", {
+                'expected_proposal_digest': p1['proposal_digest'], 'expected_generation': gen,
+            })
+            deadline = time.monotonic() + 30
+            while True:
+                job1 = ledger.reconcile_proposal(leg1_key, proposer)
+                if job1['status'] == 'GOAL_CONFIRMED':
+                    break
+                self.assertNotEqual(job1['status'], 'HOLD', job1.get('reason'))
+                if time.monotonic() >= deadline:
+                    self.fail('Leg 1 S_OUT docking trip did not complete within 30 seconds')
+                time.sleep(0.1)
+            robot_id = job1['robot_id']
+            self.assertEqual(job1['steps'][0]['step']['to'], 'S_OUT')
+
+            leg2_key = 'harbor-out-leg2-' + uuid4().hex
+            leg2 = TripIntent(leg2_key, (robot_id,), stops[1], object_ref='')
+            ledger.prepare(leg2)
+            p2 = ledger.propose(leg2_key, proposer)
+            self.assertNotIn('object_ref', p2)
+            gen2 = call(approver_token, 'GET', '/api/fleet/dispatch-control')['generation']
+            call(approver_token, 'POST', f"/api/fleet/trip-proposals/{p2['proposal_id']}/admit", {
+                'expected_proposal_digest': p2['proposal_digest'], 'expected_generation': gen2,
+            })
+            deadline = time.monotonic() + 30
+            while True:
+                job2 = ledger.reconcile_proposal(leg2_key, proposer)
+                if job2['status'] == 'GOAL_CONFIRMED':
+                    break
+                self.assertNotEqual(job2['status'], 'HOLD', job2.get('reason'))
+                if time.monotonic() >= deadline:
+                    self.fail('Leg 2 S_EXIT exit trip did not complete within 30 seconds')
+                time.sleep(0.1)
+            self.assertEqual(job2['robot_id'], robot_id)
+            self.assertEqual(job2['steps'][0]['step']['to'], 'S_EXIT')
