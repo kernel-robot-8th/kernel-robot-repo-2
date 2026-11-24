@@ -23,6 +23,7 @@ FIELDS = ("event_id", "kind", "observation_ref", "object_ref", "intake_point", "
 KINDS = {
     "container.received_at_intake": ({"object_ref", "intake_point", "identity"}, set()),
     "container.stored": ({"object_ref", "slot_ref", "identity"}, set()),
+    "container.loaded_for_outbound": ({"object_ref", "vehicle_id", "identity"}, set()),
     "container.handling_failed": ({"reason"}, {"object_ref"}),
     "vehicle.release_permitted": ({"vehicle_id"}, set()),
 }
@@ -199,6 +200,8 @@ class IntakeLedger:
         if kind == "vehicle.release_permitted":
             record_release(c, event)
             return "RELEASE_PERMITTED"
+        if kind == "container.loaded_for_outbound":
+            return "OUTBOUND_LOADED"
         row = None if ref is None else c.execute("SELECT * FROM intake WHERE object_ref=?", (ref,)).fetchone()
         if row is None:
             return "HOLD_UNKNOWN"
@@ -217,6 +220,22 @@ class IntakeLedger:
             if done:
                 c.execute("UPDATE intake SET attention=?,version=version+1 WHERE object_ref=?", (event["reason"], ref))
         return "APPLIED" if done else "IGNORED"
+
+    def outbound_loaded_events(self, *, object_ref=None, vehicle_id=None):
+        """Return consumed `container.loaded_for_outbound` events filtered by optional cargo/vehicle."""
+        with closing(self._connect()) as c:
+            rows = c.execute(
+                "SELECT payload FROM port_events WHERE kind='container.loaded_for_outbound' ORDER BY rowid ASC"
+            ).fetchall()
+        matched = []
+        for row in rows:
+            event = json.loads(row["payload"])
+            if object_ref is not None and event.get("object_ref") != object_ref:
+                continue
+            if vehicle_id is not None and event.get("vehicle_id") != vehicle_id:
+                continue
+            matched.append(event)
+        return matched
 
     def consume(self, events, *, now, connection=None, cursor=None):
         """Apply parsed events in order inside one transaction; replays are skipped. Returns outcomes."""

@@ -13,7 +13,7 @@ from harbor.cell_site_map import decode_cell_site_json
 from harbor.fleet_discovery import _NoRedirect
 from harbor.site_recognition import parse_site_recognition
 
-# ADR 0032 미확정 제안 경로(ROSY origin/main 미구현; ROSY D-1075와 별개). ROSY가 경로를 정하면 이 값만 바꾼다.
+# ROSY Wave 4 구현 경로 (`rosy.cell-site-recognition.v1`).
 SITE_RECOGNITION_PATH_PROPOSED = '/api/fleet/cell-site-recognition'
 
 
@@ -216,6 +216,21 @@ class RosyClient:
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 192 or any(ord(c) < 32 for c in reason):
             raise ValueError('Expected a short cancellation reason')
         return self._call('POST', '/api/fleet/arm-transfers/jobs/' + quote(mission_id, safe='') + '/cancel', {'reason': reason})
+
+    def arm_recovery_preview(self, mission_id):
+        """Read-only S3 ARM transfer recovery preview (`rosy` owns recovery grant)."""
+        return self._call('GET', '/api/fleet/arm-transfers/jobs/' + quote(mission_id, safe='') + '/recovery', None)
+
+    def arm_recovery_request(self, mission_id, *, request_key, expected_context_digest):
+        """Propose S3 ARM transfer recovery; execution decision remains with a ROSY named operator."""
+        key = self._checked_key(request_key, 'request_key')
+        if not isinstance(expected_context_digest, str) or not re.fullmatch(r'[0-9a-f]{64}', expected_context_digest):
+            raise ValueError('Invalid expected_context_digest')
+        return self._call(
+            'POST',
+            '/api/fleet/arm-transfers/jobs/' + quote(mission_id, safe='') + '/recovery',
+            {'request_key': key, 'expected_context_digest': expected_context_digest},
+        )
 
     def preview_cell_plan(self, payload):
         return self._call('POST', '/api/fleet/pipeline/cell-plans/dry-run', dict(payload))

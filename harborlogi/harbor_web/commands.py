@@ -353,6 +353,47 @@ def cancel_command(actor, *, command_id, expected_version, reason):
 
 
 @serialized
+def request_arm_recovery(actor, *, command_id, expected_version):
+    """Submit S3 ARM transfer recovery request for a held command; ROSY retains decision authority."""
+    registry = acquire_registry()
+    with registry.lock(command_id):
+        _role(actor, 'operator')
+        command = Command.objects.get(pk=command_id)
+        if command.version != expected_version:
+            raise Conflict('Command changed; reload.')
+        _validate(command, registry.config)
+        if not command.mission_id or command.reason != 'BUSINESS_HOLD':
+            raise Conflict('Only a BUSINESS_HOLD command with a Fleet mission id can request recovery.')
+        try:
+            preview = registry.client.arm_recovery_preview(command.mission_id)
+        except Exception as exc:
+            raise ValidationError('ROSY_RECOVERY_PREVIEW_UNAVAILABLE') from exc
+        recovery = preview.get('recovery') if isinstance(preview, dict) else None
+        if not isinstance(recovery, dict) or recovery.get('can_request') is not True:
+            raise Conflict('ROSY recovery request is not permitted in current state.')
+        digest = recovery.get('context_digest')
+        if not isinstance(digest, str) or len(digest) != 64:
+            raise Conflict('ROSY recovery context digest is missing.')
+        req_key = f"{_key(command)}:recovery:{command.version}"
+        try:
+            reply = registry.client.arm_recovery_request(
+                command.mission_id,
+                request_key=req_key,
+                expected_context_digest=digest,
+            )
+        except Exception as exc:
+            raise ValidationError('ROSY_RECOVERY_REQUEST_FAILED') from exc
+        Audit.objects.create(
+            actor=actor,
+            action='command.arm_recovery_requested',
+            object_type='Command',
+            object_id=str(command.pk),
+            detail={'mission_id': command.mission_id, 'request_key': req_key, 'context_digest': digest},
+        )
+        return reply
+
+
+@serialized
 def close_cancelled(actor, *, command_id, expected_version):
     """Close a pending cancellation as CANCELLED after the operator confirmed the stop.
 

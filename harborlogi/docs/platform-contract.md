@@ -80,6 +80,10 @@ ROSY 정본(`shared/web/cell-site-map.json`, 37셀·13슬롯)과 Harbor `Conditi
 - **사전 검증 및 라이브 대시보드**:
   - `harbor.cell_site_map`(`canonical_cell_wire_refs`, `canonical_cell_slot_specs`, `validate_canonical_cell_placement`, `validate_canonical_wire_ref`)과 `harbor.cell_plan`(`observation_site_state`, `build_harbor_plan_spec`, `build_rosy_directive_spec`)은 비정규 좌표·슬롯 비시작 열(`c2`/`c3`/`c5`/`c6`)·구역 담당 암 불일치·13개 `slot_id` 외 `goal` 키·최대 단수(`max_tier`) 초과를 송신 전 차단한다.
   - `/inventory/`는 활성 `Condition`이 없거나 ROSY 정본(`cell_zones`, `outbound_handoffs`)과 어긋날 때 `compare_condition_with_rosy` 결과를 표시한다.
+- **셀 부지 인식(`rosy.cell-site-recognition.v1`) · 반출 적재 이벤트 · S3 ARM 복구**:
+  - `GET/POST /api/fleet/cell-site-recognition`: workcell 관측 토큰 또는 운영자/서비스 권한으로 `rosy.cell-site-recognition.v1` 스냅샷을 검증·저장하고, Harbor는 `GET` 조회(`RosyClient.site_recognition`)만 사용한다.
+  - `container.loaded_for_outbound`: ROSY `PortEvent` 확장 이벤트(`object_ref`, `vehicle_id`, `identity`)를 Harbor `IntakeLedger`가 수신하면 `outbound_loop.tick`이 `PICKUP_ARRIVED` 반출 배차를 `LOADED`로 자동 전이하고 Leg 2(`S_EXIT`)를 준비한다.
+  - S3 `BUSINESS_HOLD` 복구 요청: Harbor는 `GET/POST /api/fleet/arm-transfers/jobs/{mission_id}/recovery`(`RosyClient.arm_recovery_preview` · `arm_recovery_request`)로 복구 요청만 제출하며, 최종 승인은 ROSY 기명 운영자에게 남는다.
 
 
 ### 규칙별 확인 방법
