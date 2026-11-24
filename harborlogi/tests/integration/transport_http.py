@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from harbor.cell_plan import build_harbor_plan_request, build_rosy_directive_request, validate_cell_plan_response
-from harbor.cell_site_map import normalize_cell_site_map
+from harbor.cell_site_map import compare_condition_with_rosy, normalize_cell_site_map
 from harbor.port_events import IntakeLedger, parse_slot_ref
 from harbor.rosy_http import RosyClient
 from harbor.site_places import (
