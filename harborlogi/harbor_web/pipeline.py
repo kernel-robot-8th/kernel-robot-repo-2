@@ -55,14 +55,45 @@ def connection_summary():
         ])
 
 
-def pipeline_for(order, plan=None, command=None, detail=None):
+def pipeline_for(order, plan=None, command=None, detail=None, *, cell_plan_dispatch=None):
     detail = detail or {}
     job, receipt, ledger = detail.get('job') or {}, detail.get('receipt'), detail.get('ledger') or {}
+    from harbor_web.fleet_connection import connection_settings
+    config = connection_settings()
+    if command is None and cell_plan_dispatch is not None:
+        from harbor_web.work_state import work_state
+        cp = cell_plan_dispatch
+        cp_work = work_state(cell_plan_dispatch=cp)
+        links = fleet_links(config['origin']) if (config['origin'] and config['allowed']) else fleet_links(None)
+        submitted = bool(cp.rosy_plan_id and cp.state not in ('SUBMITTING', 'NOT_FOUND'))
+        approved = cp.state in ('QUEUED', 'COMPLETED') or cp_work in ('진행 중', '완료')
+        executed = cp_work == '완료'
+        completed = cp_work == '완료'
+        def stage(key, label, owner, done, note, active=False, href=None, action=''):
+            return dict(key=key, label=label, owner=owner, status='done' if done else 'current' if active else 'pending',
+                        note=note, href=href, action=action)
+        stages = [
+            stage('plan', '업무·계획 검토', 'Harbor 관제', bool(plan), '', not plan, f'/requests/{order.pk}/'),
+            stage('proposal', '제안 제출', 'Harbor 운영자', submitted,
+                  cp_work, not submitted),
+            stage('approval', '독립 승인', 'ROSY Fleet 운영자', approved,
+                  '제안자와 다른 명명 운영자가 셀 계획을 승인합니다.', submitted and not approved, links['console'], 'fleet'),
+            stage('execution', '동작 수행', 'ROSY Fleet · OMX', executed,
+                  cp_work, cp_work == '진행 중'),
+            stage('physical', '물리 결과 대조', 'ROSY OMX · 검증', executed,
+                  '셀 단계 검증 완료' if executed else '셀 단계 검증 대기 중'),
+            stage('business', '업무 완료 대조', 'Harbor 업무 장부', completed,
+                  '셀 계획 완료 기록됨' if completed else '셀 계획 완료 확인 필요', False, f'/records/?order={order.pk}'),
+        ]
+        primary = dict(action='', label='셀 계획 상태 보기', href=f'/plans/{plan.pk}/' if plan else f'/requests/{order.pk}/',
+                       note='셀 파이프라인 진행 상태를 확인합니다.')
+        return dict(stages=stages, primary=primary, links=links, read_at=None,
+                    command_label=cp_work,
+                    job_label=cp_work,
+                    business_label='완료 근거 대조됨' if completed else '업무 완료 근거 대조 필요')
     state = command.state if command else ''
     status = execution_phase(job) if job else ''
     uncertain = state in {'UNKNOWN', 'DISPATCHING', 'CANCEL_PENDING'} or bool(detail.get('reason') == 'LEDGER_UNAVAILABLE')
-    from harbor_web.fleet_connection import connection_settings
-    config = connection_settings()
     links = fleet_links(command.fleet_origin, command.mission_id,
         arm_console_enabled=config['arm_console_enabled'] and (not config['origin'] or config['origin'] == command.fleet_origin)) if command else fleet_links(None)
     submitted = bool(command and command.mission_id and state != 'PREPARED')

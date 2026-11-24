@@ -8,9 +8,12 @@ events into the intake ledger. Both are off until HARBOR_TRIP_DESTINATION names 
 import logging
 import os
 
+from urllib.error import HTTPError, URLError
+
 from django.db.models import Max
 
 from harbor.port_events import RANK, IntakeLedger
+from harbor.site_places import parse_site_places, resolve_intake_destination
 from harbor.transport import TransportLedger, TripIntent
 
 logger = logging.getLogger(__name__)
@@ -24,12 +27,25 @@ def _destination():
     return os.environ.get('HARBOR_TRIP_DESTINATION', '')
 
 
-def prepare_trip(departure, *, now):
+def _resolve_tick_destination(client):
+    configured = _destination().strip()
+    if configured == 'auto':
+        try:
+            places = parse_site_places(client.site_places())
+            stop_id, _ = resolve_intake_destination(places)
+            return stop_id or ''
+        except (HTTPError, URLError, OSError, ValueError):
+            return ''
+    return configured
+
+
+def prepare_trip(departure, *, now, destination=None):
     """Declare the departing cargo on a PLANNED trip; None while trips are not configured."""
     path = os.environ.get('HARBOR_LEDGER_PATH', '')
-    if not path or not _destination():
+    target = destination if destination is not None else _destination()
+    if not path or not target:
         return None
-    intent = TripIntent(trip_key(departure), (departure.vehicle_id,), _destination(),
+    intent = TripIntent(trip_key(departure), (departure.vehicle_id,), target,
                         object_ref=departure.cargo.code)
     TransportLedger(path).prepare(intent)
     IntakeLedger(path).expect(intent.object_ref, now=now)
@@ -41,13 +57,14 @@ def tick(registry, *, now):
     from harbor_web.models import DepartureIntent
     path, client = registry.config['path'], registry.client
     transport, intake = TransportLedger(path), IntakeLedger(path)
-    if _destination():
+    dest = _resolve_tick_destination(client)
+    if dest:
         # shortcut: scans every departure each tick and skips arrived ones; add an index when departures grow large.
         for departure in DepartureIntent.objects.select_related('cargo').order_by('pk'):
             key, cargo = trip_key(departure), departure.cargo.code
             try:
                 # 멱등 준비로 intent만 남거나 manifest 저장이 실패한 회차도 복구한다.
-                prepare_trip(departure, now=now)
+                prepare_trip(departure, now=now, destination=dest)
                 row = transport.read(key)
                 if RANK.get(intake.read(cargo)['state'], len(RANK)) >= RANK['TRIP_ARRIVED']:
                     continue  # arrived, further along, or HOLD

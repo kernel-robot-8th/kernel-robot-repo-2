@@ -8,9 +8,9 @@ from django.utils import timezone
 from harbor_web import access, executor
 from harbor_web.alert_pages import alerts_context
 from harbor_web.auth import roles
-from harbor_web.models import Audit, Command, Order, Plan
+from harbor_web.models import Audit, CellPlanDispatch, Command, Order, Plan
 from harbor_web.order_queue import completed_order_ids
-from harbor_web.work_state import day_progress, work_state, shown_state
+from harbor_web.work_state import day_progress, order_completion_times, work_state, shown_state
 from harbor_web.yard_rows import (
     DEFAULT_SLOT,
     place_context,
@@ -61,50 +61,57 @@ def _is_empty_rearrange(order, *, command=None, plan=None):
     return not plan_result.get('moves') and not binding.get('moves')
 
 
-def _latest_completed_today(commands, *, start, now):
-    completed = {str(c.pk): c for c in commands if c.state == 'COMPLETED'}
-    if not completed:
+def _latest_completed_today(commands, *, start, now, cell_plans=()):
+    completed_cmds = {str(c.pk): c for c in commands if c.state == 'COMPLETED'}
+    completed_cps = {str(cp.pk): cp for cp in cell_plans if cp.state == 'COMPLETED'}
+    if not completed_cmds and not completed_cps:
         return None
-    audit_id = (
-        Audit.objects.filter(
-            action='command.completed',
-            object_type='Command',
-            object_id__in=completed,
-            created_at__gte=start,
-            created_at__lte=now,
+    best_at = None
+    best_obj = None
+    for action, obj_type, pool in (
+        ('command.completed', 'Command', completed_cmds),
+        ('cell_plan.completed', 'CellPlanDispatch', completed_cps),
+    ):
+        if not pool:
+            continue
+        row = (
+            Audit.objects.filter(
+                action=action,
+                object_type=obj_type,
+                object_id__in=pool,
+                created_at__gte=start,
+                created_at__lte=now,
+            )
+            .order_by('-created_at', '-pk')
+            .values('object_id', 'created_at')
+            .first()
         )
-        .order_by('-created_at', '-pk')
-        .values_list('object_id', flat=True)
-        .first()
-    )
-    return completed.get(audit_id) if audit_id else None
+        if row and (best_at is None or row['created_at'] > best_at):
+            best_at = row['created_at']
+            best_obj = pool.get(row['object_id'])
+    return best_obj
+
+
+def _done_job_href(done_obj, *, can_read):
+    if not can_read:
+        return None
+    if isinstance(done_obj, CellPlanDispatch):
+        return f'/plans/{done_obj.plan_id}/' if done_obj.plan_id else f'/requests/{done_obj.order_id}/'
+    return f'/work/{done_obj.pk}/'
 
 
 def _today_counts(now, *, open_orders, completed_commands, latest_commands, latest_plans):
     start = timezone.localtime(now).replace(hour=0, minute=0, second=0, microsecond=0)
-    first_completion = (
-        Audit.objects.filter(
-            action='command.completed',
-            object_type='Command',
-            object_id=Cast(OuterRef('pk'), CharField()),
-        )
-        .order_by('created_at')
-        .values('created_at')[:1]
-    )
-    completed_rows = (
-        Command.objects.filter(state='COMPLETED')
-        .annotate(completed_at=Subquery(first_completion))
-        .values('order_id', 'order__kind')
-        .annotate(first_completed_at=Min('completed_at'))
-        .filter(first_completed_at__gte=start, first_completed_at__lte=now)
-    )
+    earliest = order_completion_times()
+    today_ids = [oid for oid, at in earliest.items() if start <= at <= now]
+    order_kinds = dict(Order.objects.filter(pk__in=today_ids).values_list('pk', 'kind'))
     completed = {'INBOUND': 0, 'OUTBOUND': 0, 'REARRANGE': 0}
-    for row in completed_rows:
-        kind = row['order__kind']
+    for oid in today_ids:
+        kind = order_kinds.get(oid)
         if kind not in completed:
             continue
         if kind == 'REARRANGE':
-            cmd = completed_commands.get(row['order_id'])
+            cmd = completed_commands.get(oid)
             if cmd is not None and _is_empty_rearrange(cmd.order, command=cmd, plan=cmd.plan):
                 continue
         completed[kind] += 1
@@ -262,12 +269,22 @@ def board_context(request, *, observation, operations, now=None):
             'plan__condition',
         ).order_by('-pk')
     )
+    cell_plans = list(
+        CellPlanDispatch.objects.select_related(
+            'order__cargo',
+            'plan__observation__condition',
+            'plan__condition',
+        ).order_by('-pk')
+    )
     latest_commands = {}
     completed_commands = {}
     for cmd in commands:
         latest_commands.setdefault(cmd.order_id, cmd)
         if cmd.state == 'COMPLETED':
             completed_commands.setdefault(cmd.order_id, cmd)
+    latest_cell_plans = {}
+    for cp in cell_plans:
+        latest_cell_plans.setdefault(cp.order_id, cp)
 
     open_orders = list(
         Order.objects.exclude(pk__in=completed_order_ids())
@@ -320,6 +337,11 @@ def board_context(request, *, observation, operations, now=None):
     running = next((c for c in commands if work_state(c) == '진행 중'), None)
     attention = next((c for c in commands if work_state(c) == '처리할 것'), None)
     active_cmd = running or attention
+    active_cp = None
+    if active_cmd is None:
+        running_cp = next((cp for cp in cell_plans if work_state(cell_plan_dispatch=cp) == '진행 중'), None)
+        attention_cp = next((cp for cp in cell_plans if work_state(cell_plan_dispatch=cp) == '처리할 것'), None)
+        active_cp = running_cp or attention_cp
 
     current_job = None
     mini_move = None
@@ -338,29 +360,47 @@ def board_context(request, *, observation, operations, now=None):
         )
         mini_move = details
         upcoming_orders = [o for o in pending_orders if o.pk != active_cmd.order_id]
+    elif active_cp is not None:
+        state = work_state(cell_plan_dispatch=active_cp)
+        details = _move_details(active_cp.order, plan=active_cp.plan)
+        current_job = dict(
+            title=_job_title(active_cp.order),
+            state=shown_state(state, None, cell_plan_dispatch=active_cp),
+            tone=STATE_TONES.get(state, 'neutral'),
+            href=_done_job_href(active_cp, can_read=can_read),
+            arm=details['arm'],
+            cargo=details['cargo'],
+            source=details['source'],
+            destination=details['destination'],
+        )
+        mini_move = details
+        upcoming_orders = [o for o in pending_orders if o.pk != active_cp.order_id]
     elif pending_orders:
         first_order = pending_orders[0]
         first_cmd = latest_commands.get(first_order.pk)
+        first_cp = None if first_cmd is not None else latest_cell_plans.get(first_order.pk)
         first_plan = obs_plans.get(first_order.pk)
         safe_plan = (
             first_plan
             if (first_plan is None or isinstance(first_plan.result, dict))
             else Plan(result={})
         )
-        first_state = work_state(first_cmd, safe_plan)
-        done_today = _latest_completed_today(commands, start=start, now=now)
+        first_state = work_state(first_cmd, safe_plan, cell_plan_dispatch=first_cp)
+        done_today = _latest_completed_today(commands, start=start, now=now, cell_plans=cell_plans)
         if first_state == '대기' and done_today is not None:
+            done_cmd = done_today if isinstance(done_today, Command) else None
+            done_cp = done_today if isinstance(done_today, CellPlanDispatch) else None
             state = (
-                work_state(done_today, next_command=first_cmd, next_plan=first_plan)
-                if (first_cmd is not None or first_plan is not None)
+                work_state(done_cmd, next_command=first_cmd, next_plan=first_plan, cell_plan_dispatch=done_cp, next_cell_plan=first_cp)
+                if (first_cmd is not None or first_cp is not None or first_plan is not None)
                 else '완료 · 다음 작업 대기 중'
             )
-            details = _move_details(done_today.order, command=done_today)
+            details = _move_details(done_today.order, command=done_cmd, plan=done_cp.plan if done_cp else None)
             current_job = dict(
                 title=_job_title(done_today.order),
                 state=state,
                 tone=STATE_TONES.get(state, 'good'),
-                href=f'/work/{done_today.pk}/' if can_read else None,
+                href=_done_job_href(done_today, can_read=can_read),
                 arm=details['arm'],
                 cargo=details['cargo'],
                 source=details['source'],
@@ -372,7 +412,7 @@ def board_context(request, *, observation, operations, now=None):
             details = _move_details(first_order, command=first_cmd, plan=first_plan)
             current_job = dict(
                 title=_job_title(first_order),
-                state=shown_state(first_state, first_cmd),
+                state=shown_state(first_state, first_cmd, cell_plan_dispatch=first_cp),
                 tone=STATE_TONES.get(first_state, 'neutral'),
                 href=_item_href(
                     first_order,
@@ -389,14 +429,16 @@ def board_context(request, *, observation, operations, now=None):
             mini_move = details
             upcoming_orders = pending_orders[1:]
     else:
-        done_today = _latest_completed_today(commands, start=start, now=now)
+        done_today = _latest_completed_today(commands, start=start, now=now, cell_plans=cell_plans)
         if done_today is not None:
-            details = _move_details(done_today.order, command=done_today)
+            done_cmd = done_today if isinstance(done_today, Command) else None
+            done_cp = done_today if isinstance(done_today, CellPlanDispatch) else None
+            details = _move_details(done_today.order, command=done_cmd, plan=done_cp.plan if done_cp else None)
             current_job = dict(
                 title=_job_title(done_today.order),
                 state='완료',
                 tone=STATE_TONES['완료'],
-                href=f'/work/{done_today.pk}/' if can_read else None,
+                href=_done_job_href(done_today, can_read=can_read),
                 arm=details['arm'],
                 cargo=details['cargo'],
                 source=details['source'],
@@ -407,17 +449,18 @@ def board_context(request, *, observation, operations, now=None):
     next_jobs = []
     for order in upcoming_orders[:5]:
         cmd = latest_commands.get(order.pk)
+        cp = None if cmd is not None else latest_cell_plans.get(order.pk)
         plan = obs_plans.get(order.pk)
         safe_plan = (
             plan if (plan is None or isinstance(plan.result, dict)) else Plan(result={})
         )
-        state = work_state(cmd, safe_plan)
+        state = work_state(cmd, safe_plan, cell_plan_dispatch=cp)
         details = _move_details(order, command=cmd, plan=plan)
         next_jobs.append(
             dict(
                 kind_label=KIND_LABELS.get(order.kind, order.kind),
                 title=_job_title(order),
-                state=shown_state(state, cmd),
+                state=shown_state(state, cmd, cell_plan_dispatch=cp),
                 tone=STATE_TONES.get(state, 'neutral'),
                 href=_item_href(
                     order,

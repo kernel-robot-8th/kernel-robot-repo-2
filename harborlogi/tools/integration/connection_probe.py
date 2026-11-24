@@ -51,12 +51,24 @@ report(2, days > 30, f'Fleet 인증서가 이름으로 검증됨, 만료까지 {
 client = RosyClient(origin, token)
 session = client.session()
 report(4, (session.get('principal_id'), session.get('role')) == (os.environ['HARBOR_FLEET_PRINCIPAL'], 'service'), 'session이 설정된 service 신원과 일치')
+client.expected_principal = os.environ['HARBOR_FLEET_PRINCIPAL']
+client.expected_role = 'service'
 report(3, answer(RosyClient(origin, 'x' * 40).session)[0] == 401, '틀린 토큰은 401')
 key = 'harbor-probe-' + uuid.uuid4().hex
 report(9, answer(lambda: client.arm_request(key)) == (404, 'ARM_TRANSFER_JOB_NOT_FOUND'), '없는 키는 code가 든 404')
 events = answer(lambda: client.port_events(after=key, limit=1))
 report(11, events in {(400, 'PORT_EVENT_CURSOR_INVALID'), (404, None)},
        'port-events ' + ('경로 있음' if events[0] == 400 else '경로 없음: 이 R에서는 입고 사건이 자동으로 들어오지 않음' if events == (404, None) else f'미확인 {events}'))
+cell_plans = answer(lambda: client.cell_plan_request(key))
+site_places = answer(client.site_places)
+cell_sites = answer(client.cell_sites)
+state_probe = answer(client.fleet_state)
+print('INFO capabilities:', {
+    'cell_plans': cell_plans == (404, 'UNKNOWN_CELL_PLAN'),
+    'site_places': site_places[0] == 200,
+    'cell_sites': cell_sites[0] == 200,
+    'fleet_state': state_probe[0] == 200,
+})
 print('INFO execution-profile:', {k: v for k, v in client.execution_profile().items() if k in ('profile', 'arm_execution')})
 
 if os.environ.get('HARBOR_ROSY_ACCOUNT_FILE'):

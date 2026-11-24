@@ -10,7 +10,11 @@ source_id는 GET /api/fleet/vision/sources의 sources에서 고른다 —
 Bearer로 받는다(rosy-platform site_auth.authorize → account_receiver). 로컬 계정이면
 HARBOR_FLEET_TOKEN(서비스 신원)을 쓴다.
 """
+import hashlib
 import os
+import threading
+import time
+from urllib.error import HTTPError
 
 from django.conf import settings
 from django.http import HttpResponse
@@ -29,6 +33,42 @@ from harbor_web.fleet_connection import connection_settings
 
 from harbor_web.auth import require_roles
 from harbor_web.rosy_account import access_token
+
+_CACHE_MAX_ENTRIES = 64
+_SOURCES_TTL_S = 15.0
+_LEASE_DEFAULT_TTL_S = 30.0
+_LEASE_MARGIN_S = 5.0
+_cache_lock = threading.Lock()
+_sources_cache: dict[tuple[str, str], tuple[float, list[str]]] = {}
+_lease_cache: dict[tuple[str, str, str], tuple[float, dict]] = {}
+_unrectified_sources: set[tuple[str, str]] = set()
+
+
+def clear_topview_cache():
+    with _cache_lock:
+        _sources_cache.clear()
+        _lease_cache.clear()
+        _unrectified_sources.clear()
+
+
+def _token_digest(token):
+    return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+
+def _trim_cache(cache):
+    while len(cache) > _CACHE_MAX_ENTRIES:
+        oldest = min(cache, key=lambda k: cache[k][0])
+        cache.pop(oldest, None)
+
+
+def _lease_deadline(lease_response, now_wall, now_mono):
+    ttl = lease_response.get('ttl_seconds') or lease_response.get('ttl')
+    if isinstance(ttl, (int, float)) and ttl > _LEASE_MARGIN_S:
+        return now_mono + float(ttl) - _LEASE_MARGIN_S
+    exp = lease_response.get('expires_at')
+    if isinstance(exp, (int, float)) and exp - now_wall > _LEASE_MARGIN_S:
+        return now_mono + float(exp - now_wall) - _LEASE_MARGIN_S
+    return now_mono + _LEASE_DEFAULT_TTL_S
 
 
 def _fleet_settings(request):
@@ -81,13 +121,50 @@ def topview_frame(request, source_id):
                             content_type="text/plain; charset=utf-8")
 
     try:
-        if source_id not in _camera_sources(origin, token, ca_file, timeout=10):
-            return HttpResponse('frame unavailable', status=404, content_type='text/plain; charset=utf-8')
         client = VisionClient(origin, token, timeout=10, ca_file=ca_file)
+        lease_key = (origin, _token_digest(token), source_id)
+        rect_key = (origin, source_id)
+        now_mono = time.monotonic()
+        with _cache_lock:
+            cached_lease = _lease_cache.get(lease_key)
+            lease_response = cached_lease[1] if (cached_lease is not None and now_mono < cached_lease[0]) else None
+            use_rect = rect_key not in _unrectified_sources
+        from_cache = lease_response is not None
+        if lease_response is None and source_id not in _camera_sources(origin, token, ca_file, timeout=10):
+            return HttpResponse('frame unavailable', status=404, content_type='text/plain; charset=utf-8')
         try:
-            lease_response = client.lease(source_id, rectification=MAP_RECTIFICATION)
+            if lease_response is None:
+                try:
+                    lease_response = client.lease(source_id, rectification=MAP_RECTIFICATION) if use_rect else client.lease(source_id)
+                except PlaneUnavailableError:
+                    with _cache_lock:
+                        _unrectified_sources.add(rect_key)
+                    lease_response = client.lease(source_id)
+                with _cache_lock:
+                    _lease_cache[lease_key] = (_lease_deadline(lease_response, time.time(), now_mono), lease_response)
+                    _trim_cache(_lease_cache)
             jpeg, metadata = client.fetch_frame(lease_response)
+        except HTTPError as error:
+            if from_cache and error.code in (401, 403):
+                with _cache_lock:
+                    _lease_cache.pop(lease_key, None)
+                    use_rect = rect_key not in _unrectified_sources
+                if source_id not in _camera_sources(origin, token, ca_file, timeout=10):
+                    return HttpResponse('frame unavailable', status=404, content_type='text/plain; charset=utf-8')
+                try:
+                    lease_response = client.lease(source_id, rectification=MAP_RECTIFICATION) if use_rect else client.lease(source_id)
+                except PlaneUnavailableError:
+                    with _cache_lock:
+                        _unrectified_sources.add(rect_key)
+                    lease_response = client.lease(source_id)
+                with _cache_lock:
+                    _lease_cache[lease_key] = (_lease_deadline(lease_response, time.time(), time.monotonic()), lease_response)
+                jpeg, metadata = client.fetch_frame(lease_response)
+            else:
+                raise
         except PlaneUnavailableError:
+            with _cache_lock:
+                _unrectified_sources.add(rect_key)
             lease_response = client.lease(source_id)
             jpeg, metadata = client.fetch_frame(lease_response)
         response = HttpResponse(jpeg, content_type="image/jpeg")

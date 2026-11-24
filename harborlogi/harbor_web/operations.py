@@ -3,7 +3,7 @@ from django.db.models import Count, Max, Min
 from django.utils import timezone
 
 from harbor_web import services
-from harbor_web.models import Audit, Command, Observation, Order, Plan
+from harbor_web.models import Audit, CellPlanDispatch, Command, Observation, Order, Plan
 from harbor_web.presentation import COMMAND_LABELS, reason_text
 from harbor_web.yard_scene import area_presentation
 from harbor_web.yard_rows import DEFAULT_SLOT, place_context, place_label, slot_key, yard_rows
@@ -72,14 +72,17 @@ THROUGHPUT_WINDOW = timezone.timedelta(hours=24)
 THROUGHPUT_MIN_SPAN = timezone.timedelta(minutes=10)  # shorter spans turn two completions into absurd hourly rates
 
 
-def _throughput(done, now):
-    """Interval rate between the first and last completion Harbor recorded in the window.
-    The time is the audit row written with the COMPLETED save (commands._save), not the robot's finish time."""
+def _throughput(done, now, *, cell_plans=()):
+    """Interval rate between the first and last completion Harbor recorded in the window."""
     stamps = dict(Audit.objects.filter(object_type='Command', action='command.completed',
                                        created_at__gte=now - THROUGHPUT_WINDOW, created_at__lte=now,
                                        object_id__in=[str(c.pk) for c in done])
-                  .values_list('object_id').annotate(at=Min('created_at')))  # first time Harbor recorded it
-    times = sorted(stamps.values())
+                  .values_list('object_id').annotate(at=Min('created_at')))
+    cp_stamps = dict(Audit.objects.filter(object_type='CellPlanDispatch', action='cell_plan.completed',
+                                          created_at__gte=now - THROUGHPUT_WINDOW, created_at__lte=now,
+                                          object_id__in=[str(cp.pk) for cp in cell_plans])
+                     .values_list('object_id').annotate(at=Min('created_at')))
+    times = sorted([*stamps.values(), *cp_stamps.values()])
     span = times[-1] - times[0] if times else timezone.timedelta(0)
     # count - 1 intervals lie between the first and last completion
     return dict(window_hours=int(THROUGHPUT_WINDOW.total_seconds() // 3600), count=len(times),
@@ -87,15 +90,19 @@ def _throughput(done, now):
                 per_hour=round((len(times) - 1) / (span.total_seconds() / 3600), 1) if span >= THROUGHPUT_MIN_SPAN else None)
 
 
-def _actual(commands, now):
-    """COMPLETED is set only after the ARM_TRANSFER ledger finish() (commands.advance_command); legacy
-    cell stages never create a Command. The binding is the digest-checked ledger payload."""
+def _actual(commands, now, *, cell_plans=()):
+    """Count completed Orders across legacy Command finishes and CellPlanDispatch finishes."""
     latest = {}
     for c in commands:  # newest first: a newer completion of the same order replaces, not adds
         if c.state == 'COMPLETED':
             latest.setdefault(c.order_id, c)
+    latest_cp = {}
+    for cp in cell_plans:
+        if cp.state == 'COMPLETED' and cp.order_id not in latest:
+            latest_cp.setdefault(cp.order_id, cp)
     done = list(latest.values())
-    kinds = [c.order.kind for c in done]
+    done_cp = list(latest_cp.values())
+    kinds = [c.order.kind for c in done] + [cp.order.kind for cp in done_cp]
     rehandles, unmatched = 0, []
     for c in done:
         if c.order.kind != 'OUTBOUND':
@@ -106,11 +113,20 @@ def _actual(commands, now):
             unmatched.append(c)  # No outbound move to count against: never report it as zero rehandles.
         else:
             rehandles += index
+    for cp in done_cp:
+        if cp.order.kind != 'OUTBOUND':
+            continue
+        cargo_code = cp.order.cargo.code if cp.order.cargo_id else None
+        index = next((i for i, m in enumerate(cp.planned_steps or [])
+                      if cargo_code and m.get('cargo_id') == cargo_code), None)
+        if index is not None:
+            rehandles += index
     from harbor_web.human_evidence import attested_final_commands
     human = len(attested_final_commands([c.pk for c in done]))  # 완료 근거가 기명 사람 확인(ADR 0023)인 건
-    return dict(completed=len(done), human_attested=human, inbound=kinds.count('INBOUND'), outbound=kinds.count('OUTBOUND'),
-                rearrange=kinds.count('REARRANGE'), outbound_rehandle_moves=None if unmatched else rehandles,
-                unmatched=unmatched, throughput=_throughput(done, now))
+    return dict(completed=len(done) + len(done_cp), human_attested=human, inbound=kinds.count('INBOUND'),
+                outbound=kinds.count('OUTBOUND'), rearrange=kinds.count('REARRANGE'),
+                outbound_rehandle_moves=None if unmatched else rehandles,
+                unmatched=unmatched, throughput=_throughput(done, now, cell_plans=done_cp))
 
 
 def operations_context(observation, *, now=None):
@@ -125,7 +141,8 @@ def operations_context(observation, *, now=None):
             superseded=Observation.objects.filter(source_id=observation.source_id, pk__gt=observation.pk).exists())
     counts = dict(Order.objects.values_list('kind').annotate(count=Count('pk')))
     commands = list(Command.objects.select_related('plan__observation__condition', 'order__cargo').order_by('-pk'))
-    commanded = {c.order_id for c in commands}
+    cell_plans = list(CellPlanDispatch.objects.select_related('order__cargo', 'plan').order_by('-pk'))
+    commanded = {c.order_id for c in commands} | {cp.order_id for cp in cell_plans}
     handoffs = [dict(command=c, plan=c.plan, label=COMMAND_LABELS.get(c.state, c.state), cargo=_cargo_label(c.order))
                 for c in commands]
     latest_ids = Plan.objects.values('order_id').annotate(latest_id=Max('pk')).values('latest_id')
@@ -187,7 +204,7 @@ def operations_context(observation, *, now=None):
         if c.state in ATTENTION_STATES:
             attention.append(dict(label=f"전체 인계 · {COMMAND_LABELS[c.state]} · {_cargo_label(c.order)}", count=1,
                                   action='원래 작업 대조', href=f'/work/{c.pk}/'))
-    actual = _actual(commands, now)
+    actual = _actual(commands, now, cell_plans=cell_plans)
     for c in actual['unmatched']:
         attention.append(dict(label=f"완료 인계 · 반출 이동 대조 불가 · {_cargo_label(c.order)}", count=1,
                               action='원래 작업 대조', href=f'/work/{c.pk}/'))

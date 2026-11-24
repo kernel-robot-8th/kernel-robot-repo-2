@@ -118,7 +118,7 @@ def _fetch_fleet_cell_sites():
     if not token:
         raise ValidationError('FLEET_TOKEN_NOT_CONFIGURED: HARBOR_FLEET_TOKEN 자격이 설정되지 않았습니다.')
     try:
-        return fleet_connection.fleet_client(config, token, timeout=10).cell_sites()
+        return fleet_connection.fleet_client(config, token, timeout=10, verify_identity=True).cell_sites()
     except HTTPError as error:
         raise ValidationError(f'FLEET_HTTP_{error.code}: Fleet 응답 오류 (HTTP {error.code})') from error
     except (URLError, TimeoutError, OSError) as error:

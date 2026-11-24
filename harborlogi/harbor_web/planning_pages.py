@@ -1,9 +1,10 @@
+import json
 import os
 import sqlite3
 
 from django import forms
 from django.contrib import messages
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.http import Http404
 from django.views.decorators.http import require_http_methods
@@ -22,17 +23,67 @@ class CommandForm(forms.Form):
     reason = forms.CharField(label='취소 요청 사유', max_length=192, required=False)
 
 
-@require_roles('viewer', 'operator', 'admin')
+def _parse_goal_payload(raw_goal):
+    text = (raw_goal or '').strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+    except ValueError as exc:
+        raise ValidationError('목표 배치 JSON 형식이 올바르지 않습니다.') from exc
+    if not isinstance(parsed, dict) or not parsed or any(
+        not isinstance(k, str) or not isinstance(v, list) or not all(isinstance(item, str) for item in v)
+        for k, v in parsed.items()
+    ):
+        raise ValidationError('목표 배치는 {"slot_id": ["CARGO", ...]} 형태여야 합니다.')
+    return parsed
+
+
+@require_roles('viewer', 'operator', 'admin', 'field')
 @require_http_methods(['GET', 'POST'])
 def plan_detail(request, pk):
     plan = get_object_or_404(Plan.objects.select_related('order__cargo', 'observation', 'condition'), pk=pk)
     review_observation = selected_observation(request, default_latest=True)
     gate = commands.capability(plan)
+    awaiting_field_load = OutboundDispatch.objects.filter(
+        cell_plan_dispatch__order=plan.order, state='PICKUP_ARRIVED',
+    ).exists()
+    if (request.method == 'GET' and not has_role(request.user, 'viewer', 'operator', 'admin')
+            and not awaiting_field_load):
+        raise PermissionDenied
+    preview_result = None
     if request.method == 'POST':
-        if not has_role(request.user, 'operator'):
-            from django.core.exceptions import PermissionDenied
+        action = request.POST.get('action')
+        if action == 'cell_plan_outbound_loaded':
+            if not has_role(request.user, 'field', 'operator'):
+                raise PermissionDenied
+        elif not has_role(request.user, 'operator'):
             raise PermissionDenied
-        if request.POST.get('action') == 'cell_plan_harbor':
+        if action == 'cell_plan_preview_harbor':
+            try:
+                dry = cell_plan_dispatch.preview_harbor_plan(request.user, plan_id=pk)
+            except (services.Conflict, ValidationError) as exc:
+                return render(request, 'error.html', dict(heading='OMX 셀 계획 미리보기를 실행하지 못했습니다', reason=exc.messages[0] if getattr(exc, 'messages', None) else '계획·상태·Fleet 연결을 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
+            preview_result = dict(mode=dry.mode, order_source=dry.order_source, moves=list(dry.moves), final_state=dry.final_state)
+            messages.info(request, f'Harbor 계획 미리보기: {len(dry.moves)}단계 이동 확인')
+        elif action == 'cell_plan_preview_rosy':
+            directive_mode = request.POST.get('directive_mode') or ('outbound' if plan.order.kind == 'OUTBOUND' else 'rehandle')
+            destination = request.POST.get('destination') or 'stand'
+            try:
+                goal = _parse_goal_payload(request.POST.get('goal_json')) if directive_mode == 'goal' else None
+                dry = cell_plan_dispatch.preview_rosy_directive(
+                    request.user,
+                    order_id=plan.order_id,
+                    observation_id=plan.observation_id,
+                    directive_mode=directive_mode,
+                    destination=destination,
+                    goal=goal,
+                )
+            except (services.Conflict, ValidationError) as exc:
+                return render(request, 'error.html', dict(heading='ROSY 자율 계획 미리보기를 실행하지 못했습니다', reason=exc.messages[0] if getattr(exc, 'messages', None) else '배치·목표·Fleet 연결을 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
+            preview_result = dict(mode=dry.mode, order_source=dry.order_source, moves=list(dry.moves), final_state=dry.final_state)
+            messages.info(request, f'ROSY 계획 미리보기: {len(dry.moves)}단계 이동 확인')
+        elif action == 'cell_plan_harbor':
             try:
                 dispatch = cell_plan_dispatch.dispatch_harbor_plan(request.user, plan_id=pk)
             except (services.Conflict, ValidationError) as exc:
@@ -42,16 +93,18 @@ def plan_detail(request, pk):
             else:
                 messages.success(request, f'Harbor 계획 순서·좌표 {len(dispatch.rosy_task_ids)}단계를 ROSY에 제안했습니다.')
             return redirect(f'/plans/{pk}/')
-        if request.POST.get('action') == 'cell_plan_rosy':
+        elif action == 'cell_plan_rosy':
             directive_mode = request.POST.get('directive_mode') or ('outbound' if plan.order.kind == 'OUTBOUND' else 'rehandle')
             destination = request.POST.get('destination') or 'stand'
             try:
+                goal = _parse_goal_payload(request.POST.get('goal_json')) if directive_mode == 'goal' else None
                 dispatch = cell_plan_dispatch.dispatch_rosy_directive(
                     request.user,
                     order_id=plan.order_id,
                     observation_id=plan.observation_id,
                     directive_mode=directive_mode,
                     destination=destination,
+                    goal=goal,
                     plan_id=pk,
                 )
             except (services.Conflict, ValidationError) as exc:
@@ -126,31 +179,35 @@ def plan_detail(request, pk):
                 return render(request, 'error.html', dict(heading='셀 계획을 취소할 수 없습니다', reason=exc.messages[0] if getattr(exc, 'messages', None) else '이미 실행되었거나 취소할 수 없는 상태입니다.', return_url=f'/plans/{pk}/'), status=409)
             messages.info(request, f'셀 계획을 취소했습니다: {cell_plan_dispatch._STATE_LABELS.get(cancelled.state, cancelled.state)}')
             return redirect(f'/plans/{pk}/')
-        if request.POST.get('action') == 'decide':  # a person accepts the algorithm's inbound placement (ADR 0012)
-            from harbor_web.inbound_decision import PlacementDecisionForm, decide_placement
-            decision_form = PlacementDecisionForm(request.POST)
-            if not decision_form.is_valid():
-                return render(request, 'error.html', dict(reason='검토한 지시 버전이나 대안 순번이 올바르지 않습니다.', return_url=f'/plans/{pk}/'), status=400)
-            try:
-                decide_placement(request.user, plan_id=pk, expected_version=decision_form.cleaned_data['expected_version'],
-                    alternative_rank=decision_form.cleaned_data['alternative_rank'] or 0)
-            except (services.Conflict, ValidationError):
-                return render(request, 'error.html', dict(heading='결정할 수 없습니다', reason='요청·계획 또는 선택한 자리의 조건이 맞지 않습니다. 최신 입고 추천을 다시 계산해 확인하세요.', return_url=f'/requests/{plan.order_id}/'), status=409)
-            messages.success(request, '입고 위치를 결정했습니다. 실제 이동은 입고 실행 연결과 관측으로 확인합니다.')
-            return redirect(f'/plans/{pk}/')
-        form = CommandForm(request.POST)
-        if form.is_valid():
-            try:
-                command = commands.prepare_command(request.user, plan_id=pk, expected_version=form.cleaned_data['expected_version'])
-                if command.state == 'PREPARED':
-                    command = commands.submit_command(request.user, command_id=command.pk, expected_version=command.version)
-            except (services.Conflict, ValidationError):
-                return render(request, 'error.html', dict(heading='실행 인계 조건이 달라졌습니다', reason='요청 revision·원본 관측·설치 대응과 연결 상태를 다시 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
-            return redirect(f'/work/{command.pk}/')
-        return render(request, 'error.html', dict(reason='검토한 revision이 올바르지 않습니다.', return_url=f'/plans/{pk}/'), status=400)
+        if preview_result is None:
+            if request.POST.get('action') == 'decide':  # a person accepts the algorithm's inbound placement (ADR 0012)
+                from harbor_web.inbound_decision import PlacementDecisionForm, decide_placement
+                decision_form = PlacementDecisionForm(request.POST)
+                if not decision_form.is_valid():
+                    return render(request, 'error.html', dict(reason='검토한 지시 버전이나 대안 순번이 올바르지 않습니다.', return_url=f'/plans/{pk}/'), status=400)
+                try:
+                    decide_placement(request.user, plan_id=pk, expected_version=decision_form.cleaned_data['expected_version'],
+                        alternative_rank=decision_form.cleaned_data['alternative_rank'] or 0)
+                except (services.Conflict, ValidationError):
+                    return render(request, 'error.html', dict(heading='결정할 수 없습니다', reason='요청·계획 또는 선택한 자리의 조건이 맞지 않습니다. 최신 입고 추천을 다시 계산해 확인하세요.', return_url=f'/requests/{plan.order_id}/'), status=409)
+                messages.success(request, '입고 위치를 결정했습니다. 실제 이동은 입고 실행 연결과 관측으로 확인합니다.')
+                return redirect(f'/plans/{pk}/')
+            form = CommandForm(request.POST)
+            if form.is_valid():
+                try:
+                    command = commands.prepare_command(request.user, plan_id=pk, expected_version=form.cleaned_data['expected_version'])
+                    if command.state == 'PREPARED':
+                        command = commands.submit_command(request.user, command_id=command.pk, expected_version=command.version)
+                except (services.Conflict, ValidationError):
+                    return render(request, 'error.html', dict(heading='실행 인계 조건이 달라졌습니다', reason='요청 revision·원본 관측·설치 대응과 연결 상태를 다시 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
+                return redirect(f'/work/{command.pk}/')
+            return render(request, 'error.html', dict(reason='검토한 revision이 올바르지 않습니다.', return_url=f'/plans/{pk}/'), status=400)
     if plan.order.kind == 'OUTBOUND':
         from harbor_web.workspace import workspace_context
-        return page(request, 'workspace.html', section='outbound', **workspace_context(plan.order, plan, review_observation=review_observation))
+        return page(request, 'workspace.html', section='outbound',
+                    can_confirm_outbound_load=has_role(request.user, 'field', 'operator'),
+                    cell_plan_preview=preview_result,
+                    **workspace_context(plan.order, plan, review_observation=review_observation))
     if plan.result.get('plan_kind') == 'inbound-placement':
         from harbor_web.placement_view import placement_context
         return page(request, 'placement_plan.html', section='cargo', **placement_context(plan))
@@ -169,6 +226,8 @@ def plan_detail(request, pk):
                 gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']), command=None,
                 observation_stage=observation_stage, yard_scene=scene_for([observation_stage]) if observation_stage else None,
                 cell_plan_dispatches=cell_plan_dispatch.dispatch_views_for_order(plan.order),
+                cell_plan_preview=preview_result,
+                can_confirm_outbound_load=has_role(request.user, 'field', 'operator'),
                 spatial_observation=bool(plan.observation.payload.get('schema') == 'grid-placement-v1'),
                 harbor_cell_plan_ready=bool(plan.result.get('model') == 'grid-placement-v1'
                                             and plan.result.get('status') == 'READY' and plan.result.get('moves')))
