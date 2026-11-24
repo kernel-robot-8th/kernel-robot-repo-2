@@ -143,10 +143,14 @@ class HttpTests(unittest.TestCase):
             {"source_id": "arm_a", "arm_id": "A", "incidents": [
                 {"incident_id": "c1", "state": "cleared", "decision": {"hold": True, "reason": "old"}},
                 {"incident_id": "g1", "state": "open", "decision": {"hold": False, "reason": "guard stop"}},
+                {"incident_id": "s1", "state": "open", "held": False, "decision": {"hold": True, "reason": "software stop"}},
             ]},
             {"source_id": "arm_b", "arm_id": "B", "incidents": [
                 {"incident_id": "h1", "state": "explained", "decision": {"hold": True, "reason": "overload\nstop"},
                  "explanation": {"assessment": {"type": "contact_or_collision", "direction": "negative", "verification": "unverified"}}},
+            ]},
+            {"source_id": "arm_c", "arm_id": "C", "incidents": [
+                {"incident_id": "h2", "state": "open", "held": True, "decision": {"hold": True, "reason": "latched"}},
             ]},
         ]}]}
         seen_calls = []
@@ -154,10 +158,16 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(client.workcell_observations(), payload)
         self.assertEqual(seen_calls, [("GET", "/api/fleet/workcell-observations", None)])
         holds = open_arm_incident_holds(payload)
-        self.assertEqual(holds, [{
-            "workcell_id": "bench", "source_id": "arm_b", "arm_id": "B", "incident_ids": ["h1"],
-            "reason": "overload stop", "assessment": {"type": "contact_or_collision", "direction": "negative"},
-        }])
+        self.assertEqual(holds, [
+            {
+                "workcell_id": "bench", "source_id": "arm_b", "arm_id": "B", "incident_ids": ["h1"],
+                "reason": "overload stop", "assessment": {"type": "contact_or_collision", "direction": "negative"},
+            },
+            {
+                "workcell_id": "bench", "source_id": "arm_c", "arm_id": "C", "incident_ids": ["h2"],
+                "reason": "latched",
+            },
+        ])
         for bad in ({}, {"workcells": "bad"}, {"workcells": [{"arms": [{"incidents": "bad"}]}]}):
             with self.assertRaises(ValueError):
                 open_arm_incident_holds(bad)
