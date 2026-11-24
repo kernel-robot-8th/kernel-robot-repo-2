@@ -58,6 +58,8 @@ class Fleet:
 
 class IntakeLoopTests(TestCase):
     def setUp(self):
+        executor.clear_backoff()
+        self.addCleanup(executor.clear_backoff)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.path = str(Path(tmp.name) / 'ledger.sqlite3')

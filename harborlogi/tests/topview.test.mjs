@@ -17,6 +17,9 @@ const capturedEpoch = capturedDate.getTime() / 1000;
 assert.equal(frameStatus(200, captured), '찍은 시각 09:08:07');
 assert.equal(frameStatus(200, String(capturedEpoch)), '찍은 시각 09:08:07');
 assert.equal(frameStatus(200, `${capturedEpoch}.410025`), '찍은 시각 09:08:07');
+assert.equal(frameStatus(200, captured, 'map-overlay'), '실제 환경 + 좌표 · 찍은 시각 09:08:07');
+assert.equal(frameStatus(200, null, 'map-overlay'), '실제 환경 + 좌표');
+assert.equal(frameStatus(200, captured, 'map'), '버드뷰 평면 · 찍은 시각 09:08:07');
 assert.equal(frameStatus(502, captured), 'ROSY 연결 안 됨');
 console.log('Topview: normal polling, retry, visibility pause and status text passed');
 
@@ -233,6 +236,48 @@ try {
   assert.equal(calls.length, callsBeforeCleanup);
   assert.equal(removedAttrs.length, removedAfterCleanup);
   assert.equal(timers.size, 0);
+
+  // Mode selector switches between default map_overlay ('auto') and explicit raw ('?view=raw').
+  timers.clear();
+  calls.length = 0;
+  const modeImage = {hidden: true, style: {}, removeAttribute() {}};
+  const modeStatus = {textContent: ''};
+  const modeOrientation = {textContent: '기본 방향 안내'};
+  const modeSelect = new EventTarget();
+  modeSelect.value = 'auto';
+  const modeNodes = {
+    '[data-topview-image]': modeImage,
+    '[data-topview-status]': modeStatus,
+    '[data-topview-mode]': modeSelect,
+    '[data-topview-orientation]': modeOrientation,
+  };
+  decodeBehavior = () => Promise.resolve();
+  respond = () => Promise.resolve(new Response('overlay-jpeg', {
+    headers: {
+      'Content-Type': 'image/jpeg',
+      'X-Frame-Rectified': 'map-overlay',
+      'X-Frame-Captured-At': captured,
+    },
+  }));
+  const modeCleanup = mountTopview({
+    querySelector: selector => modeNodes[selector],
+    dataset: {topviewUrl: '/topview/cam-one/frame/'},
+  });
+  await settle();
+  assert.equal(calls.at(-1).url, '/topview/cam-one/frame/');
+  assert.equal(modeStatus.textContent, '실제 환경 + 좌표 · 찍은 시각 09:08:07');
+  assert.equal(modeOrientation.textContent, '버드뷰 실제 환경 + 좌표 (지도 +X 오른쪽 · +Y 위)');
+
+  modeSelect.value = 'raw';
+  respond = () => Promise.resolve(new Response('raw-jpeg', {
+    headers: {'Content-Type': 'image/jpeg', 'X-Frame-Captured-At': captured},
+  }));
+  modeSelect.dispatchEvent(new Event('change'));
+  await settle();
+  assert.equal(calls.at(-1).url, '/topview/cam-one/frame/?view=raw');
+  assert.equal(modeStatus.textContent, '찍은 시각 09:08:07');
+  assert.equal(modeOrientation.textContent, '기본 방향 안내');
+  modeCleanup();
 } finally {
   Object.assign(globalThis, saved);
   URL.revokeObjectURL = revoke;

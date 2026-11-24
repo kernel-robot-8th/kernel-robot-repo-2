@@ -23,8 +23,10 @@ from django.views.decorators.http import require_http_methods
 
 from harbor.rosy_vision import (
     FRAME_HEADERS,
+    MAP_OVERLAY_RECTIFICATION,
     MAP_RECTIFICATION,
     PlaneUnavailableError,
+    RectificationUnsupportedError,
     StaleFrameError,
     VisionClient,
 )
@@ -40,8 +42,9 @@ _LEASE_DEFAULT_TTL_S = 30.0
 _LEASE_MARGIN_S = 5.0
 _cache_lock = threading.Lock()
 _sources_cache: dict[tuple[str, str], tuple[float, list[str]]] = {}
-_lease_cache: dict[tuple[str, str, str], tuple[float, dict]] = {}
+_lease_cache: dict[tuple[str, str, str, str], tuple[float, dict]] = {}
 _unrectified_sources: set[tuple[str, str]] = set()
+_overlay_unsupported: set[str] = set()
 
 
 def clear_topview_cache():
@@ -49,6 +52,7 @@ def clear_topview_cache():
         _sources_cache.clear()
         _lease_cache.clear()
         _unrectified_sources.clear()
+        _overlay_unsupported.clear()
 
 
 def _token_digest(token):
@@ -111,6 +115,32 @@ def topview_context(request):
         return dict(sources=[], status='ROSY 연결 안 됨')
 
 
+def _request_topview_lease(client, origin, source_id, *, view_mode):
+    rect_key = (origin, source_id)
+    if view_mode == 'raw':
+        return client.lease(source_id)
+    with _cache_lock:
+        use_rect = rect_key not in _unrectified_sources
+        use_overlay = origin not in _overlay_unsupported
+    if use_rect and use_overlay:
+        try:
+            return client.lease(source_id, rectification=MAP_OVERLAY_RECTIFICATION)
+        except RectificationUnsupportedError:
+            with _cache_lock:
+                _overlay_unsupported.add(origin)
+        except PlaneUnavailableError:
+            with _cache_lock:
+                _unrectified_sources.add(rect_key)
+            return client.lease(source_id)
+    if use_rect:
+        try:
+            return client.lease(source_id, rectification=MAP_RECTIFICATION)
+        except PlaneUnavailableError:
+            with _cache_lock:
+                _unrectified_sources.add(rect_key)
+    return client.lease(source_id)
+
+
 @require_roles(*EVERYONE)
 @require_http_methods(['GET'])
 def topview_frame(request, source_id):
@@ -120,26 +150,23 @@ def topview_frame(request, source_id):
         return HttpResponse("ROSY 연동 전" if not origin else "ROSY 로그인 필요", status=503,
                             content_type="text/plain; charset=utf-8")
 
+    raw_view = (request.GET.get('view') or 'auto').strip().lower()
+    view_mode = 'raw' if raw_view == 'raw' else 'auto'
+
     try:
         client = VisionClient(origin, token, timeout=10, ca_file=ca_file)
-        lease_key = (origin, _token_digest(token), source_id)
+        lease_key = (origin, _token_digest(token), source_id, view_mode)
         rect_key = (origin, source_id)
         now_mono = time.monotonic()
         with _cache_lock:
             cached_lease = _lease_cache.get(lease_key)
             lease_response = cached_lease[1] if (cached_lease is not None and now_mono < cached_lease[0]) else None
-            use_rect = rect_key not in _unrectified_sources
         from_cache = lease_response is not None
         if lease_response is None and source_id not in _camera_sources(origin, token, ca_file, timeout=10):
             return HttpResponse('frame unavailable', status=404, content_type='text/plain; charset=utf-8')
         try:
             if lease_response is None:
-                try:
-                    lease_response = client.lease(source_id, rectification=MAP_RECTIFICATION) if use_rect else client.lease(source_id)
-                except PlaneUnavailableError:
-                    with _cache_lock:
-                        _unrectified_sources.add(rect_key)
-                    lease_response = client.lease(source_id)
+                lease_response = _request_topview_lease(client, origin, source_id, view_mode=view_mode)
                 with _cache_lock:
                     _lease_cache[lease_key] = (_lease_deadline(lease_response, time.time(), now_mono), lease_response)
                     _trim_cache(_lease_cache)
@@ -148,15 +175,9 @@ def topview_frame(request, source_id):
             if from_cache and error.code in (401, 403):
                 with _cache_lock:
                     _lease_cache.pop(lease_key, None)
-                    use_rect = rect_key not in _unrectified_sources
                 if source_id not in _camera_sources(origin, token, ca_file, timeout=10):
                     return HttpResponse('frame unavailable', status=404, content_type='text/plain; charset=utf-8')
-                try:
-                    lease_response = client.lease(source_id, rectification=MAP_RECTIFICATION) if use_rect else client.lease(source_id)
-                except PlaneUnavailableError:
-                    with _cache_lock:
-                        _unrectified_sources.add(rect_key)
-                    lease_response = client.lease(source_id)
+                lease_response = _request_topview_lease(client, origin, source_id, view_mode=view_mode)
                 with _cache_lock:
                     _lease_cache[lease_key] = (_lease_deadline(lease_response, time.time(), time.monotonic()), lease_response)
                 jpeg, metadata = client.fetch_frame(lease_response)
@@ -165,7 +186,10 @@ def topview_frame(request, source_id):
         except PlaneUnavailableError:
             with _cache_lock:
                 _unrectified_sources.add(rect_key)
+                _lease_cache.pop(lease_key, None)
             lease_response = client.lease(source_id)
+            with _cache_lock:
+                _lease_cache[lease_key] = (_lease_deadline(lease_response, time.time(), time.monotonic()), lease_response)
             jpeg, metadata = client.fetch_frame(lease_response)
         response = HttpResponse(jpeg, content_type="image/jpeg")
         response["Cache-Control"] = "no-store"

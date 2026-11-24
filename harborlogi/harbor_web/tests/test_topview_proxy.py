@@ -6,7 +6,13 @@ from django.contrib.auth.models import Group, User
 from django.test import TestCase
 from django.urls import reverse
 
-from harbor.rosy_vision import MAP_RECTIFICATION, PlaneUnavailableError, StaleFrameError
+from harbor.rosy_vision import (
+    MAP_OVERLAY_RECTIFICATION,
+    MAP_RECTIFICATION,
+    PlaneUnavailableError,
+    RectificationUnsupportedError,
+    StaleFrameError,
+)
 from harbor_web.topview_proxy import clear_topview_cache
 
 
@@ -106,30 +112,37 @@ class TopviewProxyTests(TestCase):
             'frame_path': '/api/vision/sources/ceiling_north/frame'}
         allowed = self.client.get(reverse('topview_frame', args=['ceiling_north']))
         self.assertEqual((allowed.status_code, allowed.content), (200, b'jpeg-test'))
-        self.camera.lease.assert_called_once_with('ceiling_north', rectification=MAP_RECTIFICATION)
+        self.camera.lease.assert_called_once_with('ceiling_north', rectification=MAP_OVERLAY_RECTIFICATION)
 
         self.camera.lease.reset_mock()
         rejected = self.client.get(reverse('topview_frame', args=['unapproved-cam']))
         self.assertEqual(rejected.status_code, 404)
         self.camera.lease.assert_not_called()
 
-    def test_falls_back_to_raw_frame_when_map_plane_rectification_is_unavailable(self):
+    def test_falls_back_from_map_overlay_to_map_and_raw_and_supports_raw_query(self):
         self.camera.lease.side_effect = [
+            RectificationUnsupportedError('422'),
             {'source_id': 'test-cam', 'lease': 'map-lease-secret',
              'frame_path': '/api/vision/sources/test-cam/frame'},
             {'source_id': 'test-cam', 'lease': 'raw-lease-secret',
+             'frame_path': '/api/vision/sources/test-cam/frame'},
+            {'source_id': 'test-cam', 'lease': 'explicit-raw-secret',
              'frame_path': '/api/vision/sources/test-cam/frame'},
         ]
         self.camera.fetch_frame.side_effect = [
             PlaneUnavailableError('map plane unavailable'),
             (b'jpeg-raw-fallback', {'X-Frame-Seq': '43', 'X-Frame-Rectified': 'false'}),
+            (b'jpeg-explicit-raw', {'X-Frame-Seq': '44', 'X-Frame-Rectified': 'false'}),
         ]
         response = self.client.get(self.url)
         self.assertEqual((response.status_code, response.content), (200, b'jpeg-raw-fallback'))
         self.assertEqual(response['X-Frame-Rectified'], 'false')
+
+        raw_response = self.client.get(self.url + '?view=raw')
+        self.assertEqual((raw_response.status_code, raw_response.content), (200, b'jpeg-explicit-raw'))
         self.assertEqual(
             [call.kwargs for call in self.camera.lease.call_args_list],
-            [{'rectification': MAP_RECTIFICATION}, {}],
+            [{'rectification': MAP_OVERLAY_RECTIFICATION}, {'rectification': MAP_RECTIFICATION}, {}, {}],
         )
         self.assertNotIn('map-lease-secret', str(dict(response.headers)))
         self.assertNotIn('raw-lease-secret', str(dict(response.headers)))
