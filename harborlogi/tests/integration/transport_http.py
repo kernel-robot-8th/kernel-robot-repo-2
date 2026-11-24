@@ -401,7 +401,9 @@ class TransportHttpTests(unittest.TestCase):
         dry = service.preview_cell_plan_typed(rosy_req, expected_order_source='rosy_r')
         self.assertEqual(len(dry.moves), 3)
         self.assertEqual(dry.final_state, ())
-        self.assertTrue(all(m.cargo_id is None for m in dry.moves))
+        dry_raw = service.preview_cell_plan(rosy_req)
+        self.assertIsNone(dry_raw['final_state'])
+        self.assertTrue(all('cargo_id' not in m for m in dry_raw['moves']))
         goal_req = build_rosy_directive_request(
             mode='goal',
             observation_payload=observation_payload,
