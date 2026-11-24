@@ -4,6 +4,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from harbor.cell_site_map import (
+    canonical_cell_slot_specs,
+    validate_canonical_cell_placement,
+    validate_canonical_wire_ref,
+)
 from harbor.model import YARD_ARMS, identifier
 from harbor.process import anchor_address
 
@@ -58,7 +63,7 @@ def _req_pos_int(value: Any, *, code: str = 'INVALID_SPATIAL_PLACEMENT') -> int:
     return value
 
 
-def observation_site_state(observation_payload: dict | None) -> dict[str, str]:
+def observation_site_state(observation_payload: dict | None, *, validate_canonical: bool = True) -> dict[str, str]:
     """Build {cargo_id: wire_ref} from a grid-placement-v1 observation payload."""
     if not isinstance(observation_payload, dict) or observation_payload.get('schema') != 'grid-placement-v1':
         raise ValueError('SPATIAL_OBSERVATION_REQUIRED')
@@ -70,10 +75,14 @@ def observation_site_state(observation_payload: dict | None) -> dict[str, str]:
         identifier(cargo_id)
         if cargo_id in state:
             raise ValueError('DUPLICATE_CARGO_IN_OBSERVATION')
+        area_id = entry.get('area_id')
         row = _req_pos_int(entry.get('row'))
         col = _req_pos_int(entry.get('column'))
         level = _req_pos_int(entry.get('level'))
-        state[cargo_id] = anchor_address(entry.get('area_id'), row, col, level)
+        if validate_canonical:
+            state[cargo_id] = validate_canonical_cell_placement(area_id, row, col, level)
+        else:
+            state[cargo_id] = anchor_address(area_id, row, col, level)
     return state
 
 
@@ -263,6 +272,7 @@ def build_harbor_plan_spec(
     observation_payload: dict | None = None,
     robot_id: str = 'rosy_01',
     cargo_id: str | None = None,
+    validate_canonical: bool = True,
 ) -> HarborPlanRequest:
     """Translate a Harbor READY spatial Plan.result into a typed Mode 1 HarborPlanRequest."""
     if not isinstance(plan_result, dict) or plan_result.get('status') != 'READY':
@@ -290,10 +300,16 @@ def build_harbor_plan_spec(
             arm_id = _arm_to_rosy(move.get('primary_arm'))
             step_cargo = move.get('cargo_id')
             identifier(step_cargo)
+            if validate_canonical:
+                src_site = validate_canonical_cell_placement(src_p.get('area_id'), src_row, src_col, src_lvl, arm_id=arm_id)
+                dst_site = validate_canonical_cell_placement(dst_p.get('area_id'), dst_row, dst_col, dst_lvl, arm_id=arm_id)
+            else:
+                src_site = anchor_address(src_p.get('area_id'), src_row, src_col, src_lvl)
+                dst_site = anchor_address(dst_p.get('area_id'), dst_row, dst_col, dst_lvl)
             steps.append(CellPlanStepSpec(
                 cargo_id=step_cargo,
-                src_site=anchor_address(src_p.get('area_id'), src_row, src_col, src_lvl),
-                dst_site=anchor_address(dst_p.get('area_id'), dst_row, dst_col, dst_lvl),
+                src_site=src_site,
+                dst_site=dst_site,
                 arm_id=arm_id,
                 phase_label=str(move.get('phase_label') or '이동'),
             ))
@@ -304,16 +320,21 @@ def build_harbor_plan_spec(
         rec_row = _req_pos_int(rec.get('row'), code='SPATIAL_MOVE_COORDINATES_REQUIRED')
         rec_col = _req_pos_int(rec.get('column'), code='SPATIAL_MOVE_COORDINATES_REQUIRED')
         rec_lvl = _req_pos_int(rec.get('level'), code='SPATIAL_MOVE_COORDINATES_REQUIRED')
+        dst_site = (
+            validate_canonical_cell_placement(rec.get('area_id'), rec_row, rec_col, rec_lvl)
+            if validate_canonical
+            else anchor_address(rec.get('area_id'), rec_row, rec_col, rec_lvl)
+        )
         steps.append(CellPlanStepSpec(
             cargo_id=step_cargo,
             src_site='belt',
-            dst_site=anchor_address(rec.get('area_id'), rec_row, rec_col, rec_lvl),
+            dst_site=dst_site,
             phase_label='입고',
         ))
     else:
         raise ValueError('PLAN_HAS_NO_EXECUTABLE_MOVES')
 
-    state_pairs = tuple(observation_site_state(observation_payload).items()) if observation_payload is not None else None
+    state_pairs = tuple(observation_site_state(observation_payload, validate_canonical=validate_canonical).items()) if observation_payload is not None else None
     return HarborPlanRequest(steps=tuple(steps), robot_id=robot_id, state=state_pairs)
 
 
@@ -342,21 +363,31 @@ def build_rosy_directive_spec(
     goal: dict[str, list[str]] | None = None,
     avoid: tuple[str, ...] | list[str] = (),
     robot_id: str = 'rosy_01',
+    validate_canonical: bool = True,
 ) -> RosyDirectiveRequest:
     """Build a typed Mode 2 RosyDirectiveRequest."""
     if mode not in AUTONOMOUS_DIRECTIVE_MODES:
         raise ValueError('INVALID_DIRECTIVE_MODE')
-    state = tuple(observation_site_state(observation_payload).items())
+    state = tuple(observation_site_state(observation_payload, validate_canonical=validate_canonical).items())
     goal_pairs: tuple[tuple[str, tuple[str, ...]], ...] | None = None
     if mode == 'goal':
         if not isinstance(goal, dict) or not goal:
             raise ValueError('GOAL_STACKS_REQUIRED')
+        slot_specs = canonical_cell_slot_specs() if validate_canonical else None
         parsed_goal: list[tuple[str, tuple[str, ...]]] = []
         for stack_key, cargo_list in goal.items():
             if not isinstance(cargo_list, (list, tuple)) or not cargo_list:
                 raise ValueError('GOAL_STACKS_REQUIRED')
-            parsed_goal.append((str(stack_key), tuple(cargo_list)))
+            key_str = str(stack_key)
+            if slot_specs is not None:
+                if key_str not in slot_specs or len(cargo_list) > slot_specs[key_str]:
+                    raise ValueError(f'UNKNOWN_CELL_SLOT: {key_str}')
+            parsed_goal.append((key_str, tuple(cargo_list)))
         goal_pairs = tuple(parsed_goal)
+    avoid_refs = tuple(
+        validate_canonical_wire_ref(s) if validate_canonical else str(s)
+        for s in avoid
+    )
     return RosyDirectiveRequest(
         mode=mode,
         state=state,
@@ -364,7 +395,7 @@ def build_rosy_directive_spec(
         cargo_id=cargo_id,
         destination=destination if mode == 'outbound' else None,
         goal=goal_pairs,
-        avoid=tuple(str(s) for s in avoid),
+        avoid=avoid_refs,
     )
 
 

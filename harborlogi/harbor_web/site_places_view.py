@@ -2,6 +2,7 @@
 import os
 from urllib.error import HTTPError, URLError
 
+from harbor.cell_site_map import compare_condition_with_rosy
 from harbor.site_places import (
     parse_site_places,
     resolve_intake_destination,
@@ -30,7 +31,7 @@ _STATUS_LABELS = {
 }
 
 
-def site_places_context():
+def site_places_context(*, condition=None):
     """Return read-only port site-place summary for the yard page; fail closed on any error."""
     config = fleet_connection.connection_settings()
     token = os.environ.get('HARBOR_FLEET_TOKEN', '').strip()
@@ -49,6 +50,15 @@ def site_places_context():
 
     intake_stop, intake_reason = resolve_intake_destination(places)
     outbound_stops, outbound_reason = resolve_outbound_dispatch_stops(places)
+    report = compare_condition_with_rosy(
+        condition.payload if condition is not None else None,
+        site_places=places,
+    )
+    alignment = dict(
+        aligned=report['aligned'],
+        summary='일치' if report['aligned'] else f"정합 점검 필요 ({len(report['issues'])}건)",
+        issues=report['issues'],
+    )
     return dict(
         available=True,
         schema=places.schema,
@@ -59,6 +69,7 @@ def site_places_context():
             if outbound_stops
             else f'보류 ({outbound_reason})'
         ),
+        alignment=alignment,
         not_places=sorted(places.not_places),
         vehicle_places=[
             dict(

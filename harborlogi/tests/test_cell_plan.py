@@ -171,6 +171,62 @@ class CellPlanUnitTests(unittest.TestCase):
         self.assertEqual(cancelled.plan.hold_reason, 'aborted')
         self.assertEqual(cancelled.cancelled_task_ids, ('cp-1-s1',))
 
+    def test_builders_fail_closed_on_non_canonical_coordinates_arms_or_goal_slots(self):
+        bad_obs = {
+            'schema': 'grid-placement-v1',
+            'placements': [
+                {'cargo_id': 'C1', 'area_id': 'yard', 'row': 1, 'column': 2, 'level': 1, 'orientation': 0},
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, 'INVALID_CELL_SLOT_COORDINATE'):
+            observation_site_state(bad_obs)
+
+        bad_plan = {
+            'status': 'READY',
+            'model': 'grid-placement-v1',
+            'moves': [{
+                'cargo_id': 'C1',
+                'primary_arm': 'B',
+                'source_placement': {'area_id': 'stand', 'row': 1, 'column': 1, 'level': 1},
+                'destination_placement': {'area_id': 'yard', 'row': 1, 'column': 4, 'level': 1},
+            }],
+        }
+        with self.assertRaisesRegex(ValueError, 'INVALID_CELL_ZONE_ARM'):
+            build_harbor_plan_spec(bad_plan)
+
+        bad_level_plan = {
+            'status': 'READY',
+            'model': 'grid-placement-v1',
+            'moves': [{
+                'cargo_id': 'C1',
+                'primary_arm': 'A',
+                'source_placement': {'area_id': 'stand', 'row': 1, 'column': 1, 'level': 2},
+                'destination_placement': {'area_id': 'yard', 'row': 1, 'column': 1, 'level': 1},
+            }],
+        }
+        with self.assertRaisesRegex(ValueError, 'INVALID_CELL_SLOT_COORDINATE'):
+            build_harbor_plan_spec(bad_level_plan)
+
+        with self.assertRaisesRegex(ValueError, 'UNKNOWN_CELL_SLOT'):
+            build_rosy_directive_spec(
+                mode='goal',
+                observation_payload=self._observation(),
+                goal={'stand:r1-s2': ['C1']},
+            )
+        with self.assertRaisesRegex(ValueError, 'UNKNOWN_CELL_SLOT'):
+            build_rosy_directive_spec(
+                mode='goal',
+                observation_payload=self._observation(),
+                goal={'stand:r1-s1': ['C1', 'C2']},
+            )
+        with self.assertRaisesRegex(ValueError, 'INVALID_CELL_SLOT_COORDINATE'):
+            build_rosy_directive_spec(
+                mode='outbound',
+                observation_payload=self._observation(),
+                cargo_id='C1',
+                avoid=['yard-r1-c3-l1'],
+            )
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -5,13 +5,20 @@ import unittest
 from unittest.mock import patch
 
 from harbor.cell_site_map import (
+    CANONICAL_ZONE_SPECS,
     MAX_DOCUMENT_BYTES,
     SCHEMA_ID,
+    canonical_cell_slot_specs,
+    canonical_cell_wire_refs,
+    compare_condition_with_rosy,
     decode_cell_site_json,
     default_calibration_ref,
     default_name,
     normalize_cell_site_map,
+    validate_canonical_cell_placement,
+    validate_canonical_wire_ref,
 )
+from harbor.site_places import parse_site_places
 from harbor.rosy_http import RosyClient
 
 
@@ -347,3 +354,121 @@ class CellSiteMapTests(unittest.TestCase):
         with patch.object(client._opener, 'open', return_value=_DummyHTTPResponse(b'{"a":1,"a":2}')):
             with self.assertRaisesRegex(ValueError, 'DUPLICATE_JSON_KEY'):
                 client.cell_sites()
+
+
+class CanonicalZoneAlignmentTests(unittest.TestCase):
+    def test_canonical_wire_refs_and_slots_match_37_sites_13_slots(self):
+        refs = canonical_cell_wire_refs()
+        slots = canonical_cell_slot_specs()
+        self.assertEqual(len(refs), 37)
+        self.assertEqual(len(slots), 13)
+        self.assertEqual(set(CANONICAL_ZONE_SPECS), {'yard', 'temp_a', 'temp_b', 'stand'})
+        self.assertIn('yard-r3-c4-l3', refs)
+        self.assertIn('stand-r1-c1-l1', refs)
+        self.assertEqual(slots['yard:r2-s2'], 3)
+        self.assertEqual(slots['stand:r1-s1'], 1)
+
+    def test_validate_canonical_placement_and_wire_ref_reject_invalid_coords_and_arms(self):
+        self.assertEqual(validate_canonical_cell_placement('yard', 1, 4, 2, arm_id='B'), 'yard-r1-c4-l2')
+        self.assertEqual(validate_canonical_wire_ref('temp_a-r2-c1-l3', arm_id='arm_a'), 'temp_a-r2-c1-l3')
+        self.assertEqual(validate_canonical_wire_ref('belt', allow_belt=True), 'belt')
+
+        for bad_col in (2, 3, 5, 6):
+            with self.assertRaisesRegex(ValueError, 'INVALID_CELL_SLOT_COORDINATE'):
+                validate_canonical_cell_placement('yard', 1, bad_col, 1)
+        with self.assertRaisesRegex(ValueError, 'INVALID_CELL_SLOT_COORDINATE'):
+            validate_canonical_cell_placement('temp_a', 1, 2, 1)
+        with self.assertRaisesRegex(ValueError, 'INVALID_CELL_SLOT_COORDINATE'):
+            validate_canonical_cell_placement('stand', 1, 1, 2)
+        with self.assertRaisesRegex(ValueError, 'INVALID_CELL_SLOT_COORDINATE'):
+            validate_canonical_cell_placement('yard', True, 1, 1)
+        with self.assertRaisesRegex(ValueError, 'INVALID_CELL_SLOT_COORDINATE'):
+            validate_canonical_wire_ref('belt')
+
+        with self.assertRaisesRegex(ValueError, 'INVALID_CELL_ZONE_ARM'):
+            validate_canonical_cell_placement('stand', 1, 1, 1, arm_id='B')
+        with self.assertRaisesRegex(ValueError, 'INVALID_CELL_ZONE_ARM'):
+            validate_canonical_cell_placement('temp_a', 1, 1, 1, arm_id='arm_b')
+        with self.assertRaisesRegex(ValueError, 'INVALID_CELL_ZONE_ARM'):
+            validate_canonical_wire_ref('temp_b-r1-c1-l1', arm_id='A')
+
+    def _canonical_condition(self):
+        return {
+            'slot_cells': 3,
+            'yard_layout': {'rows': 3, 'columns': 6, 'levels': 3},
+            'spatial_areas': [
+                {'area_id': 'temp_a', 'rows': 3, 'columns': 3, 'levels': 3},
+                {'area_id': 'temp_b', 'rows': 3, 'columns': 3, 'levels': 3},
+                {'area_id': 'stand', 'rows': 1, 'columns': 3, 'levels': 1},
+            ],
+            'arm_reach': [
+                ['A', 'yard'], ['B', 'yard'],
+                ['A', 'temp_a'], ['B', 'temp_b'], ['A', 'stand'],
+            ],
+        }
+
+    def _port_places(self, *, exit_stop='S_EXIT', exit_role='outbound_exit', status='verified'):
+        return parse_site_places({
+            'schema': 'rosy.port-site-places.v1',
+            'sources': {
+                'site_map': {'map_id': 'test_world', 'version': 1},
+                'cell_site_map': {'schema': 'rosy.cell-site-map.v1', 'revision': 1, 'status': 'verified'},
+            },
+            'digest': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+            'vehicle_places': [
+                {'place_id': 'S1', 'port_role': 'inbound_load', 'label': '수령구', 'status': 'verified', 'dispatchable': True},
+                {'place_id': 'S_OUT', 'port_role': 'outbound_pickup', 'label': '반출 상차', 'status': status, 'dispatchable': status == 'verified'},
+                {'place_id': 'S_EXIT', 'port_role': exit_role, 'label': '반출 출구', 'status': status, 'dispatchable': status == 'verified'},
+            ],
+            'cell_zones': [
+                {'zone_id': 'yard', 'role': 'storage', 'label': '야드', 'status': status},
+                {'zone_id': 'temp_a', 'role': 'temporary', 'label': '임시A', 'status': status},
+                {'zone_id': 'temp_b', 'role': 'temporary', 'label': '임시B', 'status': status},
+                {'zone_id': 'stand', 'role': 'outbound', 'label': '반출대', 'status': status},
+            ],
+            'intake_handoffs': [],
+            'outbound_handoffs': [{
+                'handoff_id': 'stand_out',
+                'cell_zone_id': 'stand',
+                'wire_slot_ref': 'stand-r1-c1-l1',
+                'vehicle_pickup_stop_id': 'S_OUT',
+                'vehicle_exit_stop_id': exit_stop,
+                'status': status,
+                'dispatchable': status == 'verified',
+            }],
+            'not_places': ['belt'],
+        })
+
+    def test_compare_condition_with_rosy_flags_mismatches_and_passes_when_aligned(self):
+        missing = compare_condition_with_rosy(None, site_places=self._port_places())
+        self.assertFalse(missing['aligned'])
+        self.assertIn('NO_ACTIVE_CONDITION', {i['code'] for i in missing['issues']})
+
+        legacy_condition = {
+            'slot_cells': 1,
+            'yard_layout': {'rows': 3, 'columns': 3, 'levels': 3},
+            'spatial_areas': [{'area_id': 'stand', 'rows': 1, 'columns': 3, 'levels': 1}],
+            'arm_reach': [['B', 'stand']],
+        }
+        mismatch = compare_condition_with_rosy(
+            legacy_condition,
+            site_places=self._port_places(exit_stop='S1', status='planned_unverified'),
+        )
+        codes = {i['code'] for i in mismatch['issues']}
+        self.assertTrue({
+            'SLOT_CELLS_MISMATCH',
+            'ZONE_DIMENSIONS_MISMATCH',
+            'ZONE_MISSING_IN_HARBOR',
+            'ZONE_ARM_MISMATCH',
+            'OUTBOUND_EXIT_ROLE_MISMATCH',
+            'CELL_ZONES_UNVERIFIED',
+            'OUTBOUND_PICKUP_UNVERIFIED',
+        }.issubset(codes))
+
+        aligned = compare_condition_with_rosy(
+            self._canonical_condition(),
+            site_places=self._port_places(),
+        )
+        self.assertTrue(aligned['aligned'])
+        self.assertEqual(aligned['issues'], [])
+

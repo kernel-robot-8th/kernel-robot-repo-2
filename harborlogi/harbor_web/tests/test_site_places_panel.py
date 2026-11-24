@@ -78,3 +78,21 @@ class SitePlacesPanelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'ROSY 위치 계약 검증 실패')
         self.assertNotContains(response, '1.25')
+
+    def test_inventory_renders_zone_alignment_issues_and_passes_glossary_sweep(self):
+        payload = copy.deepcopy(json.loads(CONFIG_PATH.read_text(encoding='utf-8')))
+        if payload.get('outbound_handoffs'):
+            payload['outbound_handoffs'][0]['vehicle_exit_stop_id'] = 'S1'
+        with patch.dict(os.environ, {
+            'HARBOR_FLEET_ORIGIN': 'https://fleet.example',
+            'HARBOR_FLEET_ALLOWED_ORIGINS': 'https://fleet.example',
+            'HARBOR_FLEET_TOKEN': 'token-for-test',
+        }), patch('harbor.rosy_http.RosyClient.site_places', return_value=payload):
+            response = self.client.get('/inventory/')
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode('utf-8')
+        self.assertContains(response, '구역·정지선 정합')
+        self.assertContains(response, '정합 점검 필요')
+        self.assertContains(response, 'NO_ACTIVE_CONDITION')
+        self.assertContains(response, 'OUTBOUND_EXIT_ROLE_MISMATCH')
+        _assert_glossary_clean(self, html)
