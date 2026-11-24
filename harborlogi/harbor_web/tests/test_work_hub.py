@@ -94,8 +94,8 @@ class WorkHubTests(TestCase):
             [urgent.pk, any_order.pk, later.pk, running.pk])
         self.assertNotIn(done.order_id, [r['order'].pk for r in rows])
         self.assertContains(response, '단계 안 순서 자유')
-        self.assertContains(response, '<span class="helptext">지금</span>', count=1, html=True)
-        self.assertContains(response, '<span class="helptext">다음</span>', count=1, html=True)
+        self.assertContains(response, '<span class="work-tag">지금</span>', count=1, html=True)
+        self.assertContains(response, '<span class="work-tag">다음</span>', count=1, html=True)
         self.assertEqual([r['order'].pk for r in rows if r.get('is_next')], [urgent.pk])
         self.assertNotContains(response, '알고리즘이 정한 순서')
 
@@ -105,8 +105,8 @@ class WorkHubTests(TestCase):
         next_order = self.order('NEXT', sequence=2)
         self.order('LATER', sequence=3)
         response = self.get_hub()
-        self.assertContains(response, '<span class="helptext">다음</span>', count=1, html=True)
-        self.assertNotContains(response, '<span class="helptext">지금</span>', html=True)
+        self.assertContains(response, '<span class="work-tag">다음</span>', count=1, html=True)
+        self.assertNotContains(response, '<span class="work-tag">지금</span>', html=True)
         self.assertEqual([r['order'].pk for r in response.context['timeline'] if r.get('is_next')],
             [next_order.pk])
 
@@ -222,3 +222,11 @@ class WorkHubTests(TestCase):
         self.client.logout()
         self.assertEqual(self.client.get('/work/').status_code, 302)
         self.assertEqual(before, (Order.objects.count(), Plan.objects.count(), Command.objects.count(), Audit.objects.count()))
+
+
+class ShownStateTests(TestCase):
+    def test_attention_is_named_by_cause(self):
+        from harbor_web.work_state import shown_state
+        self.assertEqual(shown_state('처리할 것', object()), '작업 확인')
+        self.assertEqual(shown_state('처리할 것', None), '작업 막힘')
+        self.assertEqual(shown_state('대기', None), '대기')
