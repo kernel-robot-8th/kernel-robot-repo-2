@@ -76,7 +76,7 @@
 .yard-topview > * {min-width:0}
 .yard-topview > .yard-linked {display:flex;flex-direction:column;align-items:stretch}
 .yard-topview .linked-flat {order:-1}
-.topview-panel img {display:block;width:100%;height:auto;border-radius:var(--primitive-radius-control)}
+.topview-panel img {display:block;width:100%;height:auto;border-radius:var(--primitive-radius-control);transform:rotate(180deg)} /* camera looks from the far side: turn it to the yard plan's direction */
 .topview-panel img[hidden] {display:none}
 .topview-panel select {width:100%}
 .topview-panel [role="status"] {min-height:1.4em;color:var(--semantic-text-secondary);overflow-wrap:anywhere}
