@@ -221,8 +221,8 @@ class TransportHttpTests(unittest.TestCase):
             with urlopen(req, timeout=10) as resp:
                 return json.load(resp)
 
-        received_id = sha256(f'{cargo}|received'.encode()).hexdigest()
-        stored_id = sha256(f'{cargo}|stored'.encode()).hexdigest()
+        received_id = sha256(f'{wc_id}|obs-{cargo}|container.received_at_intake'.encode()).hexdigest()
+        stored_id = sha256(f'{wc_id}|obs-store-{cargo}|container.stored'.encode()).hexdigest()
         post_event({
             'event_id': received_id, 'kind': 'container.received_at_intake',
             'observation_ref': 'obs-' + cargo, 'object_ref': cargo,
