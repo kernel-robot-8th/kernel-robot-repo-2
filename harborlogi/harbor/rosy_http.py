@@ -192,13 +192,16 @@ class RosyClient:
         return self._call('POST', '/api/fleet/arm-transfers/jobs/' + quote(mission_id, safe='') + '/cancel', {'reason': reason})
 
     def preview_cell_plan(self, payload):
-        return self._call('POST', '/api/fleet/pipeline/cell-plans/preview', dict(payload))
+        return self._call('POST', '/api/fleet/pipeline/cell-plans/dry-run', dict(payload))
 
     def propose_cell_plan(self, payload, *, request_key):
         return self._call('POST', '/api/fleet/pipeline/cell-plans', {**dict(payload), 'request_key': request_key})
 
     def cell_plan(self, plan_id):
         return self._call('GET', '/api/fleet/pipeline/cell-plans/' + quote(plan_id, safe=''), None)
+
+    def cell_plan_request(self, request_key):
+        return self._call('GET', '/api/fleet/pipeline/cell-plans?request_key=' + quote(request_key, safe=''), None)
 
 
 def load_site_recognition(client=None, *, known_site_refs=None):

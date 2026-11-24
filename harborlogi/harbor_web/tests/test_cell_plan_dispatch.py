@@ -1,23 +1,69 @@
 """Django tests for dual-mode OMX cell-plan dispatch (Harbor plan order vs autonomous ROSY directive)."""
+from hashlib import sha256
+from io import BytesIO
 import json
+import os
 from pathlib import Path
-from types import SimpleNamespace
+from unittest.mock import patch
+from urllib.error import HTTPError, URLError
 
 from django.contrib.auth.models import Group, User
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
-from harbor_web import cell_plan_dispatch, services
-from harbor_web.models import CargoFootprint, CellPlanDispatch
+from harbor.transport import TransportLedger
+from harbor_web import cell_plan_dispatch, executor, outbound_loop, services
+from harbor_web.models import CargoFootprint, CellPlanDispatch, OutboundDispatch
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _http_error(status: int, code: str | None = None) -> HTTPError:
+    body = json.dumps({'detail': {'code': code}}).encode('utf-8') if code else b'Not Found'
+    return HTTPError('https://fleet.invalid/api/fleet/pipeline/cell-plans', status, 'err', {}, BytesIO(body))
+
+
+def _canonical_places_doc() -> dict:
+    body = {
+        'schema': 'rosy.port-site-places.v1',
+        'sources': {
+            'site_map': {'map_id': 'w', 'version': 1, 'sha256': 'a' * 64},
+            'cell_site_map': {'schema': 'rosy.cell-site-map.v1', 'revision': 1, 'status': 'verified'},
+        },
+        'vehicle_places': [
+            {'place_id': 'S_OUT', 'port_role': 'outbound_pickup', 'status': 'verified', 'dispatchable': True, 'label': 'S_OUT'},
+            {'place_id': 'S_EXIT', 'port_role': 'outbound_exit', 'status': 'verified', 'dispatchable': True, 'label': 'S_EXIT'},
+        ],
+        'cell_zones': [
+            {'zone_id': 'yard', 'role': 'storage', 'status': 'verified', 'label': '야드'},
+            {'zone_id': 'stand', 'role': 'outbound', 'status': 'verified', 'label': '반출대'},
+        ],
+        'intake_handoffs': [],
+        'outbound_handoffs': [{
+            'handoff_id': 'outbound_stand_load',
+            'cell_zone_id': 'stand',
+            'wire_slot_ref': 'stand-r1-c1-l1',
+            'vehicle_pickup_stop_id': 'S_OUT',
+            'vehicle_exit_stop_id': 'S_EXIT',
+            'status': 'verified',
+            'dispatchable': True,
+        }],
+        'not_places': ['belt'],
+    }
+    encoded = json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
+    return {**body, 'digest': sha256(encoded.encode('utf-8')).hexdigest()}
 
 
 class _FakeCellPlanClient:
     def __init__(self):
         self.calls = []
+        self.by_key = {}
+        self.by_id = {}
         self.status = 'PROPOSED'
+        self.post_error = None
+        self.get_key_error = None
+        self.sites_doc = _canonical_places_doc()
 
     def propose_cell_plan(self, payload, *, request_key):
         self.calls.append((request_key, payload))
@@ -50,7 +96,7 @@ class _FakeCellPlanClient:
             }
             for i, m in enumerate(moves)
         ]
-        self._last = {
+        response = {
             'ok': True,
             'schema': 'rosy.cell-plan.v1',
             'plan': {
@@ -61,25 +107,67 @@ class _FakeCellPlanClient:
                 'status': self.status,
                 'total_steps': len(tasks),
                 'completed_steps': 0,
+                'request_key': request_key,
                 'task_ids': [t['task_id'] for t in tasks],
                 'moves': moves,
             },
             'tasks': tasks,
         }
-        return self._last
+        self._last = response
+        self.by_key[request_key] = response
+        self.by_id[plan_id] = response
+        if self.post_error is not None:
+            raise self.post_error
+        return response
 
     def cell_plan(self, plan_id):
+        rec = self.by_id[plan_id]
         return {
-            **self._last,
-            'plan': {**self._last['plan'], 'plan_id': plan_id, 'status': self.status},
-            'tasks': [{**t, 'status': self.status} for t in self._last['tasks']],
+            **rec,
+            'plan': {**rec['plan'], 'status': self.status},
+            'tasks': [{**t, 'status': self.status} for t in rec['tasks']],
         }
+
+    def cell_plan_request(self, request_key):
+        if self.get_key_error is not None:
+            raise self.get_key_error
+        if request_key not in self.by_key:
+            raise _http_error(404, 'UNKNOWN_CELL_PLAN')
+        rec = self.by_key[request_key]
+        return {
+            **rec,
+            'plan': {**rec['plan'], 'status': self.status},
+            'tasks': [{**t, 'status': self.status} for t in rec['tasks']],
+        }
+
+    def site_places(self):
+        return self.sites_doc
+
+
+class _FakeOutboundTransport:
+    def __init__(self, ledger_path: Path):
+        self.ledger = TransportLedger(ledger_path)
+        self.trip_status = 'QUEUED'
+        self.assigned_robot = 'pinky-01'
+
+    def prepare(self, intent):
+        self.ledger.prepare(intent)
+
+    def read(self, request_key):
+        return self.ledger.read(request_key)
+
+    def propose(self, request_key, client):
+        del client
+        return {'mission_id': f'trip:{request_key}', 'robot_id': self.assigned_robot, 'status': self.trip_status}
+
+    def reconcile_proposal(self, request_key, client):
+        return self.propose(request_key, client)
 
 
 class CellPlanDispatchTests(TestCase):
     def setUp(self):
         self.operator = User.objects.create_user('cell-op')
-        for role in ('admin', 'operator', 'viewer'):
+        for role in ('admin', 'operator', 'field', 'viewer'):
             self.operator.groups.add(Group.objects.get_or_create(name=role)[0])
         self.viewer = User.objects.create_user('cell-viewer')
         self.viewer.groups.add(Group.objects.get_or_create(name='viewer')[0])
@@ -111,12 +199,25 @@ class CellPlanDispatchTests(TestCase):
         self.plan = services.make_plan(self.operator, order_id=self.order.pk, expected_version=1, observation_id=self.observation.pk)
         self.assertEqual(self.plan.result['status'], 'READY')
 
+    def test_default_client_requires_service_role_rule_4(self):
+        env = {
+            'HARBOR_FLEET_ORIGIN': 'https://fleet.example',
+            'HARBOR_FLEET_TOKEN': 'tok-svc',
+            'HARBOR_FLEET_PRINCIPAL': 'cell-app-service',
+            'HARBOR_FLEET_ALLOW_HOSTS': 'fleet.example',
+        }
+        with patch.dict(os.environ, env, clear=False), patch('harbor_web.cell_plan_dispatch.connection_settings', return_value={'origin': 'https://fleet.example', 'allowed': True, 'principal': 'cell-app-service'}):
+            client = cell_plan_dispatch._default_client()
+        self.assertEqual(client.expected_principal, 'cell-app-service')
+        self.assertEqual(client.expected_role, 'service')
+
     def test_dual_mode_dispatch_and_sync_lifecycle(self):
         client = _FakeCellPlanClient()
         harbor_row = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk, client=client)
         self.assertEqual(harbor_row.dispatch_mode, 'HARBOR_PLAN')
         self.assertEqual(harbor_row.order_source, 'harbor')
         self.assertEqual(harbor_row.state, 'PROPOSED')
+        self.assertEqual(harbor_row.request_payload['mode'], 'harbor_plan')
         self.assertEqual(len(harbor_row.rosy_task_ids), len(self.plan.result['moves']))
         self.assertEqual(client.calls[0][1]['mode'], 'harbor_plan')
 
@@ -137,11 +238,101 @@ class CellPlanDispatchTests(TestCase):
         with self.assertRaises(PermissionDenied):
             cell_plan_dispatch.dispatch_harbor_plan(self.viewer, plan_id=self.plan.pk, client=client)
 
+    def test_write_before_post_and_get_request_key_reconciliation_rules_6_to_9(self):
+        client = _FakeCellPlanClient()
+        client.post_error = URLError('network timeout after commit')
+        row = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk, client=client)
+        self.assertEqual(row.state, 'UNCERTAIN')
+        self.assertEqual(row.rosy_plan_id, '')
+        self.assertEqual(row.request_payload['mode'], 'harbor_plan')
+        self.assertEqual(len(client.calls), 1)
+
+        # Rule 7: reconciliation queries GET ?request_key= and NEVER re-POSTs.
+        client.post_error = None
+        recovered = cell_plan_dispatch.reconcile_cell_plan_dispatch(row.pk, client=client)
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(recovered.state, 'PROPOSED')
+        self.assertEqual(recovered.rosy_plan_id, 'cell-plan-1')
+
+        # Rule 8: uncoded 404 keeps UNCERTAIN (capability absent), coded UNKNOWN_CELL_PLAN sets NOT_FOUND.
+        client.post_error = _http_error(503, 'PIPELINE_LEDGER_UNAVAILABLE')
+        uncertain2 = cell_plan_dispatch.dispatch_rosy_directive(
+            self.operator, order_id=self.order.pk, observation_id=self.observation.pk, client=client,
+        )
+        client.by_key.pop(uncertain2.request_key, None)
+        client.get_key_error = _http_error(404, code=None)
+        still_uncertain = cell_plan_dispatch.reconcile_cell_plan_dispatch(uncertain2.pk, client=client)
+        self.assertEqual(still_uncertain.state, 'UNCERTAIN')
+        self.assertEqual(still_uncertain.reason, 'CELL_PLAN_ROUTE_UNAVAILABLE')
+
+        client.get_key_error = None
+        not_found = cell_plan_dispatch.reconcile_cell_plan_dispatch(uncertain2.pk, client=client)
+        self.assertEqual(not_found.state, 'NOT_FOUND')
+        self.assertEqual(not_found.reason, 'UNKNOWN_CELL_PLAN')
+
+        # Rule 9: 401/403 marks REJECTED with FLEET_IDENTITY_REJECTED and raises ValidationError.
+        client.post_error = _http_error(401, 'UNAUTHORIZED')
+        with self.assertRaises(ValidationError):
+            cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk, client=client)
+        latest = CellPlanDispatch.objects.order_by('-pk').first()
+        self.assertEqual(latest.state, 'REJECTED')
+        self.assertEqual(latest.reason, 'FLEET_IDENTITY_REJECTED')
+
+    def test_executor_tick_reconciles_cell_plan_and_drives_two_leg_outbound_pinky(self):
+        import tempfile
+        client = _FakeCellPlanClient()
+        client.post_error = URLError('lost response')
+        row = cell_plan_dispatch.dispatch_rosy_directive(
+            self.operator, order_id=self.order.pk, observation_id=self.observation.pk,
+            directive_mode='outbound', plan_id=self.plan.pk, client=client,
+        )
+        self.assertEqual(row.state, 'UNCERTAIN')
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transport = _FakeOutboundTransport(Path(tmpdir) / 'outbound.sqlite3')
+
+            class _Reg:
+                def __init__(self, c, t):
+                    self.client = c
+                    self.transport = t
+                    self.config = {'path': str(Path(tmpdir) / 'outbound.sqlite3')}
+
+            reg = _Reg(client, transport)
+            client.post_error = None
+            client.status = 'COMPLETED'
+            env = {'HARBOR_OUTBOUND_AUTO_DISPATCH': '1', 'HARBOR_OUTBOUND_VEHICLES': 'pinky-01,pinky-02'}
+            with patch.dict(os.environ, env, clear=False), patch('harbor_web.runtime.execution_block_reason', return_value=''):
+                # Tick 1: reconciles UNCERTAIN -> COMPLETED, auto-prepares OutboundDispatch (PICKUP_PLANNED),
+                # then outbound_loop.tick proposes Leg 1 S_OUT -> PICKUP_PROPOSED.
+                executor.tick(registry=reg)
+                row.refresh_from_db()
+                self.assertEqual(row.state, 'COMPLETED')
+                od = OutboundDispatch.objects.get(cell_plan_dispatch=row)
+                self.assertEqual(od.state, 'PICKUP_PROPOSED')
+                self.assertEqual(od.assigned_vehicle_id, 'pinky-01')
+
+                # Tick 2: Leg 1 S_OUT arrives -> PICKUP_ARRIVED (stops cleanly awaiting load confirm).
+                transport.trip_status = 'GOAL_CONFIRMED'
+                executor.tick(registry=reg)
+                od.refresh_from_db()
+                self.assertEqual(od.state, 'PICKUP_ARRIVED')
+
+                # Named confirmation -> LOADED -> Leg 2 pinned vehicle S_EXIT -> EXITED.
+                outbound_loop.confirm_outbound_loaded(self.operator, dispatch_id=od.pk, expected_version=od.version, registry=reg)
+                transport.trip_status = 'QUEUED'
+                executor.tick(registry=reg)
+                od.refresh_from_db()
+                self.assertEqual(od.state, 'EXIT_PROPOSED')
+
+                transport.trip_status = 'GOAL_CONFIRMED'
+                executor.tick(registry=reg)
+                od.refresh_from_db()
+                self.assertEqual(od.state, 'EXITED')
+
     def test_plan_detail_posts_both_cell_plan_actions(self):
         client = _FakeCellPlanClient()
         self.client.force_login(self.operator)
         with self.settings(ROOT_URLCONF='harbor_web.urls'):
-            from unittest.mock import patch
             with patch.object(cell_plan_dispatch, '_default_client', return_value=client):
                 r1 = self.client.post(f'/plans/{self.plan.pk}/', {'action': 'cell_plan_harbor'})
                 self.assertEqual(r1.status_code, 302)

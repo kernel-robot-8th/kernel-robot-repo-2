@@ -109,6 +109,7 @@ def main(argv=None):
                 'origin': fleet.url, 'operator': fleet.tokens['operator'], 'viewer': fleet.tokens['viewer'],
                 'service': fleet.tokens['service'],
                 'approver': fleet.tokens.get('approver'),  # R relays; its cell alone approves
+                'service': fleet.tokens.get('service'),
                 'platform_sha': platform_sha, 'app_sha': app_sha,
                 'binding': {**ref, 'cargo_id': 'synthetic-cargo', 'source': 'source', 'destination': 'destination',
                             'workcell_id': harness.WORKCELL, 'instance_id': harness.INSTANCE,

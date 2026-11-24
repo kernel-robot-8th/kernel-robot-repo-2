@@ -63,6 +63,16 @@ ledger = BusinessLedger(ledger_path, placement_sources=("synthetic-camera",),
 | `HARBOR_PLACEMENT_SOURCES` / `HARBOR_RETREAT_SOURCES` | 설치자가 등록한 배치·퇴피 근거 출처 ID(쉼표 구분, 서로 겹치지 않음). 장부의 `placement_sources`·`retreat_sources`가 이 값을 쓴다 | 미설정(placeholder) |
 | `HARBOR_EXECUTOR_EVIDENCE=intake` | 실행기가 제출된 근거(intake)를 소비해 confirm·finish를 이어간다 | 끔(근거 없이 단계가 열리지 않음) |
 | `HARBOR_RELEASE_OVERDUE_MINUTES` | 열린 현장 배정에서 ROSY 출발 허락(`vehicle.release_permitted`)이 오지 않을 때 비상 적재면 확인을 알리는 기준 시간(분) | 기본 10분 |
+| `HARBOR_OUTBOUND_AUTO_DISPATCH` | `1`이면 완료된 반출 `Command` 또는 `stand` 대상 `CellPlanDispatch` 뒤 `OutboundDispatch`(`S_OUT`)를 자동 준비 | 끔 |
+| `HARBOR_OUTBOUND_VEHICLES` | 반출대 차량 호출(`OutboundDispatch`)에 사용할 후보 Pinky ID 쉼표 목록(최대 8대) | 미설정 |
+
+## 이중 모드 OMX 셀 계획(`/api/fleet/pipeline/cell-plans`)과 반출대 2단계 Pinky 이송
+
+1. `harbor_web/cell_plan_dispatch.py`는 두 경로를 제공한다:
+   - `dispatch_harbor_plan`: `harbor.cell_plan.build_harbor_plan_request`로 Harbor 계획 순서·`wire_ref` 좌표를 `mode="harbor_plan"`으로 제안한다(`order_source="harbor"`).
+   - `dispatch_rosy_directive`: `build_rosy_directive_request`로 `steps` 없이 목표 지시(`outbound`/`rehandle`/`goal`)만 보내 ROSY가 이동 순서와 좌표를 산출한다(`order_source="rosy_r"`).
+   - 두 함수 모두 POST 전 `CellPlanDispatch(state='SUBMITTING', request_key=..., request_payload=...)`를 저장하고, 응답 유실 시 `UNCERTAIN`으로 남겨 `executor.tick`이 `GET /api/fleet/pipeline/cell-plans?request_key=<key>`(`reconcile_cell_plan_dispatch`)로만 복구한다.
+2. `harbor_web/outbound_loop.py`는 완료된 반출 `Command` 또는 `stand` 목적지의 완료된 `CellPlanDispatch`를 받아 2단계 차량 이송(`S_OUT` pickup → `confirm_outbound_loaded` 적재 확인 → 고정 차량 `S_EXIT` departure, `object_ref=''`)을 수행한다. `OutboundDispatch`는 `command`와 `cell_plan_dispatch` 중 정확히 하나만 참조(`outbound_dispatch_exactly_one_source`)하며 `stand_zone_id`당 활성 1건만 허용한다.
 
 근거 제출은 `harbor_web.evidence.submit`(현장 확인 역할)로 들어오며, mission·attempt·계획 revision에 결속되고 신선(기본 5초)하며 아직 소모되지 않은 것만 채택된다. 운영 producer의 전송·자격 계약은 [물리 관측 수용 조건](observation-acceptance.md) 산출물이 열기 전까지 설치 통합 담당 영역이다.
 

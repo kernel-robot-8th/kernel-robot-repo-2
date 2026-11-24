@@ -90,6 +90,10 @@ def tick(*, evidence=None, now=None, registry=None):
         try:
             results[command.pk] = commands.advance_command(command, registry, evidence=evidence)
             _record(command.pk, False, interval)
+            if results[command.pk] == 'COMPLETED' and command.order.kind == 'OUTBOUND':
+                from harbor_web import outbound_loop
+                command.refresh_from_db()
+                outbound_loop.maybe_auto_prepare(command, registry)
         except Exception as error:
             results[command.pk] = f'TICK_ERROR: {type(error).__name__}'
             _record(command.pk, True, interval)
@@ -100,6 +104,16 @@ def tick(*, evidence=None, now=None, registry=None):
         intake_loop.tick(registry, now=now)
     except Exception:
         pass  # R not reachable or not yet serving port events; the next tick retries.
+    try:
+        from harbor_web import cell_plan_dispatch
+        cell_plan_dispatch.tick(registry, now=now)
+    except Exception:
+        pass
+    try:
+        from harbor_web import outbound_loop
+        outbound_loop.tick(registry, now=now)
+    except Exception:
+        pass
     return dict(ran=True, reason='', results=results)
 
 

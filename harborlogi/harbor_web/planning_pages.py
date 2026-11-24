@@ -9,7 +9,7 @@ from django.http import Http404
 from django.views.decorators.http import require_http_methods
 
 from harbor.ledger import ReadOnlyLedger
-from harbor_web import cell_plan_dispatch, commands, human_evidence, services
+from harbor_web import cell_plan_dispatch, commands, human_evidence, outbound_loop, services
 from harbor_web.auth import has_role, require_roles
 from harbor_web.models import Command, Plan
 from harbor_web.pipeline import pipeline_for
@@ -37,7 +37,10 @@ def plan_detail(request, pk):
                 dispatch = cell_plan_dispatch.dispatch_harbor_plan(request.user, plan_id=pk)
             except (services.Conflict, ValidationError) as exc:
                 return render(request, 'error.html', dict(heading='OMX 셀 계획 요청을 보내지 못했습니다', reason=exc.messages[0] if getattr(exc, 'messages', None) else '계획·관측·Fleet 연결 상태를 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
-            messages.success(request, f'Harbor 계획 순서·좌표 {len(dispatch.rosy_task_ids)}단계를 ROSY에 제안했습니다.')
+            if dispatch.state == 'UNCERTAIN':
+                messages.warning(request, '요청 응답을 받지 못해 기록된 요청 키로 진행 상태를 확인 중입니다.')
+            else:
+                messages.success(request, f'Harbor 계획 순서·좌표 {len(dispatch.rosy_task_ids)}단계를 ROSY에 제안했습니다.')
             return redirect(f'/plans/{pk}/')
         if request.POST.get('action') == 'cell_plan_rosy':
             directive_mode = request.POST.get('directive_mode') or ('outbound' if plan.order.kind == 'OUTBOUND' else 'rehandle')
@@ -53,7 +56,10 @@ def plan_detail(request, pk):
                 )
             except (services.Conflict, ValidationError) as exc:
                 return render(request, 'error.html', dict(heading='ROSY 자율 계획 요청을 보내지 못했습니다', reason=exc.messages[0] if getattr(exc, 'messages', None) else '관측 배치·지시 대상·Fleet 연결 상태를 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
-            messages.success(request, f'ROSY 자율 계획 {len(dispatch.rosy_task_ids)}단계를 제안했습니다.')
+            if dispatch.state == 'UNCERTAIN':
+                messages.warning(request, '요청 응답을 받지 못해 기록된 요청 키로 진행 상태를 확인 중입니다.')
+            else:
+                messages.success(request, f'ROSY 자율 계획 {len(dispatch.rosy_task_ids)}단계를 제안했습니다.')
             return redirect(f'/plans/{pk}/')
         if request.POST.get('action') == 'decide':  # a person accepts the algorithm's inbound placement (ADR 0012)
             from harbor_web.inbound_decision import PlacementDecisionForm, decide_placement
@@ -157,12 +163,51 @@ def notification_work(request, notification_id):
 @require_http_methods(['GET', 'POST'])
 def work_detail(request, pk):
     command = get_object_or_404(Command.objects.select_related('plan__order__cargo', 'plan__observation'), pk=pk)
-    if request.method == 'GET' and not has_role(request.user, 'viewer', 'operator', 'admin') and (
-            not human_evidence.human_evidence_enabled() or human_evidence.awaiting(command) is None):
+    awaiting_outbound_load = outbound_loop.awaiting_load_confirmation(command)
+    if request.method == 'GET' and not has_role(request.user, 'viewer', 'operator', 'admin') and not (
+            (human_evidence.human_evidence_enabled() and human_evidence.awaiting(command) is not None)
+            or awaiting_outbound_load):
         from django.core.exceptions import PermissionDenied
         raise PermissionDenied  # field staff see a command only while it waits for their confirmation
     attest_form = None
-    if request.method == 'POST' and request.POST.get('action') == 'attest':
+    if request.method == 'POST' and request.POST.get('action') == 'outbound_dispatch':
+        if not has_role(request.user, 'operator'):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        form = CommandForm(request.POST)
+        if not form.is_valid():
+            return render(request, 'error.html', dict(reason='반출 요청 형식이 올바르지 않습니다.', return_url=f'/work/{pk}/'), status=400)
+        try:
+            outbound_loop.prepare_outbound_dispatch(
+                request.user,
+                command_id=pk,
+                expected_version=form.cleaned_data['expected_version'],
+            )
+        except (services.Conflict, ValidationError) as exc:
+            msg = exc.messages[0] if isinstance(exc, ValidationError) and exc.messages else str(exc)
+            return render(request, 'error.html', dict(heading='반출대 차량 호출을 준비할 수 없습니다', reason=msg, return_url=f'/work/{pk}/'), status=409)
+        messages.info(request, '반출대 차량 호출을 등록했습니다. ROSY 독립 승인 후 도킹이 진행됩니다.')
+        return redirect(f'/work/{pk}/')
+    elif request.method == 'POST' and request.POST.get('action') == 'outbound_loaded':
+        if not has_role(request.user, 'field', 'operator'):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        try:
+            dispatch_id = int(request.POST.get('dispatch_id', ''))
+            expected_version = int(request.POST.get('expected_version', ''))
+        except (TypeError, ValueError):
+            return render(request, 'error.html', dict(reason='적재 확인 형식이 올바르지 않습니다.', return_url=f'/work/{pk}/'), status=400)
+        try:
+            outbound_loop.confirm_outbound_loaded(
+                request.user,
+                dispatch_id=dispatch_id,
+                expected_version=expected_version,
+            )
+        except (services.Conflict, ValidationError):
+            return render(request, 'error.html', dict(heading='적재 확인을 기록할 수 없습니다', reason='도킹 상태나 버전이 바뀌었습니다. 화면을 새로 열어 확인하세요.', return_url=f'/work/{pk}/'), status=409)
+        messages.info(request, '차량 적재를 확인했습니다. 출구 이동이 준비됩니다.')
+        return redirect(f'/work/{pk}/')
+    elif request.method == 'POST' and request.POST.get('action') == 'attest':
         if not has_role(request.user, *human_evidence.ROLES):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
@@ -207,4 +252,6 @@ def work_detail(request, pk):
     return page(request, 'work_detail.html', section='work', command=command, detail=detail,
                 attest_form=attest_form if stage else None, attest_stage=stage,
                 pipeline=pipeline_for(command.plan.order, command.plan, command, detail),
+                outbound_dispatch=outbound_loop.dispatch_view(command),
+                can_confirm_outbound_load=has_role(request.user, 'field', 'operator'),
                 gate_reason=gate_text(detail['reason']))

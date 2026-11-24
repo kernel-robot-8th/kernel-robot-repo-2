@@ -15,6 +15,7 @@ from harbor.ownership import WriterLease
 from harbor.ledger import ReadOnlyLedger, plan_payload
 from harbor.process import ArmTransferBinding
 from harbor.execution import read_arm_execution, validate_arm_execution, cancel_execution
+from harbor.transport import TransportLedger
 from harbor.workflow import BusinessLedger
 from harbor_web.command_models import ACTIVE_COMMAND_STATES, FRESHNESS, HUMAN_PLACEMENT_SOURCE, HUMAN_RETREAT_SOURCE
 from harbor_web.models import Plan, Command, CommandFact, Audit, Observation
@@ -114,9 +115,17 @@ class Registry:
             self.client.expected_principal = config['principal']
             self.client.expected_role = 'service'
             self.locks = {}
+            self._transport = None
         except BaseException:
             self.lease.__exit__()
             raise
+
+    @property
+    def transport(self):
+        with _guard:
+            if self._transport is None:
+                self._transport = TransportLedger(self.config['path'])
+            return self._transport
 
     def lock(self, key):
         with _guard:
