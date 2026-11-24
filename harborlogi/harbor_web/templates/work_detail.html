@@ -10,6 +10,7 @@
 <dl class="facts"><div><dt>검토한 계획</dt><dd><a href="/plans/{{ command.plan_id }}/">#{{ command.plan_id }}</a> · 지시 v{{ command.plan_version }}</dd></div><div><dt>수행 원본</dt><dd>{{ pipeline.job_label }}</dd></div><div><dt>업무 완료</dt><dd>{{ pipeline.business_label }}</dd></div></dl>
 {% include 'pipeline.html' %}
 {% if can_operate and pipeline.primary.action == 'fleet' %}<form method="post" data-command class="actions">{% csrf_token %}<input type="hidden" name="action" value="reconcile"><input type="hidden" name="expected_version" value="{{ command.version }}"><button type="submit" class="quiet">Fleet 검토 후 원래 요청으로 대조</button></form>{% endif %}
+{% if can_operate and command.mission_id and command.reason == 'BUSINESS_HOLD' %}<form method="post" data-command class="actions">{% csrf_token %}<input type="hidden" name="action" value="arm_recovery_request"><input type="hidden" name="expected_version" value="{{ command.version }}"><button type="submit" class="quiet">ROSY ARM 복구 요청 (S3)</button></form>{% endif %}
 {% if pipeline.links.console %}<p><a href="{{ pipeline.links.console }}" rel="noreferrer" target="_blank">Fleet 작업 관제로 이동 ↗</a> <small>별도 Fleet 로그인·권한을 사용합니다.</small></p>{% endif %}
 <h2>물리 결과와 업무 근거</h2>
 {% if detail.receipt %}<div class="notice info"><strong>물리 receipt를 대조했습니다</strong><p>전체 업무의 배치·재취급 복귀·관련 팔 퇴피 근거를 이어서 확인해야 합니다.</p></div>{% else %}<p class="muted">물리 receipt 미확인. 동작 성공 뒤에도 물리 결과 대조가 필요합니다.</p>{% endif %}

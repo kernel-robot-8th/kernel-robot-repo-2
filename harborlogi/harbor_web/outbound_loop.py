@@ -459,12 +459,73 @@ def _advance_leg(dispatch, transport, client):
     return next_state
 
 
+def _apply_outbound_loaded_events(transport, *, now=None):
+    """Transition PICKUP_ARRIVED dispatches to LOADED when `container.loaded_for_outbound` matches."""
+    ledger_path = os.environ.get('HARBOR_LEDGER_PATH', '').strip()
+    if not ledger_path or not Path(ledger_path).is_file():
+        return []
+    waiting = list(
+        OutboundDispatch.objects.select_related('cargo', 'actor')
+        .filter(state='PICKUP_ARRIVED')
+        .exclude(assigned_vehicle_id='')
+        .order_by('pk')
+    )
+    if not waiting:
+        return []
+    from harbor.port_events import IntakeLedger
+    events = IntakeLedger(ledger_path).outbound_loaded_events()
+    if not events:
+        return []
+    by_pair = {}
+    for ev in events:
+        key = (ev.get('object_ref'), ev.get('vehicle_id'))
+        if key not in by_pair:
+            by_pair[key] = ev
+    transitioned = []
+    stamp = now or timezone.now()
+    for dispatch in waiting:
+        matched = by_pair.get((dispatch.cargo.code, dispatch.assigned_vehicle_id))
+        if not matched:
+            continue
+        with transaction.atomic():
+            updated = OutboundDispatch.objects.filter(
+                pk=dispatch.pk,
+                version=dispatch.version,
+                state='PICKUP_ARRIVED',
+            ).update(
+                state='LOADED',
+                reason='',
+                loaded_by=None,
+                loaded_at=stamp,
+                loaded_event_id=matched['event_id'][:64],
+                version=dispatch.version + 1,
+                updated_at=stamp,
+            )
+            if updated != 1:
+                continue
+            dispatch.refresh_from_db()
+            Audit.objects.create(
+                actor=dispatch.actor,
+                action='outbound.loaded_from_port_event',
+                object_type='OutboundDispatch',
+                object_id=str(dispatch.pk),
+                detail={
+                    'vehicle_id': dispatch.assigned_vehicle_id,
+                    'event_id': matched['event_id'],
+                    'exit_stop_id': dispatch.exit_stop_id,
+                },
+            )
+        transport.prepare(_leg2_intent(dispatch))
+        transitioned.append(dispatch.pk)
+    return transitioned
+
+
 def tick(registry, *, now=None):
     """Advance active OutboundDispatch records without touching PICKUP_ARRIVED until load confirmation."""
-    del now
     transport = _transport_for(registry)
     client = registry.client
     results = {}
+    _apply_outbound_loaded_events(transport, now=now)
     active = list(
         OutboundDispatch.objects.filter(
             state__in=('PICKUP_PLANNED', 'PICKUP_PROPOSED', 'LOADED', 'EXIT_PROPOSED', 'HOLD')

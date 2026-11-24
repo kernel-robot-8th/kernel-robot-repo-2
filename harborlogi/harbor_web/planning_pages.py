@@ -369,7 +369,7 @@ def work_detail(request, pk):
             raise PermissionDenied
         form = CommandForm(request.POST)
         action = request.POST.get('action')
-        if form.is_valid() and action in {'submit', 'reconcile', 'cancel', 'close'}:
+        if form.is_valid() and action in {'submit', 'reconcile', 'cancel', 'close', 'arm_recovery_request'}:
             try:
                 args = dict(command_id=pk, expected_version=form.cleaned_data['expected_version'])
                 if action == 'cancel':
@@ -378,6 +378,10 @@ def work_detail(request, pk):
                     commands.close_cancelled(request.user, **args)
                 elif action == 'submit':
                     commands.submit_command(request.user, **args)
+                elif action == 'arm_recovery_request':
+                    commands.request_arm_recovery(request.user, **args)
+                    messages.info(request, 'ROSY ARM 복구 요청을 제출했습니다. ROSY 기명 운영자 승인 후 진행됩니다.')
+                    return redirect(f'/work/{pk}/')
                 else:
                     commands.reconcile_command(request.user, **args)
             except (services.Conflict, ValidationError):
