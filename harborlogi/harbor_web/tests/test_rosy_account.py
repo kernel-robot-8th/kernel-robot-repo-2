@@ -122,6 +122,18 @@ class RosyAccountTests(TestCase):
         self.client.get('/accounts/login/')
         self.assertNotIn('_auth_user_id', self.client.session)
 
+    def test_near_expiry_token_is_proactively_refreshed_before_access_expires(self):
+        self.sign_in()
+        session = self.client.session
+        soon = int(time.time()) + 20
+        session['rosy_account'] = dict(session['rosy_account'],
+                                       access=access(['harbor.operate'], exp=soon),
+                                       exp=soon, checked=time.time())
+        session.save()
+        self.client.get('/accounts/login/')
+        self.assertGreater(self.client.session['rosy_account']['exp'], int(time.time()) + 40)
+        self.assertEqual([endpoint for endpoint, _ in self.hub.calls][-2:], ['introspect', 'token'])
+
     def test_logout_revokes_the_hub_family(self):
         self.sign_in()
         self.client.post('/accounts/logout/')

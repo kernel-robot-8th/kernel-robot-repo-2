@@ -150,8 +150,15 @@ def workspace_context(order, plan=None, *, priority_form=None, plan_form=None, r
     completion_moves = completion_plan.result['moves'] if completion_plan else []
     related_arms = sorted({arm for move in completion_moves for arm in [move['primary_arm'], *move['alternate_arms']]})
     from harbor_web.pipeline import pipeline_for
+    from harbor_web.cell_plan_dispatch import dispatch_views_for_order
+    spatial_observation = bool(source and isinstance(source.payload, dict) and source.payload.get('schema') == 'grid-placement-v1')
+    harbor_cell_plan_ready = bool(plan and spatial_observation and plan.result.get('model') == 'grid-placement-v1'
+                                  and plan.result.get('status') == 'READY' and plan.result.get('moves'))
     return dict(order=order, plan=plan, plans=plans, command=command, execution=detail,
         pipeline=pipeline_for(order, plan, command, detail), review_observation=review_observation,
+        cell_plan_dispatches=dispatch_views_for_order(order),
+        spatial_observation=spatial_observation,
+        harbor_cell_plan_ready=harbor_cell_plan_ready,
         review_differs=bool(plan and review_observation and plan.observation_id != review_observation.pk),
         source=source, latest_source=latest, yard_stages=stages, yard_scene=scene, yard_occupancy=occupancy, display_moves=moves,
         yard_rows=yard_rows(source, targets={order.cargo.code} if order.cargo_id and order.kind == 'OUTBOUND' else (),

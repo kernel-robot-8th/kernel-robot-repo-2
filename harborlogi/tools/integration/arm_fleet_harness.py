@@ -484,11 +484,11 @@ class RelayedArmFleet:
 
     def __init__(self, *, root, workdir, sim=False, request_keys=("neutral-arm-http:0",), one_attempt=True):
         self.root, self.workdir = Path(root), Path(workdir)
-        self.peer = {unit: secrets.token_urlsafe(40) for unit in ("R", "CELL-A")}  # the token each unit sends
+        self.peer = {unit: secrets.token_urlsafe(40) for unit in ("R", "ARM-CELL")}  # the token each unit sends
         self.cell = ArmFleet(root=root, workdir=self.workdir / "cell", sim=sim, delegated=True,
                              request_keys=request_keys, one_attempt=one_attempt,
                              before_app=lambda cell: {"control_unit_config": self._config(
-                                 "CELL-A", "R", self.url, cell.identity[0])})
+                                 "ARM-CELL", "R", self.url, cell.identity[0])})
         self.cell.tokens["control-unit:R"] = self.peer["R"]
         self.tokens = {name: secrets.token_urlsafe(40) for name in ("operator", "viewer")}
         self.url = f"http://127.0.0.1:{_free_port()}"
@@ -506,7 +506,7 @@ class RelayedArmFleet:
         path.write_text(json.dumps({"unit_id": unit, "peers": {peer: {"url": url, "token_file": "peer.token"}},
             "manifest": {"revision": "harbor-int-1", "units": [
                 {"id": "R", "resources": list(self.r_resources)},
-                {"id": "CELL-A", "parent": "R", "resources": ["workcell:" + workcell]}]}}),
+                {"id": "ARM-CELL", "parent": "R", "resources": ["workcell:" + workcell]}]}}),
             encoding="utf-8")
         return path
 
@@ -521,10 +521,10 @@ class RelayedArmFleet:
         users = {hashlib.sha256(token.encode()).hexdigest(): {"principal_id": principal, "role": role}
                  for token, principal, role in ((self.tokens["operator"], "harbor-operator", "service"),
                                                 (self.tokens["viewer"], "viewer", "viewer"),
-                                                (self.peer["CELL-A"], "control-unit:CELL-A", "service"))}
+                                                (self.peer["ARM-CELL"], "control-unit:ARM-CELL", "service"))}
         app = create_app(FleetConsole([], []), site_users=users,
             task_service=FleetTaskService(FleetTaskStore(self.workdir / "R" / "fleet.sqlite3"), robot_ids=()),
-            control_unit_config=self._config("R", "CELL-A", self.cell.url, self.identity[0]))
+            control_unit_config=self._config("R", "ARM-CELL", self.cell.url, self.identity[0]))
         if app.state.arm_transfer_job_store is not None or app.state.control_unit is None:
             raise RuntimeError("R must relay ARM work, not own it")
         self.server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=int(self.url.rsplit(":", 1)[1]),
@@ -559,9 +559,9 @@ class RelayedFullFlowFleet(RelayedArmFleet):
         self.cell.start()
         self.fleet = RealFleet(root=self.root, workdir=self.workdir / "R", transport_only=True,
                                port=int(self.url.rsplit(":", 1)[1]),
-                               extra_app={"control_unit_config": self._config("R", "CELL-A", self.cell.url, self.identity[0])})
-        self.fleet.tokens["cell"] = self.peer["CELL-A"]
-        self.fleet.principals["cell"] = ("control-unit:CELL-A", "service")
+                               extra_app={"control_unit_config": self._config("R", "ARM-CELL", self.cell.url, self.identity[0])})
+        self.fleet.tokens["cell"] = self.peer["ARM-CELL"]
+        self.fleet.principals["cell"] = ("control-unit:ARM-CELL", "service")
         self.tokens = self.fleet.tokens
         self.fleet.start()
         if self.fleet.app.state.arm_transfer_job_store is not None or self.fleet.app.state.control_unit is None:

@@ -81,6 +81,7 @@ def main(argv=None):
     harness = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(harness)
     # Windows keeps the in-process Fleet SQLite file open after stop; a leftover temp dir must not mask the result.
+    os.environ.setdefault('PYTEST_CURRENT_TEST', 'harbor:real_fleet_http')
     with tempfile.TemporaryDirectory(prefix='harbor-http-integration-', ignore_cleanup_errors=True) as temporary:
         request_key_path = Path(temporary) / 'request-key' if args.web_arm_only else None
         fleet = (harness.RelayedArmFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet') if args.arm_via_r else
@@ -106,7 +107,11 @@ def main(argv=None):
             config = {
                 'schema': 'harbor.transport-http-test/1' if args.transport_only else 'harbor.http-test/1', 'simulation': True,
                 'origin': fleet.url, 'operator': fleet.tokens['operator'], 'viewer': fleet.tokens['viewer'],
+                'service': fleet.tokens['service'],
                 'approver': fleet.tokens.get('approver'),  # R relays; its cell alone approves
+                'service': fleet.tokens.get('service'),
+                'workcell_id': harness.WORKCELL,
+                'workcell_token': getattr(fleet, 'workcell_token', None),
                 'platform_sha': platform_sha, 'app_sha': app_sha,
                 'binding': {**ref, 'cargo_id': 'synthetic-cargo', 'source': 'source', 'destination': 'destination',
                             'workcell_id': harness.WORKCELL, 'instance_id': harness.INSTANCE,

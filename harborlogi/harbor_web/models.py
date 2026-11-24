@@ -210,6 +210,6 @@ class Measurement(Immutable):
         constraints = [models.CheckConstraint(condition=models.Q(elapsed_seconds__gte=0) | models.Q(elapsed_seconds__isnull=True), name='measurement_nonnegative_elapsed')]
 
 
-from harbor_web.command_models import Command, CommandFact
+from harbor_web.command_models import CellPlanDispatch, Command, CommandFact, OutboundDispatch
 
 from harbor_web.runtime_models import DeploymentState, EvidenceProducerSetting, FleetConnection

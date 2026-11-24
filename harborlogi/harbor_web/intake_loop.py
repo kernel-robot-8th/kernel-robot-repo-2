@@ -56,7 +56,7 @@ def tick(registry, *, now):
                 transport.propose(key, client)
             elif row['state'] != 'SUBMITTING':
                 job = transport.reconcile_proposal(key, client)
-                if job.get('status') == 'GOAL_CONFIRMED':
+                if job is not None and job.get('status') == 'GOAL_CONFIRMED':
                     intake.arrive(cargo, now=now)
         except Exception:
             logger.exception('출발 준비 %s의 이송 처리 실패; 다음 틱에 재시도', departure.pk)

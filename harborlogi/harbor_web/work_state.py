@@ -58,3 +58,10 @@ def day_progress(*, now=None):
         .filter(first_completed_at__gte=start, first_completed_at__lte=now).count())
     unfinished = Order.objects.exclude(pk__in=completed_order_ids()).count()
     return {'completed': completed, 'total': completed + unfinished}
+
+
+def shown_state(state, command):
+    """Name the problem the way the alert chips do, instead of a generic '처리할 것'."""
+    if state != '처리할 것':
+        return state
+    return '작업 확인' if command is not None else '작업 막힘'

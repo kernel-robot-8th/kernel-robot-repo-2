@@ -10,7 +10,7 @@ from harbor_web.alert_pages import alerts_context
 from harbor_web.auth import roles
 from harbor_web.models import Audit, Command, Order, Plan
 from harbor_web.order_queue import completed_order_ids
-from harbor_web.work_state import day_progress, work_state
+from harbor_web.work_state import day_progress, work_state, shown_state
 from harbor_web.yard_rows import (
     DEFAULT_SLOT,
     place_context,
@@ -328,7 +328,7 @@ def board_context(request, *, observation, operations, now=None):
         details = _move_details(active_cmd.order, command=active_cmd)
         current_job = dict(
             title=_job_title(active_cmd.order),
-            state=state,
+            state=shown_state(state, active_cmd),
             tone=STATE_TONES.get(state, 'neutral'),
             href=f'/work/{active_cmd.pk}/' if can_read else None,
             arm=details['arm'],
@@ -372,7 +372,7 @@ def board_context(request, *, observation, operations, now=None):
             details = _move_details(first_order, command=first_cmd, plan=first_plan)
             current_job = dict(
                 title=_job_title(first_order),
-                state=first_state,
+                state=shown_state(first_state, first_cmd),
                 tone=STATE_TONES.get(first_state, 'neutral'),
                 href=_item_href(
                     first_order,
@@ -417,7 +417,7 @@ def board_context(request, *, observation, operations, now=None):
             dict(
                 kind_label=KIND_LABELS.get(order.kind, order.kind),
                 title=_job_title(order),
-                state=state,
+                state=shown_state(state, cmd),
                 tone=STATE_TONES.get(state, 'neutral'),
                 href=_item_href(
                     order,
