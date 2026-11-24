@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_environment():
-    env = {key: value for key, value in os.environ.items() if not key.startswith('HARBOR_')}
+    env = {key: value for key, value in os.environ.items() if not key.startswith('HARBOR_') or key == 'HARBOR_BROWSER_CHANNEL'}
     env.update(
         HARBOR_WEB_MODE='test', HARBOR_WEB_DATABASE=':memory:',
         HARBOR_WEB_SECRET_KEY=secrets.token_urlsafe(64),
