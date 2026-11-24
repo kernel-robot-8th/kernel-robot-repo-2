@@ -24,7 +24,7 @@ def main():
     output = args.output.resolve() / ('run-' + uuid.uuid4().hex)
     output.mkdir(parents=True)
     for key in list(os.environ):
-        if key.startswith('HARBOR_'):
+        if key.startswith('HARBOR_') and key != 'HARBOR_BROWSER_CHANNEL':
             del os.environ[key]
     os.environ.update(DJANGO_SETTINGS_MODULE='harbor_web.settings', HARBOR_WEB_MODE='development',
         HARBOR_WEB_SECRET_KEY=secrets.token_urlsafe(64), HARBOR_WEB_DATABASE=str(output / 'product.sqlite3'))
@@ -83,7 +83,7 @@ def main():
                 time.sleep(.2)
         os.environ['DJANGO_ALLOW_ASYNC_UNSAFE'] = 'true'
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(channel='msedge', headless=True)
+            browser = playwright.chromium.launch(channel=os.environ.get('HARBOR_BROWSER_CHANNEL', 'msedge'), headless=True)
             page = browser.new_page(viewport={'width': 1440, 'height': 1000})
             errors = []
             page.on('pageerror', lambda error: errors.append(str(error)))
@@ -96,6 +96,8 @@ def main():
             page.locator('main button[type=submit]').click()
             page.wait_for_load_state('networkidle')
             page.goto(origin + f'/inventory/?observation={observed.pk}')
+            # 62063dd: source-preserving review links moved inside the yard source fold.
+            page.locator('.yard-source-fold > summary').click()
             page.locator(f'a[href="/requests/?kind=OUTBOUND&observation={observed.pk}"]').click()
             page.locator(f'a[href="/requests/{order.pk}/?observation={observed.pk}"]').click()
             assert page.locator('[name=observation]').input_value() == str(observed.pk)
@@ -218,7 +220,15 @@ def main():
                 assert not page.evaluate('document.documentElement.scrollWidth > innerWidth'), width
                 result['viewports'].append(dict(width=width, height=height, overflow=False))
                 page.goto(origin + '/workflow/')
-                assert page.locator('.journey-list > li').count() == 5
+                # 0bbc1de: four three-step role cards; bacc32a: 11 folded scenarios replace the five-step journey.
+                cards = page.locator('[data-help-role]')
+                assert cards.count() == 4
+                assert cards.first.get_attribute('data-help-role') == 'operator'
+                assert cards.locator('.help-steps > li').count() == 12
+                page.locator('details.fold > summary').click()
+                page.get_by_text('다른 담당의 일', exact=True).click()
+                assert page.locator('.journey-list:visible').count() == 11
+                assert page.locator('.journey-list > li:visible').count() == 27
                 assert not page.evaluate('document.documentElement.scrollWidth > innerWidth'), width
                 page.screenshot(path=str(output / f'{width}-workflow.png'), full_page=True)
             result['checks'].append('Four widths: merged 2x1 and3x1 identity, coverage9, keyboard layer retention, independent auxiliary layers, atomic outbound/restoration, no overflow')

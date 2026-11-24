@@ -87,7 +87,7 @@ def main():
         state['requests'].clear()
         result['checks'].append('Synthetic HTTP endpoint rejects missing credentials before any session data')
         for key in list(os.environ):
-            if key.startswith('HARBOR_'):
+            if key.startswith('HARBOR_') and key != 'HARBOR_BROWSER_CHANNEL':
                 del os.environ[key]
         bindings = output / 'bindings.json'
         bindings.write_text('[]', encoding='utf-8')
@@ -129,7 +129,7 @@ def main():
                     raise AssertionError('Isolated server readiness timeout')
                 time.sleep(.2)
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(channel='msedge', headless=True)
+            browser = playwright.chromium.launch(channel=os.environ.get('HARBOR_BROWSER_CHANNEL', 'msedge'), headless=True)
             page = browser.new_page(viewport=dict(width=1440, height=1000))
             errors = []
             page.on('pageerror', lambda error: errors.append(str(error)))
@@ -144,8 +144,8 @@ def main():
             def safe_page():
                 assert token not in page.content(), 'Service token leaked into rendered HTML'
 
-            # A matched session also runs the ADR0022 readiness GETs: workcell observations, evidence, recheck, trip proposal, platform signal.
-            READINESS_PROBES = 5
+            # 29ae826 adds the port-events readiness GET to the settings check (no duplicate requests).
+            READINESS_PROBES = 6
 
             def check(mode, reason, expected_requests):
                 state['mode'] = mode
@@ -154,7 +154,9 @@ def main():
                 page.wait_for_load_state('networkidle')
                 audit = Audit.objects.filter(action='fleet.check').latest('pk')
                 assert audit.detail['reason'] == reason, audit.detail
-                assert len(state['requests']) - before == expected_requests
+                requests = state['requests'][before:]
+                assert len(requests) == expected_requests, requests
+                assert len({urlsplit(request['path']).path for request in requests}) == expected_requests, requests
                 assert audit.detail['status'] == ('VERIFIED' if reason == 'READ_API_VERIFIED' else 'FAILED')
                 assert page.get_by_text(CONNECTION_REASONS[reason], exact=True).first.is_visible()
                 safe_page()
@@ -250,7 +252,7 @@ def main():
             assert len(state['requests']) == 12 + 5 * READINESS_PROBES  # five checks reached a matched session
             assert token not in json.dumps(list(Audit.objects.values_list('detail', flat=True)))
             assert not errors, errors
-            result['checks'].append('Operator GET/save/check/discover denied; four widths have no overflow; token absent from HTML/audit; all twelve Fleet requests are authenticated GETs; no Harbor Commands or Fleet jobs created')
+            result['checks'].append('Operator GET/save/check/discover denied; four widths have no overflow; token absent from HTML/audit; all 42 Fleet requests are authenticated GETs; no Harbor Commands or Fleet jobs created')
             result.update(status='PASSED', fleet_requests=state['requests'], browser_errors=errors)
             browser.close()
     except Exception:

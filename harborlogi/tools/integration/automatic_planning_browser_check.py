@@ -20,7 +20,7 @@ def main():
     output=ROOT/'runs/automatic-planning-browser'/('run-'+uuid.uuid4().hex)
     output.mkdir(parents=True)
     for key in list(os.environ):
-        if key.startswith('HARBOR_'):del os.environ[key]
+        if key.startswith('HARBOR_') and key != 'HARBOR_BROWSER_CHANNEL':del os.environ[key]
     os.environ.update(DJANGO_SETTINGS_MODULE='harbor_web.settings',HARBOR_WEB_MODE='development',
         HARBOR_WEB_SECRET_KEY=secrets.token_urlsafe(64),HARBOR_WEB_DATABASE=str(output/'web.sqlite3'))
     import django
@@ -53,8 +53,9 @@ def main():
         for code,column in [('C1',1),('C2',2)]])
     observed=services.record_observation(admin,source_id='planning-source',source_revision='one',
         observed_at=timezone.now(),provenance='SYNTHETIC',condition=condition,payload=payload)
+    # a0d6bc1: tier 4 is gone; C1 needs an unused sequence in tier 3 to reverse behind C2.
     outgoing={code:services.create_order(operator,cargo=cargo[code],kind='OUTBOUND',priority_group=group,
-        sequence=1,tie_policy='FIXED') for code,group in [('C1',1),('C3',2),('C2',3)]}
+        sequence=2 if code=='C1' else 1,tie_policy='FIXED') for code,group in [('C1',1),('C3',2),('C2',3)]}
     incoming=services.create_order(operator,cargo=cargo['C3'],kind='INBOUND',priority_group=9,sequence=1,tie_policy='FIXED')
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
@@ -74,7 +75,7 @@ def main():
                 time.sleep(.2)
         os.environ['DJANGO_ALLOW_ASYNC_UNSAFE']='true'
         with sync_playwright() as pw:
-            browser=pw.chromium.launch(channel='msedge',headless=True)
+            browser=pw.chromium.launch(channel=os.environ.get('HARBOR_BROWSER_CHANNEL', 'msedge'),headless=True)
             page=browser.new_page(viewport=dict(width=1440,height=1000))
             errors=[]
             page.on('pageerror',lambda e:errors.append(str(e)))
@@ -103,7 +104,8 @@ def main():
             page.goto(origin+f'/requests/{outgoing["C1"].pk}/')
             page.get_by_text('우선순위·지시 메모 변경',exact=True).click()
             change=page.locator('form:has(input[name=action][value=priority])')
-            change.locator('[name=priority_group]').fill('4')
+            # a0d6bc1 (KAN-116): 일반 (3), sequence 2 puts C1 after C2, replacing the old numeric tier 4.
+            change.locator('[name=priority_group][value="3"]').check()
             change.locator('button[type=submit]').click()
             page.wait_for_load_state('networkidle')
             second=Plan.objects.filter(order=incoming).latest('pk')

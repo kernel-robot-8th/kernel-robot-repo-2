@@ -25,7 +25,7 @@ def main():
     output = parser.parse_args().output.resolve() / ('run-' + uuid.uuid4().hex)
     output.mkdir(parents=True)
     for key in list(os.environ):
-        if key.startswith('HARBOR_'):
+        if key.startswith('HARBOR_') and key != 'HARBOR_BROWSER_CHANNEL':
             del os.environ[key]
     os.environ.update(DJANGO_SETTINGS_MODULE='harbor_web.settings', HARBOR_WEB_MODE='development',
         HARBOR_WEB_SECRET_KEY=secrets.token_urlsafe(64), HARBOR_WEB_DATABASE=str(output / 'product.sqlite3'))
@@ -79,7 +79,7 @@ def main():
                 time.sleep(.2)
         os.environ['DJANGO_ALLOW_ASYNC_UNSAFE'] = 'true'
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(channel='msedge', headless=True)
+            browser = playwright.chromium.launch(channel=os.environ.get('HARBOR_BROWSER_CHANNEL', 'msedge'), headless=True)
             page = browser.new_page(viewport=dict(width=1440, height=1000))
             errors = []
             page.on('pageerror', lambda error: errors.append(str(error)))

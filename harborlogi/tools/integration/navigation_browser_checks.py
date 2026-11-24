@@ -6,12 +6,13 @@ def exercise_navigation(page):
     density = page.locator('[data-nav-density]')
     rail = page.locator('#navigation')
     assert rail.bounding_box()['width'] == 76
-    link = rail.get_by_role('link', name='반출 관제', exact=True)
+    # fefad6f (WP06): the flat menu replaces outbound with work (timeline/outbound order).
+    link = rail.get_by_role('link', name='작업', exact=True)
     assert link.locator('svg[aria-hidden=true]').count() == 1
     link.hover()
     tip = page.get_by_role('tooltip')
     tip.wait_for(state='visible')
-    assert '우선순위' in tip.inner_text()
+    assert '시간표' in tip.inner_text()
     tip.hover()
     page.wait_for_timeout(180)
     assert tip.is_visible()
