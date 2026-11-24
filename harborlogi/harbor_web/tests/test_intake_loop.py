@@ -105,6 +105,39 @@ class IntakeLoopTests(TestCase):
         self.assertEqual(IntakeLedger(self.path).read('C-1')['state'], 'RECEIVED_AT_INTAKE')
         self.assertEqual(len(self.fleet.bodies), 1)  # proposed once, never re-sent
 
+    def test_tick_recovers_uncertain_proposal_after_transient_unavailable(self):
+        import io
+        import json
+        from urllib.error import HTTPError
+        departure = self.depart()
+        key = intake_loop.trip_key(departure)
+        base = self.fleet
+
+        def unavailable_once(method, path, body):
+            if (method, path) == ('POST', '/api/fleet/trip-proposals'):
+                raise HTTPError(path, 503, 'Unavailable', {}, io.BytesIO(
+                    json.dumps({'detail': {'code': 'TRIP_PROPOSAL_UNAVAILABLE'}}).encode()))
+            return base(method, path, body)
+
+        def missing_on_get(method, path, body):
+            if path.startswith('/api/fleet/trip-proposals?request_key=') and unquote(path.split('=', 1)[1]) not in base.proposals:
+                raise HTTPError(path, 404, 'Not Found', {}, io.BytesIO(
+                    json.dumps({'detail': {'code': 'TRIP_PROPOSAL_NOT_FOUND'}}).encode()))
+            return base(method, path, body)
+
+        self.registry.client = RosyClient(transport=unavailable_once)
+        self.registry.client.expected_principal, self.registry.client.expected_role = PRINCIPAL, 'service'
+        intake_loop.tick(self.registry, now=timezone.now())
+        self.assertEqual(TransportLedger(self.path).read(key)['state'], 'UNCERTAIN')
+
+        self.registry.client = RosyClient(transport=missing_on_get)
+        self.registry.client.expected_principal, self.registry.client.expected_role = PRINCIPAL, 'service'
+        intake_loop.tick(self.registry, now=timezone.now())
+        self.assertEqual(TransportLedger(self.path).read(key)['state'], 'PLANNED')
+
+        intake_loop.tick(self.registry, now=timezone.now())
+        self.assertEqual(TransportLedger(self.path).read(key)['state'], 'AWAITING_APPROVAL')
+
     def test_unconfigured_destination_keeps_the_departure_record_only(self):
         with mock.patch.dict(os.environ, {'HARBOR_TRIP_DESTINATION': ''}):
             departure = self.depart()

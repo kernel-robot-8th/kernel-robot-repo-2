@@ -107,6 +107,9 @@ def main(argv=None):
                 'schema': 'harbor.transport-http-test/1' if args.transport_only else 'harbor.http-test/1', 'simulation': True,
                 'origin': fleet.url, 'operator': fleet.tokens['operator'], 'viewer': fleet.tokens['viewer'],
                 'approver': fleet.tokens.get('approver'),  # R relays; its cell alone approves
+                'service': fleet.tokens.get('service'),
+                'workcell_id': harness.WORKCELL,
+                'workcell_token': getattr(fleet, 'workcell_token', None),
                 'platform_sha': platform_sha, 'app_sha': app_sha,
                 'binding': {**ref, 'cargo_id': 'synthetic-cargo', 'source': 'source', 'destination': 'destination',
                             'workcell_id': harness.WORKCELL, 'instance_id': harness.INSTANCE,

@@ -1,5 +1,7 @@
 """D-908 / API v1.329: Harbor proposes once, never admits, reconciles by the original key."""
 from hashlib import sha256
+import io
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -41,7 +43,11 @@ class ProposalFleet:
                 raise TimeoutError("response lost after commit")
             return {"proposal": self.proposals[key]}
         if path.startswith("/api/fleet/trip-proposals?request_key="):
-            return {"proposal": self.proposals[unquote(path.split("=", 1)[1])]}
+            key = unquote(path.split("=", 1)[1])
+            if key not in self.proposals:
+                raise HTTPError(path, 404, "Not Found", {}, io.BytesIO(
+                    json.dumps({"detail": {"code": "TRIP_PROPOSAL_NOT_FOUND"}}).encode()))
+            return {"proposal": self.proposals[key]}
         if path.startswith("/api/fleet/trip-jobs?request_key="):
             return {"job": self.jobs[unquote(path.split("=", 1)[1])]}
         raise AssertionError(f"unexpected call {method} {path}")
@@ -121,6 +127,15 @@ class TripProposalTests(unittest.TestCase):
             self.ledger.propose(self.key, self.client)
         self.assertEqual(caught.exception.code, 503)
         self.assertEqual(self.ledger.read(self.key)["state"], "UNCERTAIN")
+        with self.assertRaises(HTTPError) as still_down:
+            self.ledger.reconcile_proposal(self.key, self.client)
+        self.assertEqual(still_down.exception.code, 503)
+        self.assertEqual(self.ledger.read(self.key)["state"], "UNCERTAIN")
+        self.fleet.unavailable = False
+        self.assertIsNone(self.ledger.reconcile_proposal(self.key, self.client))
+        self.assertEqual(self.ledger.read(self.key)["state"], "PLANNED")
+        self.ledger.propose(self.key, self.client)
+        self.assertEqual(self.ledger.read(self.key)["state"], "AWAITING_APPROVAL")
 
     def test_wire_body_has_no_cargo_fields(self):
         sent = []
@@ -144,8 +159,9 @@ class TripProposalTests(unittest.TestCase):
         self.fleet.proposals[intent.request_key]["object_ref"] = "C-2"
         with self.assertRaises(ValueError):  # an echo naming another cargo is refused
             self.ledger.reconcile_proposal(intent.request_key, self.client)
-        with self.assertRaises(ValueError):
-            TripIntent("harbor-trip:3", ("robot-1",), "dest", object_ref=" C-1")
+        for bad_ref in (" C-1", "C\x7f1", "C\x9f1"):
+            with self.assertRaises(ValueError):
+                TripIntent("harbor-trip:3", ("robot-1",), "dest", object_ref=bad_ref)
 
 
 if __name__ == "__main__":
