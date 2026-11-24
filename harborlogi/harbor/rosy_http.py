@@ -191,6 +191,15 @@ class RosyClient:
             raise ValueError('Expected a short cancellation reason')
         return self._call('POST', '/api/fleet/arm-transfers/jobs/' + quote(mission_id, safe='') + '/cancel', {'reason': reason})
 
+    def preview_cell_plan(self, payload):
+        return self._call('POST', '/api/fleet/pipeline/cell-plans/preview', dict(payload))
+
+    def propose_cell_plan(self, payload, *, request_key):
+        return self._call('POST', '/api/fleet/pipeline/cell-plans', {**dict(payload), 'request_key': request_key})
+
+    def cell_plan(self, plan_id):
+        return self._call('GET', '/api/fleet/pipeline/cell-plans/' + quote(plan_id, safe=''), None)
+
 
 def load_site_recognition(client=None, *, known_site_refs=None):
     """Optional read entry point for future UI use: (snapshot or None, status text)."""

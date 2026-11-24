@@ -113,3 +113,27 @@ class HumanAttestation(Immutable):
     arms = models.JSONField()
     note = models.CharField(max_length=300, blank=True)
     photo_ref = models.CharField(max_length=200, blank=True)
+
+
+class CellPlanDispatch(models.Model):
+    """Durable Harbor record for dual-mode OMX cell-plan requests (HARBOR_PLAN vs ROSY_DIRECTIVE)."""
+    objects = models.Manager()
+    key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    order = models.ForeignKey('Order', on_delete=models.PROTECT, related_name='cell_plan_dispatches')
+    plan = models.ForeignKey('Plan', null=True, blank=True, on_delete=models.PROTECT, related_name='cell_plan_dispatches')
+    observation = models.ForeignKey('Observation', on_delete=models.PROTECT)
+    dispatch_mode = models.CharField(max_length=16, choices=[('HARBOR_PLAN', 'Harbor Plan'), ('ROSY_DIRECTIVE', 'ROSY Directive')])
+    directive_mode = models.CharField(max_length=16)
+    request_key = models.CharField(max_length=128, unique=True)
+    rosy_plan_id = models.CharField(max_length=96)
+    order_source = models.CharField(max_length=16, choices=[('harbor', 'harbor'), ('rosy_r', 'rosy_r')])
+    state = models.CharField(max_length=24, default='PROPOSED')
+    planned_steps = models.JSONField(default=list)
+    rosy_task_ids = models.JSONField(default=list)
+    reason = models.CharField(max_length=192, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Cell plan dispatch history cannot be deleted.')
