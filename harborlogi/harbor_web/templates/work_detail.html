@@ -36,6 +36,9 @@
   {% if outbound_dispatch.can_confirm_load and can_confirm_outbound_load %}
   <form method="post" data-command>{% csrf_token %}<input type="hidden" name="action" value="outbound_loaded"><input type="hidden" name="dispatch_id" value="{{ outbound_dispatch.dispatch.pk }}"><input type="hidden" name="expected_version" value="{{ outbound_dispatch.dispatch.version }}"><button type="submit">차량 적재 확인</button></form>
   {% endif %}
+  {% if can_operate and outbound_dispatch.can_cancel %}
+  <form method="post" data-command>{% csrf_token %}<input type="hidden" name="action" value="outbound_cancel"><input type="hidden" name="dispatch_id" value="{{ outbound_dispatch.dispatch.pk }}"><input type="hidden" name="reason" value="운영자 반출 취소"><button type="submit" class="quiet">반출 취소</button></form>
+  {% endif %}
   {% elif can_operate and outbound_dispatch.can_start %}
   <form method="post" data-command>{% csrf_token %}<input type="hidden" name="action" value="outbound_dispatch"><input type="hidden" name="expected_version" value="{{ command.version }}"><button type="submit">반출대 차량 호출</button></form>
   {% endif %}

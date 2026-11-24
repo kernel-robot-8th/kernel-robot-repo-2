@@ -113,34 +113,32 @@ class IntakeLoopTests(TestCase):
         key = intake_loop.trip_key(departure)
         base = self.fleet
 
+        failed = [False]
+
         def unavailable_once(method, path, body):
-            if (method, path) == ('POST', '/api/fleet/trip-proposals'):
+            if (method, path) == ('POST', '/api/fleet/trip-proposals') and not failed[0]:
+                failed[0] = True
                 raise HTTPError(path, 503, 'Unavailable', {}, io.BytesIO(
                     json.dumps({'detail': {'code': 'TRIP_PROPOSAL_UNAVAILABLE'}}).encode()))
-            return base(method, path, body)
-
-        def missing_on_get(method, path, body):
-            if path.startswith('/api/fleet/trip-proposals?request_key=') and unquote(path.split('=', 1)[1]) not in base.proposals:
-                raise HTTPError(path, 404, 'Not Found', {}, io.BytesIO(
-                    json.dumps({'detail': {'code': 'TRIP_PROPOSAL_NOT_FOUND'}}).encode()))
             return base(method, path, body)
 
         self.registry.client = RosyClient(transport=unavailable_once)
         self.registry.client.expected_principal, self.registry.client.expected_role = PRINCIPAL, 'service'
         intake_loop.tick(self.registry, now=timezone.now())
-        self.assertEqual(TransportLedger(self.path).read(key)['state'], 'UNCERTAIN')
-
-        self.registry.client = RosyClient(transport=missing_on_get)
-        self.registry.client.expected_principal, self.registry.client.expected_role = PRINCIPAL, 'service'
-        intake_loop.tick(self.registry, now=timezone.now())
+        # The coded 503 says ROSY stored nothing: the ledger rolls straight back to PLANNED.
         self.assertEqual(TransportLedger(self.path).read(key)['state'], 'PLANNED')
 
         intake_loop.tick(self.registry, now=timezone.now())
         self.assertEqual(TransportLedger(self.path).read(key)['state'], 'AWAITING_APPROVAL')
 
+    def test_tick_polls_port_events_without_a_configured_destination(self):
+        with mock.patch.dict(os.environ, {'HARBOR_TRIP_DESTINATION': ''}):
+            result = intake_loop.tick(self.registry, now=timezone.now())
+        self.assertEqual(result, {'outcomes': {}, 'complete': True, 'lost': []})
+
     def test_unconfigured_destination_keeps_the_departure_record_only(self):
         with mock.patch.dict(os.environ, {'HARBOR_TRIP_DESTINATION': ''}):
             departure = self.depart()
-            self.assertIsNone(intake_loop.tick(self.registry, now=timezone.now()))
+            intake_loop.tick(self.registry, now=timezone.now())
         with self.assertRaises(ValueError):
             TransportLedger(self.path).read(intake_loop.trip_key(departure))

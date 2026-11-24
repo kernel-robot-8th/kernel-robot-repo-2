@@ -72,10 +72,9 @@ def main(argv=None):
     app_root = Path(__file__).resolve().parents[2]
     app_sha = app_checkout(app_root)
     platform_sha = verify_checkout(args.platform_root, args.platform_sha)
-    arm_mode = args.arm_only or args.web_arm_only or args.evidence_only
     sys.path.insert(0, str(app_root))
     # Loaded by path only here: the harness needs the platform's test dependencies.
-    arm = args.arm_only or args.web_arm_only or args.full_flow or args.arm_via_r
+    arm = args.arm_only or args.web_arm_only or args.full_flow or args.arm_via_r or args.evidence_only
     source = Path(__file__).resolve().parent / ('arm_fleet_harness.py' if arm else 'fleet_harness.py')
     spec = importlib.util.spec_from_file_location('harbor_fleet_harness', source)
     harness = importlib.util.module_from_spec(spec)
@@ -90,11 +89,9 @@ def main(argv=None):
                  harness.FullFlowFleet(root=args.platform_root, workdir=Path(temporary),
                      request_keys=[f'{FULL_FLOW_KEY}:{move}' for move in range(len(FULL_FLOW_MOVES))]) if args.full_flow else
                  harness.ArmFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet', request_key_path=request_key_path,
-                                  sim=args.sim_arm) if (args.arm_only or args.web_arm_only) else
+                                  sim=args.sim_arm) if (args.arm_only or args.web_arm_only or args.evidence_only) else
                  harness.RealFleet(root=args.platform_root, workdir=Path(temporary) / 'fleet',
                                    transport_only=args.transport_only or args.web_read_only))
-        if args.evidence_only:
-            fleet.include_joint_evidence = True
         try:
             fleet.start()
             ref, artifact = {}, None
@@ -107,9 +104,8 @@ def main(argv=None):
             config = {
                 'schema': 'harbor.transport-http-test/1' if args.transport_only else 'harbor.http-test/1', 'simulation': True,
                 'origin': fleet.url, 'operator': fleet.tokens['operator'], 'viewer': fleet.tokens['viewer'],
-                'service': fleet.tokens['service'],
-                'approver': fleet.tokens.get('approver'),  # R relays; its cell alone approves
                 'service': fleet.tokens.get('service'),
+                'approver': fleet.tokens.get('approver'),  # R relays; its cell alone approves
                 'workcell_id': harness.WORKCELL,
                 'workcell_token': getattr(fleet, 'workcell_token', None),
                 'platform_sha': platform_sha, 'app_sha': app_sha,
@@ -119,7 +115,7 @@ def main(argv=None):
                 'candidates': [harness.ROBOT], 'steps': [{'to': 'inbound'}],
                 'alternate_steps': [{'to': 'outbound'}],
             }
-            if args.arm_only or args.web_arm_only or args.arm_via_r:
+            if args.arm_only or args.web_arm_only or args.arm_via_r or args.evidence_only:
                 config = {'schema': 'harbor.arm-http-test/1', 'simulation': True, 'origin': fleet.url,
                     'operator': fleet.tokens['operator'], 'viewer': fleet.tokens['viewer'],
                     'platform_sha': platform_sha, 'app_sha': app_sha,
@@ -128,6 +124,13 @@ def main(argv=None):
                         'source_ref': 'source', 'target_ref': 'target'}}
                 if args.sim_arm:
                     config['goal_timeout_s'] = 600
+            if args.evidence_only:
+                policy = fleet.app.state.arm_transfer_job_store.installation.policy
+                config['schema'] = 'harbor.physical-evidence-http-test/1'
+                config['evidence'] = dict(placement_source=policy.producer_id, retreat_source='fleet-closure',
+                    policy_digest=policy.digest, arms=[dict(arm=arm, workcell_id=participant.workcell_id,
+                        instance_id=participant.instance_id, zone_id=policy.zone_resource_ids[0],
+                        joint_names=['joint1', 'joint2']) for arm, participant in zip(('A', 'B'), policy.participants)])
             if args.full_flow:
                 from tools.integration.fleet_harness import ROBOT
                 arm_ref = {'workcell_id': harness.WORKCELL, 'instance_id': harness.INSTANCE, 'object_ref': 'object-1',
@@ -160,7 +163,8 @@ def main(argv=None):
             env.pop('PYTHONPATH', None)
             print(f'Platform {platform_sha}; Harbor (with harness) {app_sha}', flush=True)
             pattern = (
-                'full_flow_http.py' if args.full_flow
+                'physical_evidence_http.py' if args.evidence_only
+                else 'full_flow_http.py' if args.full_flow
                 else 'product_web_http.py' if args.web_arm_only
                 else 'web_read_http.py' if args.web_read_only
                 else 'arm_http.py' if arm

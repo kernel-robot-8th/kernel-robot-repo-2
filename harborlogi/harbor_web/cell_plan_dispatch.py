@@ -20,21 +20,14 @@ from harbor.cell_plan import (
     validate_cell_plan_response,
 )
 from harbor_web import services
-from harbor_web.command_models import CellPlanDispatch
+from harbor_web.command_models import (ACTIVE_CELL_PLAN_DISPATCH_STATES, ACTIVE_COMMAND_STATES, CellPlanDispatch,
+                                       Command)
 from harbor_web.fleet_connection import connection_settings, fleet_client
 from harbor_web.models import Audit, Observation, Order, Plan
 
 logger = logging.getLogger(__name__)
 
-ACTIVE_CELL_PLAN_STATES = (
-    'SUBMITTING',
-    'UNCERTAIN',
-    'PROPOSED',
-    'PARTIALLY_ADMITTED',
-    'QUEUED',
-    'RUNNING',
-    'PAUSED_HUMAN',
-)
+ACTIVE_CELL_PLAN_STATES = ACTIVE_CELL_PLAN_DISPATCH_STATES
 
 _STATE_LABELS = {
     'SUBMITTING': '전송 준비 중',
@@ -118,6 +111,23 @@ def _failure_reason(parsed) -> str:
         if task.last_refusal:
             return task.last_refusal[:192]
     return ''
+
+
+def _reject_blocked_order(order: Order, *, production: bool, plan: Plan | None = None) -> None:
+    """P0 mutex: one live execution path per order; restored or unready deployments stay shut."""
+    from harbor_web.runtime import execution_block_reason
+    blocked = execution_block_reason()
+    if blocked:
+        raise services.Conflict(blocked)
+    if Command.objects.filter(order=order, state__in=ACTIVE_COMMAND_STATES).exists():
+        raise services.Conflict('EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION')
+    if CellPlanDispatch.objects.filter(order=order, state__in=ACTIVE_CELL_PLAN_DISPATCH_STATES).exists():
+        raise services.Conflict('ACTIVE_CELL_PLAN_DISPATCH')
+    if production:  # A fake client is an explicit test/simulation bypass.
+        from harbor_web.readiness import first_unmet
+        unmet = first_unmet(plan)
+        if unmet:
+            raise services.Conflict(unmet)
 
 
 def _create_and_submit(
@@ -299,6 +309,7 @@ def dispatch_harbor_plan(actor, *, plan_id: int, robot_id: str = 'rosy_01', clie
     """Mode 1: send Harbor plan's explicit move sequence and slot coordinates to ROSY (order_source='harbor')."""
     services._role(actor, 'operator')
     plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
+    _reject_blocked_order(plan.order, production=client is None, plan=plan)
     try:
         payload = build_harbor_plan_request(
             plan.result,
@@ -343,6 +354,7 @@ def dispatch_rosy_directive(
     order = Order.objects.select_related('cargo').get(pk=order_id)
     observation = Observation.objects.get(pk=observation_id)
     plan = Plan.objects.filter(pk=plan_id, order=order).first() if plan_id is not None else None
+    _reject_blocked_order(order, production=client is None, plan=plan)
     cargo_code = order.cargo.code if order.cargo_id else None
     try:
         payload = build_rosy_directive_request(
@@ -537,6 +549,7 @@ def dispatch_views_for_order(order: Order) -> list[dict]:
                 'vehicle_label': od.assigned_vehicle_id or '미배정',
                 'reason': od.reason,
                 'can_confirm_load': od.state == 'PICKUP_ARRIVED',
+                'can_cancel': od.state not in ('EXITED', 'CANCELLED'),
             }
         views.append({
             'id': row.pk,

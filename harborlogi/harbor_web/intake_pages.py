@@ -73,6 +73,25 @@ def intake_alert_items(can_read):
                 reason=row['reason'],
             )
         )
+    path = ledger_path()
+    if path and Path(path).exists():
+        # Events ROSY could not name (no cargo declared): surfacing them beats a silent drop.
+        for payload in IntakeLedger(path).unknown_events():
+            reason = payload.get('reason') or ''
+            title_suffix, detail, action = REASON_META.get(
+                reason,
+                ('등록되지 않은 반입 사건', '화물 번호가 정해지지 않은 반입 사건입니다. 야드 현황과 비교해 확인하세요.', '보기'),
+            )
+            items.append(
+                dict(
+                    title=f'등록되지 않은 반입 · {title_suffix}',
+                    detail=detail,
+                    count=1,
+                    href=None,
+                    action=action if can_read else None,
+                    reason=reason,
+                )
+            )
     return items, status
 
 

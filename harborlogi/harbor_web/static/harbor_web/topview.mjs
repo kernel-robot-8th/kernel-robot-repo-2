@@ -39,6 +39,15 @@ export function frameStatus(status, capturedAt) {
   return '찍은 시각 ' + time;
 }
 
+const FRAME_ROTATIONS = [0, 90, 180, 270];
+
+function applyRotation(image, header) {
+  // An absent or invalid header resets to the CSS default (rotate(180deg)).
+  const trimmed = typeof header === 'string' ? header.trim() : '';
+  const deg = trimmed !== '' ? Number(trimmed) : NaN;
+  image.style.transform = trimmed && FRAME_ROTATIONS.includes(deg) ? `rotate(${deg}deg)` : '';
+}
+
 export function mountTopview(panel) {
   const image = panel.querySelector('[data-topview-image]');
   const statusText = panel.querySelector('[data-topview-status]');
@@ -91,6 +100,7 @@ export function mountTopview(panel) {
           imageUrl = nextUrl;
           image.src = nextUrl;
           if (image.hidden) image.hidden = false;
+          applyRotation(image, response.headers.get('X-Frame-Rotation-Deg'));
           if (previousUrl) URL.revokeObjectURL(previousUrl);
         }
       } else {

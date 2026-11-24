@@ -25,21 +25,23 @@ from harbor.rosy_vision import (
     VisionClient,
 )
 from harbor_web.access import EVERYONE
+from harbor_web.fleet_connection import connection_settings
 
 from harbor_web.auth import require_roles
 from harbor_web.rosy_account import access_token
 
 
 def _fleet_settings(request):
-    """HARBOR_FLEET_ORIGIN·HARBOR_FLEET_CA_FILE과 자격. 자격은 로그인한 사람의 Rosy 접근 토큰(ADR 0037),
-    없으면(로컬 계정) 기존 HARBOR_FLEET_TOKEN. 어느 쪽도 브라우저에 내보내지 않는다."""
-    origin = os.environ.get("HARBOR_FLEET_ORIGIN", "").rstrip("/")
+    """DB(또는 env)로 저장된 Fleet 연결과 자격. 자격은 로그인한 사람의 Rosy 접근 토큰(ADR 0037),
+    없으면(로컬 계정) 기존 HARBOR_FLEET_TOKEN. 어느 쪽도 브라우저에 내보내지 않는다.
+    허용 목록에 없는 출처는 연동 전과 같이 취급한다."""
+    conn = connection_settings()
+    origin = (conn['origin'] or '').rstrip('/') if conn['allowed'] else ''
     if settings.ROSY_ACCOUNT and request.session.get("rosy_account"):
         token = access_token(request) or ""
     else:
         token = access_token(request) or os.environ.get("HARBOR_FLEET_TOKEN", "")
-    ca_file = os.environ.get("HARBOR_FLEET_CA_FILE", "") or None
-    return origin, token, ca_file
+    return origin, token, conn['ca_file'] or None
 
 
 def _camera_sources(origin, token, ca_file, *, timeout):

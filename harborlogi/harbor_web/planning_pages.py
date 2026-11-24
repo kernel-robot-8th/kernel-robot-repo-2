@@ -99,6 +99,20 @@ def plan_detail(request, pk):
                 return render(request, 'error.html', dict(heading='적재 확인을 기록할 수 없습니다', reason='도킹 상태나 버전이 바뀌었습니다. 화면을 새로 열어 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
             messages.info(request, '차량 적재를 확인했습니다. 출구 이동이 준비됩니다.')
             return redirect(f'/plans/{pk}/')
+        if request.POST.get('action') == 'cell_plan_outbound_cancel':
+            try:
+                dispatch_id = int(request.POST.get('dispatch_id', ''))
+            except (TypeError, ValueError):
+                return render(request, 'error.html', dict(reason='셀 계획 식별자가 올바르지 않습니다.', return_url=f'/plans/{pk}/'), status=400)
+            target_row = get_object_or_404(CellPlanDispatch, pk=dispatch_id, order_id=plan.order_id)
+            target_od = get_object_or_404(OutboundDispatch, cell_plan_dispatch=target_row)
+            try:
+                outbound_loop.cancel_outbound_dispatch(request.user, dispatch_id=target_od.pk,
+                                                       reason=request.POST.get('reason') or '운영자 반출 취소')
+            except (services.Conflict, ValidationError):
+                return render(request, 'error.html', dict(heading='반출을 취소할 수 없습니다', reason='이미 끝났거나 취소할 수 없는 상태입니다. 화면을 새로 열어 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
+            messages.info(request, '반출을 취소했습니다. 반출대와 차량 배정이 바로 해제됩니다.')
+            return redirect(f'/plans/{pk}/')
         if request.POST.get('action') == 'cell_plan_cancel':
             try:
                 dispatch_id = int(request.POST.get('dispatch_id', ''))
@@ -257,6 +271,22 @@ def work_detail(request, pk):
         except (services.Conflict, ValidationError):
             return render(request, 'error.html', dict(heading='적재 확인을 기록할 수 없습니다', reason='도킹 상태나 버전이 바뀌었습니다. 화면을 새로 열어 확인하세요.', return_url=f'/work/{pk}/'), status=409)
         messages.info(request, '차량 적재를 확인했습니다. 출구 이동이 준비됩니다.')
+        return redirect(f'/work/{pk}/')
+    elif request.method == 'POST' and request.POST.get('action') == 'outbound_cancel':
+        if not has_role(request.user, 'operator'):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        try:
+            dispatch_id = int(request.POST.get('dispatch_id', ''))
+        except (TypeError, ValueError):
+            return render(request, 'error.html', dict(reason='반출 요청 형식이 올바르지 않습니다.', return_url=f'/work/{pk}/'), status=400)
+        target_od = get_object_or_404(OutboundDispatch, pk=dispatch_id, command=command)
+        try:
+            outbound_loop.cancel_outbound_dispatch(request.user, dispatch_id=target_od.pk,
+                                                   reason=request.POST.get('reason') or '운영자 반출 취소')
+        except (services.Conflict, ValidationError):
+            return render(request, 'error.html', dict(heading='반출을 취소할 수 없습니다', reason='이미 끝났거나 취소할 수 없는 상태입니다. 화면을 새로 열어 확인하세요.', return_url=f'/work/{pk}/'), status=409)
+        messages.info(request, '반출을 취소했습니다. 반출대와 차량 배정이 바로 해제됩니다.')
         return redirect(f'/work/{pk}/')
     elif request.method == 'POST' and request.POST.get('action') == 'attest':
         if not has_role(request.user, *human_evidence.ROLES):

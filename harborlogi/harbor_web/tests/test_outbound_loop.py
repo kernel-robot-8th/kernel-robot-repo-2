@@ -9,7 +9,7 @@ from unittest import mock
 from urllib.parse import unquote
 
 from django.contrib.auth.models import Group, User
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -146,7 +146,7 @@ class OutboundLoopTests(TestCase):
 
         self.seq = 0
 
-    def _completed_command(self, cargo, *, state='COMPLETED'):
+    def _completed_command(self, cargo, *, state='COMPLETED', binding=None):
         self.seq += 1
         order = services.create_order(self.operator, cargo=cargo, kind='OUTBOUND', priority_group=1, sequence=self.seq, tie_policy='FIXED')
         plan = Plan.objects.create(
@@ -158,7 +158,7 @@ class OutboundLoopTests(TestCase):
         return Command.objects.create(
             order=order, plan=plan, actor=self.operator, plan_version=1,
             ledger_identity='l', fleet_origin='https://fleet-r.invalid', fleet_principal=PRINCIPAL,
-            body_digest='a' * 64, binding={'outbound_stand': 'stand'}, state=state,
+            body_digest='a' * 64, binding=binding if binding is not None else {'outbound_stand': 'stand'}, state=state,
         )
 
     def test_two_leg_outbound_flow_blocks_exit_until_loaded_and_pins_vehicle(self):
@@ -232,6 +232,82 @@ class OutboundLoopTests(TestCase):
         d2 = outbound_loop.prepare_outbound_dispatch(self.operator, command_id=c_done.pk, registry=self.registry)
         self.assertEqual(d2.state, 'PICKUP_PLANNED')
 
+    def test_stand_anchor_bindings_normalize_to_stand(self):
+        for raw in ('out', 'stand-r1-c1', 'stand:r1', 'stand_r1'):
+            cmd = self._completed_command(self.cargo1, binding={'outbound_stand': raw})
+            d = outbound_loop.prepare_outbound_dispatch(self.operator, command_id=cmd.pk, registry=self.registry)
+            self.assertEqual(d.stand_zone_id, 'stand', raw)
+            OutboundDispatch.objects.filter(pk=d.pk).update(state='CANCELLED')
+        empty = self._completed_command(self.cargo1, binding={})
+        d = outbound_loop.prepare_outbound_dispatch(self.operator, command_id=empty.pk, registry=self.registry)
+        self.assertEqual(d.stand_zone_id, 'stand')
+
+    def test_operator_cancel_closes_dispatch_and_releases_stand_and_vehicle(self):
+        cmd = self._completed_command(self.cargo1)
+        d = outbound_loop.prepare_outbound_dispatch(self.operator, command_id=cmd.pk, registry=self.registry)
+        k1 = outbound_loop.pickup_trip_key(d)
+        outbound_loop.tick(self.registry, now=timezone.now())
+        self.fleet.admit_and_set(k1, robot_id='pinky-1', status='GOAL_CONFIRMED')
+        outbound_loop.tick(self.registry, now=timezone.now())
+        d.refresh_from_db()
+        self.assertEqual((d.state, d.assigned_vehicle_id), ('PICKUP_ARRIVED', 'pinky-1'))
+
+        cancelled = outbound_loop.cancel_outbound_dispatch(self.operator, dispatch_id=d.pk, reason='운영자 반출 취소')
+        self.assertEqual(cancelled.state, 'CANCELLED')
+        cancelled.refresh_from_db()
+        self.assertEqual((cancelled.state, cancelled.reason), ('CANCELLED', '운영자 반출 취소'))
+        from harbor_web.models import Audit
+        self.assertTrue(Audit.objects.filter(
+            action='outbound.dispatch_cancelled', object_id=str(d.pk)).exists())
+
+        # The stand and the vehicle are free again for the next outbound.
+        cmd2 = self._completed_command(self.cargo2)
+        d2 = outbound_loop.prepare_outbound_dispatch(self.operator, command_id=cmd2.pk, registry=self.registry)
+        self.assertEqual(d2.state, 'PICKUP_PLANNED')
+        self.assertNotIn('pinky-1', outbound_loop.reserved_vehicles())
+
+        outbound_loop.cancel_outbound_dispatch(self.operator, dispatch_id=d2.pk)
+        with self.assertRaises(services.Conflict):
+            outbound_loop.cancel_outbound_dispatch(self.operator, dispatch_id=d2.pk)
+        with self.assertRaises(ValidationError):
+            outbound_loop.cancel_outbound_dispatch(self.operator, dispatch_id=99999)
+
+    def test_operator_cancel_blocked_for_viewer_and_reopens_after_cancel(self):
+        cmd = self._completed_command(self.cargo1)
+        d = outbound_loop.prepare_outbound_dispatch(self.operator, command_id=cmd.pk, registry=self.registry)
+        with self.assertRaises(PermissionDenied):
+            outbound_loop.cancel_outbound_dispatch(self.viewer, dispatch_id=d.pk)
+
+    def test_tick_marks_cancelled_when_rosy_reports_operator_cancellation(self):
+        cmd = self._completed_command(self.cargo1)
+        d = outbound_loop.prepare_outbound_dispatch(self.operator, command_id=cmd.pk, registry=self.registry)
+        k1 = outbound_loop.pickup_trip_key(d)
+        outbound_loop.tick(self.registry, now=timezone.now())
+        d.refresh_from_db()
+        self.assertEqual(d.state, 'PICKUP_PROPOSED')
+
+        self.fleet.admit_and_set(k1, robot_id='pinky-1', status='HOLD', reason='CANCELLED_BY_OPERATOR')
+        self.assertEqual(outbound_loop.tick(self.registry, now=timezone.now())[d.pk], 'CANCELLED')
+        d.refresh_from_db()
+        self.assertEqual((d.state, d.reason), ('CANCELLED', 'CANCELLED_BY_OPERATOR'))
+        from harbor_web.models import Audit
+        self.assertTrue(Audit.objects.filter(
+            action='outbound.dispatch_cancelled', object_id=str(d.pk)).exists())
+
+        # Released immediately: the stand accepts a new dispatch without going through EXITED.
+        cmd2 = self._completed_command(self.cargo2)
+        d2 = outbound_loop.prepare_outbound_dispatch(self.operator, command_id=cmd2.pk, registry=self.registry)
+        self.assertEqual(d2.state, 'PICKUP_PLANNED')
+        self.assertNotIn('pinky-1', outbound_loop.reserved_vehicles())
+
+    def test_work_detail_shows_cancel_action_until_closed(self):
+        cmd = self._completed_command(self.cargo1)
+        d = outbound_loop.prepare_outbound_dispatch(self.operator, command_id=cmd.pk, registry=self.registry)
+        view = outbound_loop.dispatch_view(cmd)
+        self.assertTrue(view['can_cancel'])
+        OutboundDispatch.objects.filter(pk=d.pk).update(state='CANCELLED', version=d.version + 1)
+        self.assertFalse(outbound_loop.dispatch_view(cmd)['can_cancel'])
+
     def test_hold_surfacing_resume_and_uncertain_recovery(self):
         cmd = self._completed_command(self.cargo1)
         d = outbound_loop.prepare_outbound_dispatch(self.operator, command_id=cmd.pk, registry=self.registry)
@@ -291,3 +367,24 @@ class OutboundLoopTests(TestCase):
         self.assertEqual(ok.status_code, 302)
         d.refresh_from_db()
         self.assertEqual(d.state, 'LOADED')
+
+    def test_work_detail_outbound_cancel_action(self):
+        cmd = self._completed_command(self.cargo1)
+        d = outbound_loop.prepare_outbound_dispatch(self.operator, command_id=cmd.pk, registry=self.registry)
+        from django.test import Client
+        op_web, viewer_web = Client(), Client()
+        op_web.force_login(self.operator)
+        viewer_web.force_login(self.viewer)
+        with mock.patch.object(commands, 'acquire_registry', return_value=self.registry):
+            denied = viewer_web.post(f'/work/{cmd.pk}/', {'action': 'outbound_cancel', 'dispatch_id': d.pk})
+            self.assertEqual(denied.status_code, 403)
+            page = op_web.get(f'/work/{cmd.pk}/')
+            self.assertEqual(page.status_code, 200)
+            self.assertIn('반출 취소', page.content.decode('utf-8'))
+            ok = op_web.post(f'/work/{cmd.pk}/', {'action': 'outbound_cancel', 'dispatch_id': d.pk})
+            self.assertEqual(ok.status_code, 302)
+        d.refresh_from_db()
+        self.assertEqual((d.state, d.reason), ('CANCELLED', '운영자 반출 취소'))
+        with mock.patch.object(commands, 'acquire_registry', return_value=self.registry):
+            again = op_web.post(f'/work/{cmd.pk}/', {'action': 'outbound_cancel', 'dispatch_id': d.pk})
+        self.assertEqual(again.status_code, 409)

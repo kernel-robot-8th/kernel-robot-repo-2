@@ -17,7 +17,8 @@ from harbor.process import ArmTransferBinding
 from harbor.execution import read_arm_execution, validate_arm_execution, cancel_execution
 from harbor.transport import TransportLedger
 from harbor.workflow import BusinessLedger
-from harbor_web.command_models import ACTIVE_COMMAND_STATES, FRESHNESS, HUMAN_PLACEMENT_SOURCE, HUMAN_RETREAT_SOURCE
+from harbor_web.command_models import (ACTIVE_CELL_PLAN_DISPATCH_STATES, ACTIVE_COMMAND_STATES, FRESHNESS,
+                                       HUMAN_PLACEMENT_SOURCE, HUMAN_RETREAT_SOURCE, CellPlanDispatch)
 from harbor_web.models import Plan, Command, CommandFact, Audit, Observation
 from harbor_web.services import _role, Conflict, queue_digest, constraints
 from harbor_web.coordination import serialized
@@ -38,6 +39,9 @@ def capability(plan):
     try:
         if Command.objects.filter(order_id=plan.order_id, state__in=ACTIVE_COMMAND_STATES).exclude(plan=plan).exists():
             raise ValidationError('EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION')
+        if CellPlanDispatch.objects.filter(order_id=plan.order_id,
+                                           state__in=ACTIVE_CELL_PLAN_DISPATCH_STATES).exists():
+            raise ValidationError('ACTIVE_CELL_PLAN_DISPATCH')
         if Command.objects.filter(order_id=plan.order_id, state='COMPLETED').exists():
             raise ValidationError('ORDER_ALREADY_COMPLETED')  # the ledger closed it; a new command would repeat the work
         from harbor_web.runtime import execution_block_reason
@@ -84,7 +88,8 @@ def capability(plan):
         _bound(plan, config)
     except ValidationError as error:
         safe = {'SPATIAL_EXECUTION_BINDINGS_REQUIRED', 'SPATIAL_OBSERVATION_REQUIRED',
-                'EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION', 'ORDER_ALREADY_COMPLETED', 'RESTORE_RECONCILIATION_REQUIRED', 'DEPLOYMENT_PROFILE_REQUIRED',
+                'EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION', 'ACTIVE_CELL_PLAN_DISPATCH',
+                'ORDER_ALREADY_COMPLETED', 'RESTORE_RECONCILIATION_REQUIRED', 'DEPLOYMENT_PROFILE_REQUIRED',
                 'EXECUTION_CONFIGURATION_REQUIRED', 'ORIGIN_NOT_ALLOWED', 'INVALID_FLEET_PRINCIPAL', 'PLAN_NOT_READY', 'PLAN_QUEUE_CHANGED',
                 'OBSERVATION_NOT_FRESH', 'OBSERVATION_REVISION_CHANGED', 'AUTHENTICATED_OBSERVATION_AND_EVIDENCE_PRODUCER_REQUIRED'} | READINESS_REASONS
         reason = error.messages[0] if error.messages and error.messages[0] in safe else 'EXECUTION_INPUTS_UNAVAILABLE'
@@ -177,6 +182,8 @@ def prepare_command(actor, *, plan_id, expected_version):
     registry = acquire_registry()
     with registry.lock('plan:' + str(plan_id)):
         plan = Plan.objects.select_related('order', 'order__cargo', 'observation', 'condition').get(pk=plan_id)
+        if CellPlanDispatch.objects.filter(order=plan.order, state__in=ACTIVE_CELL_PLAN_DISPATCH_STATES).exists():
+            raise Conflict('ACTIVE_CELL_PLAN_DISPATCH')
         # Design 28: only an ACTIVE command occupies the order; terminal commands are history.
         existing = Command.objects.filter(order=plan.order, state__in=ACTIVE_COMMAND_STATES).first()
         if existing:

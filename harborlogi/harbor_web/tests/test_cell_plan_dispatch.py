@@ -8,13 +8,15 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
 from django.contrib.auth.models import Group, User
+from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
 from harbor.transport import TransportLedger
 from harbor_web import cell_plan_dispatch, executor, outbound_loop, services
-from harbor_web.models import CargoFootprint, CellPlanDispatch, OutboundDispatch
+from harbor_web.models import Audit, CargoFootprint, CellPlanDispatch, OutboundDispatch
+from harbor_web.runtime_models import DeploymentState
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -191,6 +193,8 @@ class _FakeOutboundTransport:
 
 class CellPlanDispatchTests(TestCase):
     def setUp(self):
+        # Dispatch checks the deployment runtime gate; tests run in a reconciled, non-restored state.
+        DeploymentState.objects.get_or_create(pk=1, defaults={'mode': settings.MODE})
         self.operator = User.objects.create_user('cell-op')
         for role in ('admin', 'operator', 'field', 'viewer'):
             self.operator.groups.add(Group.objects.get_or_create(name=role)[0])
@@ -246,6 +250,19 @@ class CellPlanDispatchTests(TestCase):
         self.assertEqual(len(harbor_row.rosy_task_ids), len(self.plan.result['moves']))
         self.assertEqual(client.calls[0][1]['mode'], 'harbor_plan')
 
+        # P0-2 mutex: the still-active harbor dispatch blocks any second dispatch for the same order.
+        with self.assertRaises(services.Conflict) as blocked:
+            cell_plan_dispatch.dispatch_rosy_directive(
+                self.operator, order_id=self.order.pk, observation_id=self.observation.pk,
+                directive_mode='outbound', plan_id=self.plan.pk, client=client,
+            )
+        self.assertEqual(str(blocked.exception), 'ACTIVE_CELL_PLAN_DISPATCH')
+        self.assertEqual(CellPlanDispatch.objects.filter(order=self.order).count(), 1)
+
+        client.status = 'COMPLETED'
+        synced = cell_plan_dispatch.sync_cell_plan_dispatch(harbor_row.pk, client=client)
+        self.assertEqual(synced.state, 'COMPLETED')
+
         rosy_row = cell_plan_dispatch.dispatch_rosy_directive(
             self.operator, order_id=self.order.pk, observation_id=self.observation.pk,
             directive_mode='outbound', plan_id=self.plan.pk, client=client,
@@ -256,12 +273,22 @@ class CellPlanDispatchTests(TestCase):
         self.assertNotIn('steps', client.calls[1][1])
         self.assertEqual(client.calls[1][1]['cargo_id'], 'C1')
 
-        client.status = 'COMPLETED'
-        synced = cell_plan_dispatch.sync_cell_plan_dispatch(rosy_row.pk, client=client)
-        self.assertEqual(synced.state, 'COMPLETED')
-
         with self.assertRaises(PermissionDenied):
             cell_plan_dispatch.dispatch_harbor_plan(self.viewer, plan_id=self.plan.pk, client=client)
+
+    def test_active_command_blocks_cell_plan_dispatch(self):
+        from harbor_web.models import Command, Plan
+        client = _FakeCellPlanClient()
+        command_plan = Plan.objects.filter(order=self.order).first()
+        Command.objects.create(
+            order=self.order, plan=command_plan, actor=self.operator, plan_version=1,
+            ledger_identity='l', fleet_origin='f', fleet_principal='p', body_digest='a' * 64,
+            binding={}, state='UNKNOWN',
+        )
+        with self.assertRaises(services.Conflict) as blocked:
+            cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk, client=client)
+        self.assertEqual(str(blocked.exception), 'EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION')
+        self.assertEqual(CellPlanDispatch.objects.count(), 0)
 
     def test_write_before_post_and_get_request_key_reconciliation_rules_6_to_9(self):
         client = _FakeCellPlanClient()
@@ -272,6 +299,12 @@ class CellPlanDispatchTests(TestCase):
         self.assertEqual(row.request_payload['mode'], 'harbor_plan')
         self.assertEqual(len(client.calls), 1)
 
+        # P0-2 mutex: an uncertain request still occupies the order.
+        with self.assertRaises(services.Conflict):
+            cell_plan_dispatch.dispatch_rosy_directive(
+                self.operator, order_id=self.order.pk, observation_id=self.observation.pk, client=client,
+            )
+
         # Rule 7: reconciliation queries GET ?request_key= and NEVER re-POSTs.
         client.post_error = None
         recovered = cell_plan_dispatch.reconcile_cell_plan_dispatch(row.pk, client=client)
@@ -279,7 +312,12 @@ class CellPlanDispatchTests(TestCase):
         self.assertEqual(recovered.state, 'PROPOSED')
         self.assertEqual(recovered.rosy_plan_id, 'cell-plan-1')
 
-        # Rule 8: uncoded 404 keeps UNCERTAIN (capability absent), coded UNKNOWN_CELL_PLAN sets NOT_FOUND.
+        # Complete/cancel the recovered dispatch so the next independent Rule 8 / Rule 9 requests can start.
+        cell_plan_dispatch.cancel_cell_plan_dispatch(
+            self.operator, dispatch_id=recovered.pk, reason='done', client=client,
+        )
+
+        # Rule 8: uncoded 404 keeps UNCERTAIN (capability absent), and coded UNKNOWN_CELL_PLAN closes to NOT_FOUND.
         client.post_error = _http_error(503, 'PIPELINE_LEDGER_UNAVAILABLE')
         uncertain2 = cell_plan_dispatch.dispatch_rosy_directive(
             self.operator, order_id=self.order.pk, observation_id=self.observation.pk, client=client,
@@ -291,9 +329,9 @@ class CellPlanDispatchTests(TestCase):
         self.assertEqual(still_uncertain.reason, 'CELL_PLAN_ROUTE_UNAVAILABLE')
 
         client.get_key_error = None
-        not_found = cell_plan_dispatch.reconcile_cell_plan_dispatch(uncertain2.pk, client=client)
-        self.assertEqual(not_found.state, 'NOT_FOUND')
-        self.assertEqual(not_found.reason, 'UNKNOWN_CELL_PLAN')
+        closed = cell_plan_dispatch.reconcile_cell_plan_dispatch(uncertain2.pk, client=client)
+        self.assertEqual(closed.state, 'NOT_FOUND')
+        self.assertEqual(closed.reason, 'UNKNOWN_CELL_PLAN')
 
         # Rule 9: 401/403 marks REJECTED with FLEET_IDENTITY_REJECTED and raises ValidationError.
         client.post_error = _http_error(401, 'UNAUTHORIZED')
@@ -358,13 +396,22 @@ class CellPlanDispatchTests(TestCase):
         client = _FakeCellPlanClient()
         self.client.force_login(self.operator)
         with self.settings(ROOT_URLCONF='harbor_web.urls'):
-            with patch.object(cell_plan_dispatch, '_default_client', return_value=client):
+            with patch.object(cell_plan_dispatch, '_default_client', return_value=client), patch(
+                    'harbor_web.readiness.first_unmet', return_value=''):
                 r1 = self.client.post(f'/plans/{self.plan.pk}/', {'action': 'cell_plan_harbor'})
                 self.assertEqual(r1.status_code, 302)
+                # P0-2 mutex: the active first dispatch blocks a second dispatch for the same order.
                 r2 = self.client.post(f'/plans/{self.plan.pk}/', {'action': 'cell_plan_rosy', 'directive_mode': 'outbound'})
-                self.assertEqual(r2.status_code, 302)
+                self.assertEqual(r2.status_code, 409)
+                row = CellPlanDispatch.objects.get(order=self.order)
+                client.status = 'COMPLETED'
+                r3 = self.client.post(f'/plans/{self.plan.pk}/', {'action': 'cell_plan_sync', 'dispatch_id': row.pk})
+                self.assertEqual(r3.status_code, 302)
+                r4 = self.client.post(f'/plans/{self.plan.pk}/', {'action': 'cell_plan_rosy', 'directive_mode': 'outbound'})
+                self.assertEqual(r4.status_code, 302)
         rows = list(CellPlanDispatch.objects.filter(order=self.order).order_by('pk'))
         self.assertEqual([r.order_source for r in rows], ['harbor', 'rosy_r'])
+        self.assertEqual([r.state for r in rows], ['COMPLETED', 'COMPLETED'])
 
     def test_plan_detail_manual_sync_and_outbound_pinky_actions(self):
         import tempfile
@@ -383,6 +430,8 @@ class CellPlanDispatchTests(TestCase):
             with self.settings(ROOT_URLCONF='harbor_web.urls'), patch.dict(
                 os.environ, {'HARBOR_OUTBOUND_VEHICLES': 'pinky-01,pinky-02'}, clear=False
             ), patch.object(cell_plan_dispatch, '_default_client', return_value=client), patch(
+                'harbor_web.readiness.first_unmet', return_value=''
+            ), patch(
                 'harbor_web.commands.acquire_registry', return_value=_Reg()
             ):
                 client.post_error = URLError('lost response')
@@ -429,6 +478,52 @@ class CellPlanDispatchTests(TestCase):
                 od.refresh_from_db()
                 self.assertEqual(od.state, 'LOADED')
 
+    def test_plan_detail_cancels_the_outbound_dispatch_and_frees_the_stand(self):
+        import tempfile
+        client = _FakeCellPlanClient()
+        self.client.force_login(self.operator)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ledger_path = Path(tmpdir) / 'cancel-outbound.sqlite3'
+            transport = _FakeOutboundTransport(ledger_path)
+
+            class _Reg:
+                def __init__(self):
+                    self.client = client
+                    self.transport = transport
+                    self.config = {'path': str(ledger_path)}
+
+            with self.settings(ROOT_URLCONF='harbor_web.urls'), patch.dict(
+                os.environ, {'HARBOR_OUTBOUND_VEHICLES': 'pinky-01,pinky-02'}, clear=False
+            ), patch.object(cell_plan_dispatch, '_default_client', return_value=client), patch(
+                'harbor_web.readiness.first_unmet', return_value=''
+            ), patch(
+                'harbor_web.commands.acquire_registry', return_value=_Reg()
+            ):
+                r1 = self.client.post(f'/plans/{self.plan.pk}/', {'action': 'cell_plan_harbor'})
+                self.assertEqual(r1.status_code, 302)
+                row = CellPlanDispatch.objects.get(order=self.order)
+                client.status = 'COMPLETED'
+                r2 = self.client.post(f'/plans/{self.plan.pk}/', {'action': 'cell_plan_sync', 'dispatch_id': row.pk})
+                self.assertEqual(r2.status_code, 302)
+                r3 = self.client.post(f'/plans/{self.plan.pk}/', {'action': 'cell_plan_outbound_dispatch', 'dispatch_id': row.pk})
+                self.assertEqual(r3.status_code, 302)
+                od = OutboundDispatch.objects.get(cell_plan_dispatch=row)
+                self.assertEqual(od.state, 'PICKUP_PLANNED')
+
+                r4 = self.client.post(f'/plans/{self.plan.pk}/', {
+                    'action': 'cell_plan_outbound_cancel', 'dispatch_id': row.pk,
+                })
+                self.assertEqual(r4.status_code, 302)
+                od.refresh_from_db()
+                self.assertEqual((od.state, od.reason), ('CANCELLED', '운영자 반출 취소'))
+                self.assertTrue(Audit.objects.filter(
+                    action='outbound.dispatch_cancelled', object_id=str(od.pk)).exists())
+
+                r5 = self.client.post(f'/plans/{self.plan.pk}/', {
+                    'action': 'cell_plan_outbound_cancel', 'dispatch_id': row.pk,
+                })
+                self.assertEqual(r5.status_code, 409)
+
     def test_preview_cancel_and_hold_reason_propagation(self):
         client = _FakeCellPlanClient()
         dry1 = cell_plan_dispatch.preview_harbor_plan(self.operator, plan_id=self.plan.pk, client=client)
@@ -445,6 +540,10 @@ class CellPlanDispatchTests(TestCase):
         self.assertEqual(synced.state, 'PAUSED_HUMAN')
         self.assertEqual(synced.reason, 'HUMAN_IN_CELL_ZONE')
 
+        # A paused dispatch still occupies the order; close it (ABORTED) before the next request.
+        client.status = 'ABORTED'
+        self.assertEqual(cell_plan_dispatch.sync_cell_plan_dispatch(row.pk, client=client).state, 'ABORTED')
+
         client2 = _FakeCellPlanClient()
         row2 = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk, client=client2)
         self.client.force_login(self.operator)
@@ -460,3 +559,18 @@ class CellPlanDispatchTests(TestCase):
         row2.refresh_from_db()
         self.assertEqual(row2.state, 'CANCELLED')
         self.assertEqual(row2.reason, '운영자 현장 취소')
+
+    def test_production_dispatch_rejects_restored_runtime_and_unmet_readiness(self):
+        with patch('harbor_web.runtime.execution_block_reason', return_value='RESTORE_RECONCILIATION_REQUIRED'):
+            with self.assertRaises(services.Conflict) as restore_blocked:
+                cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk)
+        self.assertEqual(str(restore_blocked.exception), 'RESTORE_RECONCILIATION_REQUIRED')
+        self.assertEqual(CellPlanDispatch.objects.count(), 0)
+
+        with patch('harbor_web.readiness.first_unmet', return_value='READINESS_ARM_INCIDENT_UNMET'):
+            with self.assertRaises(services.Conflict) as readiness_blocked:
+                cell_plan_dispatch.dispatch_rosy_directive(
+                    self.operator, order_id=self.order.pk, observation_id=self.observation.pk,
+                )
+        self.assertEqual(str(readiness_blocked.exception), 'READINESS_ARM_INCIDENT_UNMET')
+        self.assertEqual(CellPlanDispatch.objects.count(), 0)

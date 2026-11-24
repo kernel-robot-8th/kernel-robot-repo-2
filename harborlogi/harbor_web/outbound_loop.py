@@ -31,8 +31,17 @@ _STATE_LABELS = {
     'LOADED': '적재 확인됨 · 출구 이동 준비됨',
     'EXIT_PROPOSED': '출구 이동 승인·주행 중',
     'EXITED': '출구 반출 완료',
+    'CANCELLED': '반출 취소',
     'HOLD': '차량 반출 보류',
 }
+
+# Terminal outbound states; the stand zone and the pinned vehicle free up the moment a row leaves the active set.
+CLOSED_OUTBOUND_STATES = ('EXITED', 'CANCELLED')
+
+
+def _normalize_stand(raw):
+    """Legacy bindings name the stand as 'out' or a stand-anchored slot; the dispatch only knows 'stand'."""
+    return 'stand' if not raw or raw == 'out' or raw.startswith(('stand-', 'stand:', 'stand_')) else raw
 
 
 def pickup_trip_key(dispatch):
@@ -203,7 +212,7 @@ def prepare_outbound_dispatch(actor, *, command_id, expected_version=None, candi
     if OutboundDispatch.objects.filter(command=command).exists():
         raise Conflict('Outbound dispatch already exists for this command.')
 
-    stand_zone_id = (command.binding or {}).get('outbound_stand') or 'stand'
+    stand_zone_id = _normalize_stand((command.binding or {}).get('outbound_stand'))
     return _create_outbound_dispatch(
         actor,
         cargo=command.order.cargo,
@@ -330,6 +339,19 @@ def _save_progress(dispatch, *, state, reason='', assigned_vehicle_id=None, pick
         dispatch.refresh_from_db()
 
 
+def _mark_cancelled(dispatch, *, reason='CANCELLED_BY_OPERATOR', **mission_fields):
+    """Leaving the active state set releases the stand zone and the pinned vehicle immediately."""
+    _save_progress(dispatch, state='CANCELLED', reason=reason[:192], **mission_fields)
+    Audit.objects.create(
+        actor=dispatch.actor,
+        action='outbound.dispatch_cancelled',
+        object_type='OutboundDispatch',
+        object_id=str(dispatch.pk),
+        detail={'reason': reason[:192]},
+    )
+    return 'CANCELLED'
+
+
 def _advance_leg(dispatch, transport, client):
     leg2 = dispatch.loaded_at is not None
     intent = _leg2_intent(dispatch) if leg2 else _leg1_intent(dispatch)
@@ -352,6 +374,8 @@ def _advance_leg(dispatch, transport, client):
     status = job.get('status')
     if leg2:
         if status == 'HOLD':
+            if (job.get('reason') or '') == 'CANCELLED_BY_OPERATOR':
+                return _mark_cancelled(dispatch, exit_mission_id=job['mission_id'])
             next_state = 'HOLD'
             reason = job.get('reason') or 'TRIP_HELD'
         elif status == 'GOAL_CONFIRMED':
@@ -364,6 +388,9 @@ def _advance_leg(dispatch, transport, client):
         return next_state
 
     if status == 'HOLD':
+        if (job.get('reason') or '') == 'CANCELLED_BY_OPERATOR':
+            return _mark_cancelled(
+                dispatch, assigned_vehicle_id=job['robot_id'], pickup_mission_id=job['mission_id'])
         next_state = 'HOLD'
         reason = job.get('reason') or 'TRIP_HELD'
     elif status == 'GOAL_CONFIRMED':
@@ -402,6 +429,27 @@ def tick(registry, *, now=None):
     return results
 
 
+@serialized
+def cancel_outbound_dispatch(actor, *, dispatch_id, reason=''):
+    """Operator cancels a non-terminal dispatch; the stand zone and assigned vehicle free immediately."""
+    _role(actor, 'operator')
+    dispatch = OutboundDispatch.objects.select_related('command', 'cell_plan_dispatch', 'cargo').filter(pk=dispatch_id).first()
+    if dispatch is None:
+        raise ValidationError('OUTBOUND_DISPATCH_NOT_FOUND')
+    if dispatch.state in CLOSED_OUTBOUND_STATES:
+        raise Conflict('Outbound dispatch is already closed.')
+    saved = (reason or 'OPERATOR_CANCELLED')[:192]
+    _save_progress(dispatch, state='CANCELLED', reason=saved)
+    Audit.objects.create(
+        actor=actor,
+        action='outbound.dispatch_cancelled',
+        object_type='OutboundDispatch',
+        object_id=str(dispatch.pk),
+        detail={'reason': saved, 'cancelled_by': 'operator'},
+    )
+    return dispatch
+
+
 def awaiting_load_confirmation(command):
     return OutboundDispatch.objects.filter(command=command, state='PICKUP_ARRIVED').exists()
 
@@ -412,7 +460,8 @@ def dispatch_view(command):
         return dict(show=False)
     dispatch = OutboundDispatch.objects.filter(command=command).first()
     if dispatch is None:
-        return dict(show=True, exists=False, status_label='대기 중 · 차량 호출 전', can_start=True, can_confirm_load=False)
+        return dict(show=True, exists=False, status_label='대기 중 · 차량 호출 전',
+                    can_start=True, can_confirm_load=False, can_cancel=False)
     return dict(
         show=True,
         exists=True,
@@ -420,5 +469,6 @@ def dispatch_view(command):
         status_label=_STATE_LABELS.get(dispatch.state, dispatch.state),
         can_start=False,
         can_confirm_load=dispatch.state == 'PICKUP_ARRIVED',
+        can_cancel=dispatch.state not in CLOSED_OUTBOUND_STATES,
         vehicle_label=dispatch.assigned_vehicle_id or '미배정',
     )
