@@ -19,7 +19,7 @@ from harbor.transport import TransportLedger
 from harbor.workflow import BusinessLedger
 from harbor_web.command_models import ACTIVE_COMMAND_STATES, FRESHNESS, HUMAN_PLACEMENT_SOURCE, HUMAN_RETREAT_SOURCE
 from harbor_web.models import Plan, Command, CommandFact, Audit, Observation
-from harbor_web.services import _role, Conflict, queue_digest, constraints, open_outbound_orders
+from harbor_web.services import _role, Conflict, queue_digest, constraints
 from harbor_web.coordination import serialized
 from harbor_web.readiness import REASONS as READINESS_REASONS
 # Imported by name so tests that patch `harbor_web.commands._config`/`_bound` still reach these call sites.
@@ -423,8 +423,8 @@ def advance_command(command, registry, *, evidence=None):
                 if command.state not in PROPOSE_STATES:
                     return command.state  # An uncertain prior stage must reconcile first.
                 if row['step_index'] and command.order.kind == 'REARRANGE':
-                    if open_outbound_orders().exists():
-                        return command.state  # Outbound first (design 32): no further R2 move starts.
+                    if Command.objects.filter(order__kind='OUTBOUND', state__in=ACTIVE_COMMAND_STATES).exists():
+                        return command.state  # Outbound first (design 32): no further R2 move starts while one runs.
                 return _submit_stage(command, registry, command.actor).state
             if row['state'] in ('WAITING', 'HOLD'):
                 command = reconcile_command(command.actor, command_id=command.pk,

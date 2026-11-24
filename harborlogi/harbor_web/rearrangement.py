@@ -13,7 +13,7 @@ from harbor_web import commands
 from harbor_web.command_models import ACTIVE_COMMAND_STATES
 from harbor_web.coordination import serialized
 from harbor_web.models import Audit, CargoFootprint, Command, Observation, Order, Plan, RearrangeAuthorization
-from harbor_web.order_queue import open_outbound_orders, queue_digest
+from harbor_web.order_queue import queue_digest
 # Re-bound here so tests and callers keep patching/reading `rearrangement.rearrange_proposal`.
 from harbor_web.plan_service import _calculate_plan, plan_record, rearrange_proposal  # noqa: F401
 from harbor_web.service_common import Conflict, _role
@@ -23,8 +23,11 @@ HOLD_ACTION = 'rearrange.hold'
 
 
 def outbound_pending():
-    """An outbound order is pending until a Command for it has completed (orders have no close state)."""
-    return open_outbound_orders().exists()
+    """An outbound Command is running or its result is unknown (ADR 0017, revised 2026-11-24).
+
+    Outbound orders that only wait in the queue (a scenario registers them all up front) no longer hold R2;
+    a running R2 still yields to an outbound Command between its moves (commands.py)."""
+    return Command.objects.filter(order__kind='OUTBOUND', state__in=ACTIVE_COMMAND_STATES).exists()
 
 
 def pending_inbound_lengths():
