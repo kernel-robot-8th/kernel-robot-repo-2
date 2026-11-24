@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from harbor.cell_plan import build_harbor_plan_request, build_rosy_directive_request, validate_cell_plan_response
-from harbor.cell_site_map import normalize_cell_site_map
+from harbor.cell_site_map import compare_condition_with_rosy, normalize_cell_site_map
 from harbor.port_events import IntakeLedger, parse_slot_ref
 from harbor.rosy_http import RosyClient
 from harbor.site_places import (
@@ -400,8 +400,10 @@ class TransportHttpTests(unittest.TestCase):
         # Dry-run typed preview (service caller redacts cargo_id / final_state) + goal mode preview.
         dry = service.preview_cell_plan_typed(rosy_req, expected_order_source='rosy_r')
         self.assertEqual(len(dry.moves), 3)
-        self.assertIsNone(dry.final_state)
-        self.assertTrue(all(m.cargo_id is None for m in dry.moves))
+        self.assertEqual(dry.final_state, ())
+        dry_raw = service.preview_cell_plan(rosy_req)
+        self.assertIsNone(dry_raw['final_state'])
+        self.assertTrue(all('cargo_id' not in m for m in dry_raw['moves']))
         goal_req = build_rosy_directive_request(
             mode='goal',
             observation_payload=observation_payload,
