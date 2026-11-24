@@ -1,11 +1,10 @@
 {% load static %}
 <section class="panel topview-panel" aria-labelledby="topview-title" data-topview{% if topview.sources %} data-topview-url="{{ topview.sources.0.url }}"{% endif %}>
-  <div class="panel-h"><h3 id="topview-title">ROSY 탑뷰</h3></div>
+  <div class="panel-h"><h3 id="topview-title">ROSY 탑뷰</h3>{% if topview.sources|length > 1 %}<label class="topview-camera"><span class="sr-only">카메라 선택</span><select data-topview-source>{% for camera in topview.sources %}<option value="{{ camera.url }}"{% if forloop.first %} selected{% endif %}>{{ camera.source_id }}</option>{% endfor %}</select></label>{% endif %}</div>
   <div class="panel-b">
-    {% if topview.sources|length > 1 %}<label>카메라 선택<select data-topview-source>{% for camera in topview.sources %}<option value="{{ camera.url }}"{% if forloop.first %} selected{% endif %}>{{ camera.source_id }}</option>{% endfor %}</select></label>{% endif %}
+    {% if topview.sources %}<img data-topview-image alt="ROSY 카메라의 최신 야드 탑뷰" hidden><noscript><p>탑뷰를 보려면 JavaScript를 켜세요.</p></noscript>{% endif %}
     <p role="status" data-topview-status>{{ topview.status }}</p>
     <p class="helptext topview-orientation">탑뷰 시점은 야드 평면과 180° 반전 방향입니다 (위쪽 컨베이어·반출대, 오른쪽 팔 A).</p>
-    {% if topview.sources %}<img data-topview-image alt="ROSY 카메라의 최신 야드 탑뷰" hidden><noscript><p>탑뷰를 보려면 JavaScript를 켜세요.</p></noscript>{% endif %}
   </div>
 </section>
 {% if topview.sources %}<script type="module" src="{% static 'harbor_web/topview.mjs' %}"></script>{% endif %}
