@@ -155,6 +155,13 @@ class TopviewUserTokenTests(TestCase):
         self.assertEqual((response.status_code, response.content.decode()), (503, 'ROSY 로그인 필요'))
         self.vision_class.assert_not_called()
 
+    def test_expired_rosy_session_does_not_fall_back_to_service_token(self):
+        self.sign_in(self.now - 1)
+        with patch.dict(os.environ, {'HARBOR_FLEET_TOKEN': 'service-token'}):
+            response = self.client.get(self.url)
+        self.assertEqual((response.status_code, response.content.decode()), (503, 'ROSY 로그인 필요'))
+        self.vision_class.assert_not_called()
+
     def test_local_accounts_keep_the_service_token(self):
         with patch.dict(os.environ, {'HARBOR_FLEET_TOKEN': 'service-token'}):
             self.assertEqual(self.client.get(self.url).status_code, 200)

@@ -12,6 +12,7 @@ HARBOR_FLEET_TOKEN(서비스 신원)을 쓴다.
 """
 import os
 
+from django.conf import settings
 from django.http import HttpResponse
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods
@@ -27,7 +28,10 @@ def _fleet_settings(request):
     """HARBOR_FLEET_ORIGIN·HARBOR_FLEET_CA_FILE과 자격. 자격은 로그인한 사람의 Rosy 접근 토큰(ADR 0037),
     없으면(로컬 계정) 기존 HARBOR_FLEET_TOKEN. 어느 쪽도 브라우저에 내보내지 않는다."""
     origin = os.environ.get("HARBOR_FLEET_ORIGIN", "").rstrip("/")
-    token = access_token(request) or os.environ.get("HARBOR_FLEET_TOKEN", "")
+    if settings.ROSY_ACCOUNT and request.session.get("rosy_account"):
+        token = access_token(request) or ""
+    else:
+        token = access_token(request) or os.environ.get("HARBOR_FLEET_TOKEN", "")
     ca_file = os.environ.get("HARBOR_FLEET_CA_FILE", "") or None
     return origin, token, ca_file
 
