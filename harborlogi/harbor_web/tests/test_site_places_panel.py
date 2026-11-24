@@ -43,7 +43,7 @@ class SitePlacesPanelTests(TestCase):
             response = self.client.get('/inventory/')
         self.assertEqual(response.status_code, 200)
         html = response.content.decode('utf-8')
-        self.assertContains(response, '탑뷰 시점은 야드 평면과 180° 반전 방향입니다')
+        self.assertContains(response, '탑뷰를 180° 돌려 야드 평면과 같은 방향으로 보여 줍니다')
         self.assertContains(response, 'data-site-places-status>ROSY 연동 전')
         _assert_glossary_clean(self, html)
 

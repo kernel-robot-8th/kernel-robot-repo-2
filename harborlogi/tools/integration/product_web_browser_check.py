@@ -24,7 +24,7 @@ def main():
     output = args.output.resolve() / ('run-' + uuid.uuid4().hex)
     output.mkdir(parents=True)
     for key in list(os.environ):
-        if key.startswith('HARBOR_'):
+        if key.startswith('HARBOR_') and key != 'HARBOR_BROWSER_CHANNEL':
             del os.environ[key]
     os.environ.update(DJANGO_SETTINGS_MODULE='harbor_web.settings', HARBOR_WEB_MODE='development',
                       HARBOR_WEB_SECRET_KEY=secrets.token_urlsafe(64), HARBOR_WEB_DATABASE=str(output / 'product.sqlite3'))
@@ -83,7 +83,7 @@ def main():
         # Playwright runs an internal event loop; this isolated harness performs ORM reads sequentially.
         os.environ['DJANGO_ALLOW_ASYNC_UNSAFE'] = 'true'
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(channel='msedge', headless=True)
+            browser = playwright.chromium.launch(channel=os.environ.get('HARBOR_BROWSER_CHANNEL', 'msedge'), headless=True)
 
             def visit(page, path):
                 response = page.goto(origin + path)
@@ -104,6 +104,9 @@ def main():
                     control = page.locator('main [name="' + key + '"]')
                     if control.first.evaluate('(e)=>e.tagName') == 'SELECT':
                         control.select_option(str(value))
+                    elif control.first.get_attribute('type') == 'radio':
+                        # a0d6bc1 (KAN-116): priority tiers are native radio choices.
+                        page.locator(f'main [name="{key}"][value="{value}"]').check()
                     elif control.first.get_attribute('type') == 'checkbox':
                         control.set_checked(bool(value))
                     else:
@@ -142,8 +145,10 @@ def main():
             assert 'q=PAG' in page.url and 'page=2' in page.url
             assert page.locator('[name=q]').input_value() == 'PAG'
             visit(page, '/requests/new/')
-            submit(page, dict(cargo=Cargo.objects.get(code='C1').pk, kind='OUTBOUND', priority_group=1, sequence=1, tie_policy='FIXED', note='Browser outbound'))
+            submit(page, dict(cargo=Cargo.objects.get(code='C1').pk, kind='OUTBOUND', priority_group=1, tie_policy='FIXED', note='Browser outbound'))
             outbound = Order.objects.get(kind='OUTBOUND')
+            # a0d6bc1: sequence is hidden and assigned at the back of the selected tier.
+            assert (outbound.priority_group, outbound.sequence, outbound.tie_policy) == (1, 1, 'FIXED')
             page.locator('[name=observation]').select_option(str(observed.pk))
             page.get_by_role('button', name='반출 계획 만들기', exact=True).click()
             page.wait_for_load_state('networkidle')
@@ -185,7 +190,8 @@ def main():
             assert grid.is_visible()
             visit(page, '/outbound/?q=C1')
             assert page.locator('.action-table tbody tr').count() == 1
-            page.get_by_role('link', name='야드·계획·근거 확인', exact=True).click()
+            # 65963dd: the outbound workspace link is now labelled 업무 열기.
+            page.get_by_role('link', name='업무 열기', exact=True).click()
             assert f'/requests/{outbound.pk}/' in page.url
             result['checks'].append('Configured 3x3x3 yard with27 positions, keyboard layer selection, retained level across plan stages, target outbound/blocker restoration, unchanged original observation, execution closed')
             no_js_context = browser.new_context(java_script_enabled=False)
@@ -257,11 +263,12 @@ def main():
                 viewport = browser.new_page(viewport={'width': width, 'height': height}, reduced_motion='reduce')
                 errors, failed, console, bad_http = [], [], [], []
                 viewport.on('pageerror', lambda error: errors.append(str(error)))
-                viewport.on('requestfailed', lambda request: failed.append(request.url))
+                viewport.on('requestfailed', lambda request: failed.append([request.url, request.failure]))
                 viewport.on('console', lambda message: console.append(message.text) if message.type == 'error' else None)
                 viewport.on('response', lambda response: bad_http.append([response.status, response.url]) if response.status >= 400 else None)
                 login(viewport, 'operator')
-                assert viewport.get_by_role('heading', name='지금 필요한 조치').is_visible()
+                # 3f7e44e: the landing screen became the 상황판 dashboard.
+                assert viewport.get_by_role('heading', name='상황판', exact=True).is_visible()
                 styles = viewport.evaluate("({body:parseFloat(getComputedStyle(document.body).fontSize), heading:parseFloat(getComputedStyle(document.querySelector('h1')).fontSize)})")
                 assert styles['body'] >= 16 and styles['heading'] >= 28, styles
                 viewport.keyboard.press('Tab')
@@ -306,6 +313,7 @@ def main():
                 assert viewport.locator('canvas').get_attribute('data-frame') == '0'
                 visit(viewport, '/requests/')
                 viewport.go_back()
+                viewport.wait_for_load_state('networkidle')
                 assert f'/plans/{plan.pk}/' in viewport.url
                 visit(viewport, '/cargo/new/')
                 submit(viewport, dict(code='C1', name='Retained invalid input', weight_kg='1', volume_m3='1', destination='yard'))
