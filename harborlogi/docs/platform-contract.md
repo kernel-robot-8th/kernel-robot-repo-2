@@ -62,6 +62,26 @@ REST 요청(경로 A)
   - 완료된 `OUTBOUND` `Command` 또는 `stand` 목적지의 완료된 `CellPlanDispatch`는 단일 2단계 `TripIntent`로 처리한다: Leg 1(`S_OUT` 도킹, `object_ref=""`) → 현장/운영자 적재 확인(`LOADED`, `confirmed_by`) → 고정 차량 Leg 2(`S_EXIT` 출구 이동, `object_ref=""`).
   - `executor.tick`은 `cell_plan_dispatch.tick` → `outbound_loop.tick` 순으로 실행하며, `HARBOR_OUTBOUND_AUTO_DISPATCH=1`일 때 완료된 반출 `CellPlanDispatch`에서도 1차 `S_OUT` 배차를 자동 준비한다. 반출대(`stand_zone_id`)당 활성 배차는 1건으로 제한한다.
 
+#### 구역·좌표·정지선 1:1 매핑 규약 (ROSY ↔ Harbor)
+
+ROSY 정본(`shared/web/cell-site-map.json`, 37셀·13슬롯)과 Harbor `Condition`/`cell_plan`/`outbound` 간 좌표·차량 정지선은 아래 1:1 매핑을 따른다.
+
+| 구역 (`zone_id`) | 형태 (`rows×cols×tiers`) | `slot_cells` | `wire_ref` (슬롯 시작점만 허용) | 담당 암 (`arm_id`) | 비고 |
+| --- | --- | --- | --- | --- | --- |
+| `yard` | `3×6×3` | `3` | `yard-r{1..3}-c{1\|4}-l{1..3}` (`slot_id`: `yard:r{1..3}-s{1\|2}`) | `arm_a`, `arm_b` | `hold 1`=`cols 1..3`(`c1`), `hold 2`=`cols 4..6`(`c4`). 구명칭 `ship-h1`/`ship-h2` 금지 |
+| `temp_a` | `3×3×3` | `3` | `temp_a-r{1..3}-c1-l{1..3}` (`slot_id`: `temp_a:r{1..3}-s1`) | `arm_a` | `c2`, `c3` 직접 지정 금지 |
+| `temp_b` | `3×3×3` | `3` | `temp_b-r{1..3}-c1-l{1..3}` (`slot_id`: `temp_b:r{1..3}-s1`) | `arm_b` | `c2`, `c3` 직접 지정 금지 |
+| `stand` | `1×3×1` | `3` | `stand-r1-c1-l1` (`slot_id`: `stand:r1-s1`) | `arm_a` | 단일 1층 슬롯 (`arm_b`·`l2+` 금지) |
+
+- **차량 정지선 (`rosy.port-site-places.v1`)**:
+  - `S1`=`inbound_load`, `S2`/`S4`/`S5`=`wait`, `S3`=`intake_dropoff`, `C1..C3`=`charge`, `S_OUT`=`outbound_pickup`.
+  - `outbound_handoffs[*].vehicle_exit_stop_id`는 전용 출구(`outbound_exit`)여야 하며, 입하 정지선 `S1`(`inbound_load`) 겸용 시 `OUTBOUND_EXIT_ROLE_MISMATCH`로 경고한다.
+  - `not_places`(`belt`, `supply_s`, `ship_stern`, `ship_bow`, `vehicle_tray`)에는 차량 정지선을 생성하지 않는다.
+- **사전 검증 및 라이브 대시보드**:
+  - `harbor.cell_site_map`(`canonical_cell_wire_refs`, `canonical_cell_slot_specs`, `validate_canonical_cell_placement`, `validate_canonical_wire_ref`)과 `harbor.cell_plan`(`observation_site_state`, `build_harbor_plan_spec`, `build_rosy_directive_spec`)은 비정규 좌표·슬롯 비시작 열(`c2`/`c3`/`c5`/`c6`)·구역 담당 암 불일치·13개 `slot_id` 외 `goal` 키·최대 단수(`max_tier`) 초과를 송신 전 차단한다.
+  - `/inventory/`는 활성 `Condition`이 없거나 ROSY 정본(`cell_zones`, `outbound_handoffs`)과 어긋날 때 `compare_condition_with_rosy` 결과를 표시한다.
+
+
 ### 규칙별 확인 방법
 
 | 규칙 | 자동 시험 | 실제 Fleet(로컬) | 현장 읽기 전용 점검 |

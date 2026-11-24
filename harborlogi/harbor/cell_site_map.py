@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import re
+from types import MappingProxyType
 from typing import Any
 
 from harbor.model import YARD_ARMS
@@ -576,3 +577,211 @@ def default_name(normalized: dict[str, Any]) -> str:
 
 def default_calibration_ref(normalized: dict[str, Any]) -> str:
     return f"{normalized['schema']}#rev{normalized['revision']} ({normalized['status']})"[:192]
+
+
+CANONICAL_ZONE_SPECS = MappingProxyType({
+    'yard': MappingProxyType({
+        'role': 'storage', 'rows': 3, 'columns': 6, 'tiers': 3, 'slot_cells': 3,
+        'valid_cols': (1, 4), 'arms': ('arm_a', 'arm_b'),
+    }),
+    'temp_a': MappingProxyType({
+        'role': 'temporary', 'rows': 3, 'columns': 3, 'tiers': 3, 'slot_cells': 3,
+        'valid_cols': (1,), 'arms': ('arm_a',),
+    }),
+    'temp_b': MappingProxyType({
+        'role': 'temporary', 'rows': 3, 'columns': 3, 'tiers': 3, 'slot_cells': 3,
+        'valid_cols': (1,), 'arms': ('arm_b',),
+    }),
+    'stand': MappingProxyType({
+        'role': 'outbound', 'rows': 1, 'columns': 3, 'tiers': 1, 'slot_cells': 3,
+        'valid_cols': (1,), 'arms': ('arm_a',),
+    }),
+})
+_HARBOR_TO_ROSY_ARM = {'A': 'arm_a', 'B': 'arm_b', 'arm_a': 'arm_a', 'arm_b': 'arm_b'}
+
+
+def canonical_cell_wire_refs() -> frozenset[str]:
+    """Return the exact 37 canonical ROSY cell wire_ref addresses."""
+    refs: list[str] = []
+    for zone_id, spec in CANONICAL_ZONE_SPECS.items():
+        for row in range(1, spec['rows'] + 1):
+            for col in spec['valid_cols']:
+                for tier in range(1, spec['tiers'] + 1):
+                    refs.append(f'{zone_id}-r{row}-c{col}-l{tier}')
+    return frozenset(refs)
+
+
+def canonical_cell_slot_specs() -> dict[str, int]:
+    """Return mapping of canonical slot/stack IDs (e.g. yard:r1-s2) -> max_tier."""
+    slots: dict[str, int] = {}
+    for zone_id, spec in CANONICAL_ZONE_SPECS.items():
+        for row in range(1, spec['rows'] + 1):
+            for slot_idx in range(1, len(spec['valid_cols']) + 1):
+                slots[f'{zone_id}:r{row}-s{slot_idx}'] = int(spec['tiers'])
+    return slots
+
+
+def _normalize_arm_id(arm_id: str | None) -> str | None:
+    if arm_id is None or arm_id == '':
+        return None
+    if not isinstance(arm_id, str) or arm_id.strip() not in _HARBOR_TO_ROSY_ARM:
+        raise ValueError(f'INVALID_CELL_ZONE_ARM: {arm_id!r}')
+    return _HARBOR_TO_ROSY_ARM[arm_id.strip()]
+
+
+def validate_canonical_cell_placement(
+    area_id: Any,
+    row: Any,
+    column: Any,
+    level: Any,
+    *,
+    arm_id: str | None = None,
+    allowed_wire_refs: frozenset[str] | None = None,
+) -> str:
+    """Validate 1-based slot coordinates and optional arm ownership against the canonical 37-site cell map."""
+    if not isinstance(area_id, str) or area_id not in CANONICAL_ZONE_SPECS:
+        raise ValueError(f'INVALID_CELL_SLOT_COORDINATE: unknown zone {area_id!r}')
+    spec = CANONICAL_ZONE_SPECS[area_id]
+    if (
+        type(row) is not int or not (1 <= row <= spec['rows'])
+        or type(column) is not int or column not in spec['valid_cols']
+        or type(level) is not int or not (1 <= level <= spec['tiers'])
+    ):
+        raise ValueError(f'INVALID_CELL_SLOT_COORDINATE: {area_id}-r{row}-c{column}-l{level}')
+    norm_arm = _normalize_arm_id(arm_id)
+    if norm_arm is not None and norm_arm not in spec['arms']:
+        raise ValueError(f'INVALID_CELL_ZONE_ARM: {norm_arm} cannot serve {area_id}')
+    wire_ref = f'{area_id}-r{row}-c{column}-l{level}'
+    if allowed_wire_refs is not None and wire_ref not in allowed_wire_refs:
+        raise ValueError(f'UNKNOWN_CELL_WIRE_REF: {wire_ref}')
+    return wire_ref
+
+
+def validate_canonical_wire_ref(
+    wire_ref: Any,
+    *,
+    allow_belt: bool = False,
+    arm_id: str | None = None,
+    allowed_wire_refs: frozenset[str] | None = None,
+) -> str:
+    """Validate a canonical wire_ref string (<zone>-r<row>-c<col>-l<tier>) and optional arm."""
+    if not isinstance(wire_ref, str) or not wire_ref.strip():
+        raise ValueError('INVALID_CELL_SLOT_COORDINATE: empty wire_ref')
+    text = wire_ref.strip()
+    if text == 'belt':
+        if allow_belt:
+            return 'belt'
+        raise ValueError('INVALID_CELL_SLOT_COORDINATE: belt is not a cell slot')
+    m = WIRE_REF_RE.fullmatch(text)
+    if m is None:
+        raise ValueError(f'INVALID_CELL_SLOT_COORDINATE: {text!r}')
+    return validate_canonical_cell_placement(
+        m.group('area'),
+        int(m.group('row')),
+        int(m.group('col')),
+        int(m.group('tier')),
+        arm_id=arm_id,
+        allowed_wire_refs=allowed_wire_refs,
+    )
+
+
+def compare_condition_with_rosy(
+    condition_payload: dict[str, Any] | None,
+    *,
+    cell_site_map: dict[str, Any] | None = None,
+    site_places: Any = None,
+) -> dict[str, Any]:
+    """Compare Harbor active Condition against canonical ROSY cell zones and live port-site-places."""
+    issues: list[dict[str, str]] = []
+    if cell_site_map is not None and isinstance(cell_site_map.get('zones'), list):
+        expected_zones = [
+            {
+                'id': z['id'],
+                'rows': int(z['rows']),
+                'columns': int(z['columns']),
+                'tiers': int(z['tiers']),
+                'arms': tuple(ROSY_ARM_TO_HARBOR.get(a, a) for a in z.get('arms') or ()),
+            }
+            for z in cell_site_map['zones']
+        ]
+        expected_slot_cells = int(cell_site_map.get('slot_cells') or 3)
+    else:
+        expected_zones = [
+            {
+                'id': zid,
+                'rows': int(spec['rows']),
+                'columns': int(spec['columns']),
+                'tiers': int(spec['tiers']),
+                'arms': tuple(ROSY_ARM_TO_HARBOR[a] for a in spec['arms']),
+            }
+            for zid, spec in CANONICAL_ZONE_SPECS.items()
+        ]
+        expected_slot_cells = 3
+
+    harbor_zones: list[dict[str, Any]] = []
+    if condition_payload is None:
+        issues.append({'code': 'NO_ACTIVE_CONDITION', 'label': '활성 설치 기준이 아직 등록되지 않았습니다'})
+    elif not isinstance(condition_payload, dict):
+        issues.append({'code': 'INVALID_CONDITION_PAYLOAD', 'label': '설치 기준 형식이 올바르지 않습니다'})
+    else:
+        if condition_payload.get('slot_cells') != expected_slot_cells:
+            issues.append({
+                'code': 'SLOT_CELLS_MISMATCH',
+                'label': f'슬롯 폭(slot_cells)이 ROSY 정본({expected_slot_cells}칸)과 다릅니다',
+            })
+        harbor_by_id: dict[str, dict[str, Any]] = {}
+        yl = condition_payload.get('yard_layout')
+        if isinstance(yl, dict):
+            z = {'id': 'yard', 'rows': yl.get('rows'), 'columns': yl.get('columns'), 'levels': yl.get('levels')}
+            harbor_zones.append(z)
+            harbor_by_id['yard'] = z
+        for sa in condition_payload.get('spatial_areas') or ():
+            if isinstance(sa, dict) and isinstance(sa.get('area_id'), str):
+                z = {'id': sa['area_id'], 'rows': sa.get('rows'), 'columns': sa.get('columns'), 'levels': sa.get('levels')}
+                harbor_zones.append(z)
+                harbor_by_id[sa['area_id']] = z
+
+        arm_reach_by_loc: dict[str, set[str]] = {}
+        for entry in condition_payload.get('arm_reach') or ():
+            if isinstance(entry, (list, tuple)) and len(entry) == 2:
+                arm_reach_by_loc.setdefault(str(entry[1]), set()).add(str(entry[0]))
+
+        for exp in expected_zones:
+            zid = exp['id']
+            got = harbor_by_id.get(zid)
+            if got is None:
+                issues.append({'code': 'ZONE_MISSING_IN_HARBOR', 'label': f'Harbor 설치 기준에 구역({zid})이 없습니다'})
+                continue
+            if (got.get('rows'), got.get('columns'), got.get('levels')) != (exp['rows'], exp['columns'], exp['tiers']):
+                issues.append({
+                    'code': 'ZONE_DIMENSIONS_MISMATCH',
+                    'label': f"구역({zid}) 크기가 ROSY 정본({exp['rows']}x{exp['columns']}x{exp['tiers']})과 다릅니다",
+                })
+            if zid in arm_reach_by_loc and not (arm_reach_by_loc[zid] <= set(exp['arms'])):
+                issues.append({'code': 'ZONE_ARM_MISMATCH', 'label': f'구역({zid}) 팔 도달 범위가 ROSY 정본과 다릅니다'})
+
+    if site_places is not None:
+        vp_by_id = {vp.place_id: vp for vp in getattr(site_places, 'vehicle_places', ())}
+        for oh in getattr(site_places, 'outbound_handoffs', ()):
+            exit_id = getattr(oh, 'vehicle_exit_stop_id', None)
+            if exit_id and exit_id in vp_by_id and vp_by_id[exit_id].port_role != 'outbound_exit':
+                issues.append({
+                    'code': 'OUTBOUND_EXIT_ROLE_MISMATCH',
+                    'label': f'반출 출구 정지선({exit_id})이 전용 반출 출구(outbound_exit) 역할이 아닙니다',
+                })
+        unverified_zones = [cz.zone_id for cz in getattr(site_places, 'cell_zones', ()) if cz.status != 'verified']
+        if unverified_zones:
+            issues.append({
+                'code': 'CELL_ZONES_UNVERIFIED',
+                'label': f"ROSY 셀 구역 실물 검증 대기 중 ({', '.join(unverified_zones)})",
+            })
+        pickup = vp_by_id.get('S_OUT')
+        if pickup is not None and pickup.status != 'verified':
+            issues.append({'code': 'OUTBOUND_PICKUP_UNVERIFIED', 'label': '반출 상차 정지선(S_OUT) 커미셔닝 대기 중'})
+
+    return {
+        'aligned': len(issues) == 0,
+        'issues': issues,
+        'expected_zones': expected_zones,
+        'harbor_zones': harbor_zones,
+    }
