@@ -15,7 +15,7 @@ from django.utils import timezone
 from harbor.model import identifiers
 from harbor.site_places import parse_site_places, resolve_outbound_dispatch_stops, validate_trip_places
 from harbor.transport import TransportLedger, TripIntent
-from harbor_web.command_models import ACTIVE_OUTBOUND_DISPATCH_STATES, Command, OutboundDispatch
+from harbor_web.command_models import ACTIVE_OUTBOUND_DISPATCH_STATES, CellPlanDispatch, Command, OutboundDispatch
 from harbor_web.coordination import serialized
 from harbor_web.models import Audit
 from harbor_web.services import Conflict, _role
@@ -128,21 +128,18 @@ def _leg2_intent(dispatch):
     )
 
 
-@serialized
-def prepare_outbound_dispatch(actor, *, command_id, expected_version=None, candidates=None, places=None, registry=None):
-    """Create a durable OutboundDispatch and prepare Leg 1 (`S_OUT`) after stand arm completion."""
-    _role(actor, 'operator')
-    command = Command.objects.select_related('order__cargo').filter(pk=command_id).first()
-    if command is None:
-        raise ValidationError('COMMAND_NOT_FOUND')
-    if expected_version is not None and command.version != expected_version:
-        raise Conflict('Command version changed.')
-    if command.order.kind != 'OUTBOUND' or command.state != 'COMPLETED':
-        raise ValidationError('OUTBOUND_COMMAND_NOT_COMPLETED')
-    if OutboundDispatch.objects.filter(command=command).exists():
-        raise Conflict('Outbound dispatch already exists for this command.')
-
-    stand_zone_id = (command.binding or {}).get('outbound_stand') or 'stand'
+def _create_outbound_dispatch(
+    actor,
+    *,
+    cargo,
+    stand_zone_id,
+    candidates=None,
+    places=None,
+    registry=None,
+    command=None,
+    cell_plan_dispatch=None,
+    audit_extra=None,
+):
     if OutboundDispatch.objects.filter(stand_zone_id=stand_zone_id, state__in=ACTIVE_OUTBOUND_DISPATCH_STATES).exists():
         raise Conflict('Another outbound dispatch is active at this stand.')
 
@@ -162,7 +159,8 @@ def prepare_outbound_dispatch(actor, *, command_id, expected_version=None, candi
         with transaction.atomic():
             dispatch = OutboundDispatch.objects.create(
                 command=command,
-                cargo=command.order.cargo,
+                cell_plan_dispatch=cell_plan_dispatch,
+                cargo=cargo,
                 actor=actor,
                 stand_zone_id=stand_zone_id,
                 pickup_stop_id=pickup_stop_id,
@@ -171,23 +169,82 @@ def prepare_outbound_dispatch(actor, *, command_id, expected_version=None, candi
                 candidate_robot_ids=list(pool),
                 state='PICKUP_PLANNED',
             )
+            detail = {
+                **(audit_extra or {}),
+                'pickup_stop_id': pickup_stop_id,
+                'exit_stop_id': exit_stop_id,
+                'candidates': list(pool),
+            }
             Audit.objects.create(
                 actor=actor,
                 action='outbound.dispatch_prepared',
                 object_type='OutboundDispatch',
                 object_id=str(dispatch.pk),
-                detail={
-                    'command_id': command.pk,
-                    'pickup_stop_id': pickup_stop_id,
-                    'exit_stop_id': exit_stop_id,
-                    'candidates': list(pool),
-                },
+                detail=detail,
             )
     except IntegrityError as exc:
         raise Conflict('Outbound dispatch conflicts with active stand allocation.') from exc
 
     transport.prepare(_leg1_intent(dispatch))
     return dispatch
+
+
+@serialized
+def prepare_outbound_dispatch(actor, *, command_id, expected_version=None, candidates=None, places=None, registry=None):
+    """Create a durable OutboundDispatch and prepare Leg 1 (`S_OUT`) after stand arm completion."""
+    _role(actor, 'operator')
+    command = Command.objects.select_related('order__cargo').filter(pk=command_id).first()
+    if command is None:
+        raise ValidationError('COMMAND_NOT_FOUND')
+    if expected_version is not None and command.version != expected_version:
+        raise Conflict('Command version changed.')
+    if command.order.kind != 'OUTBOUND' or command.state != 'COMPLETED':
+        raise ValidationError('OUTBOUND_COMMAND_NOT_COMPLETED')
+    if OutboundDispatch.objects.filter(command=command).exists():
+        raise Conflict('Outbound dispatch already exists for this command.')
+
+    stand_zone_id = (command.binding or {}).get('outbound_stand') or 'stand'
+    return _create_outbound_dispatch(
+        actor,
+        cargo=command.order.cargo,
+        stand_zone_id=stand_zone_id,
+        candidates=candidates,
+        places=places,
+        registry=registry,
+        command=command,
+        audit_extra={'command_id': command.pk},
+    )
+
+
+@serialized
+def prepare_outbound_dispatch_from_cell_plan(
+    actor, *, cell_plan_dispatch_id, candidates=None, places=None, registry=None
+):
+    """Create a durable OutboundDispatch and prepare Leg 1 (`S_OUT`) after a completed outbound CellPlanDispatch."""
+    _role(actor, 'operator')
+    row = CellPlanDispatch.objects.select_related('order__cargo').filter(pk=cell_plan_dispatch_id).first()
+    if row is None:
+        raise ValidationError('CELL_PLAN_DISPATCH_NOT_FOUND')
+    if row.order.kind != 'OUTBOUND' or row.order.cargo_id is None or row.state != 'COMPLETED':
+        raise ValidationError('OUTBOUND_CELL_PLAN_NOT_COMPLETED')
+    if OutboundDispatch.objects.filter(cell_plan_dispatch=row).exists():
+        raise Conflict('Outbound dispatch already exists for this cell plan dispatch.')
+    if row.planned_steps and not any(
+        (dst := str(step.get('dst_wire_ref') or step.get('dst_site') or '')) == 'stand'
+        or dst.startswith(('stand-', 'stand_', 'stand:'))
+        for step in row.planned_steps
+    ):
+        raise ValidationError('CELL_PLAN_DOES_NOT_TARGET_STAND')
+    return _create_outbound_dispatch(
+        actor,
+        cargo=row.order.cargo,
+        stand_zone_id='stand',
+        candidates=candidates,
+        places=places,
+        registry=registry,
+        cell_plan_dispatch=row,
+        audit_extra={'cell_plan_dispatch_id': row.pk, 'rosy_plan_id': row.rosy_plan_id},
+    )
 
 
 def maybe_auto_prepare(command, registry):
@@ -203,12 +260,29 @@ def maybe_auto_prepare(command, registry):
         return None
 
 
+def maybe_auto_prepare_from_cell_plan(cell_plan_dispatch, registry):
+    """Best-effort opt-in hook when HARBOR_OUTBOUND_AUTO_DISPATCH=1 and outbound cell plan completes."""
+    if os.environ.get('HARBOR_OUTBOUND_AUTO_DISPATCH') != '1':
+        return None
+    if cell_plan_dispatch.order.kind != 'OUTBOUND' or cell_plan_dispatch.state != 'COMPLETED':
+        return None
+    try:
+        return prepare_outbound_dispatch_from_cell_plan(
+            cell_plan_dispatch.created_by,
+            cell_plan_dispatch_id=cell_plan_dispatch.pk,
+            registry=registry,
+        )
+    except Exception:
+        logger.exception('Auto outbound dispatch skipped for completed cell plan %s', cell_plan_dispatch.pk)
+        return None
+
+
 @serialized
 def confirm_outbound_loaded(actor, *, dispatch_id, expected_version, now=None, registry=None):
     """Named field/operator confirms cargo transferred from stand onto the docked Pinky."""
     _role(actor, 'field', 'operator')
     now = now or timezone.now()
-    dispatch = OutboundDispatch.objects.select_related('command', 'cargo').filter(pk=dispatch_id).first()
+    dispatch = OutboundDispatch.objects.select_related('command', 'cell_plan_dispatch', 'cargo').filter(pk=dispatch_id).first()
     if dispatch is None:
         raise ValidationError('OUTBOUND_DISPATCH_NOT_FOUND')
     if dispatch.version != expected_version or dispatch.state != 'PICKUP_ARRIVED' or not dispatch.assigned_vehicle_id:
