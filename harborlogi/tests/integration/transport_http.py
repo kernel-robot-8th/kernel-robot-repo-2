@@ -196,8 +196,18 @@ class TransportHttpTests(unittest.TestCase):
         })
         call(operator_token, 'POST', '/api/fleet/site-rules/activate', {'expected_revision': rdraft['revision']})
 
-        stops, reason = resolve_outbound_dispatch_stops(parse_site_places(proposer.site_places()))
-        self.assertEqual((stops, reason), (('S_OUT', 'S_EXIT'), 'OK'))
+        places_after = parse_site_places(proposer.site_places())
+        s_out_place = places_after.vehicle_place('S_OUT')
+        s_exit_place = places_after.vehicle_place('S_EXIT')
+        self.assertIsNotNone(s_out_place)
+        self.assertTrue(s_out_place.status == 'verified' and s_out_place.dispatchable)
+        self.assertIsNotNone(s_exit_place)
+        self.assertEqual((s_exit_place.port_role, s_exit_place.status, s_exit_place.dispatchable),
+                         ('outbound_exit', 'verified', True))
+        # Real cell-site-map.json keeps stand planned_unverified until cell calibration; resolve_outbound_dispatch_stops
+        # fail-closes with OUTBOUND_ZONE_UNVERIFIED while the commissioned vehicle stops execute the 2-leg trip.
+        self.assertEqual(resolve_outbound_dispatch_stops(places_after), (None, 'OUTBOUND_ZONE_UNVERIFIED'))
+        stops = (s_out_place.place_id, s_exit_place.place_id)
 
         with tempfile.TemporaryDirectory() as folder:
             ledger = TransportLedger(Path(folder) / 'outbound.sqlite3')
