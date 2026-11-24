@@ -79,6 +79,7 @@
 .topview-panel img {display:block;width:100%;height:auto;border-radius:var(--primitive-radius-control);transform:rotate(180deg)} /* camera looks from the far side: turn it to the yard plan's direction */
 .topview-panel img[hidden] {display:none}
 .topview-panel select {width:100%}
+.topview-panel .topview-camera {margin-left:auto}.topview-panel .topview-camera select {width:auto;max-width:14rem}
 .topview-panel [role="status"] {min-height:1.4em;color:var(--semantic-text-secondary);overflow-wrap:anywhere}
 .sw.role-cargo {background:var(--primitive-color-navy-soft);color:var(--primitive-color-ink)}
 .sw.role-target {background:var(--primitive-color-navy);color:var(--primitive-color-white)}
@@ -232,6 +233,16 @@ button.slot-level[aria-pressed=true] {outline:3px solid var(--primitive-color-or
 .work-attention .work-state {color:var(--primitive-color-danger-ink)}
 .work-item.work-running {background:var(--primitive-color-teal-soft);border-color:var(--primitive-color-teal-dark)}
 .work-item.work-done {background:var(--semantic-surface-canvas)}
+/* Every card has the same head row (step number + tag) so titles line up; the next card is outlined; small arrows show order. */
+.work-item {position:relative;align-content:start}
+.work-item:not(:last-child)::after {content:'›';position:absolute;right:calc(-1 * var(--primitive-space-3));top:50%;width:var(--primitive-space-3);text-align:center;transform:translateY(-50%);color:var(--semantic-text-secondary);font-weight:700;pointer-events:none}
+.work-item-head {display:flex;align-items:center;gap:var(--primitive-space-2);min-height:1.5rem}
+.work-step {display:inline-grid;place-items:center;min-width:1.5rem;height:1.5rem;border-radius:999px;background:var(--semantic-surface-canvas);font-size:var(--primitive-font-caption);font-weight:700;font-variant-numeric:tabular-nums;color:var(--semantic-text-secondary)}
+.work-tag {padding:0 var(--primitive-space-2);border-radius:999px;font-size:var(--primitive-font-caption);font-weight:700;background:var(--primitive-color-teal-soft);color:var(--primitive-color-teal-dark)}
+.work-item-title {font-weight:700;text-decoration:none;color:var(--semantic-text-primary)}
+.work-item-title:hover {text-decoration:underline}
+.work-item.is-next {border:2px solid var(--primitive-color-teal-dark)}
+.work-item.is-next .work-step {background:var(--primitive-color-teal-dark);color:var(--primitive-color-white)}
 .work-flow {display:flex;flex-wrap:wrap;align-items:start;gap:var(--primitive-space-3);list-style:none;margin:0;padding:0;counter-reset:none}
 .work-flow li {display:grid;gap:var(--primitive-space-1);max-width:100%;overflow-wrap:anywhere}
 .work-chip {display:flex;flex-wrap:wrap;align-items:center;gap:var(--primitive-space-2);padding:var(--primitive-space-2) var(--primitive-space-3);border:1px solid var(--semantic-border-divider);border-radius:var(--primitive-radius-control)}

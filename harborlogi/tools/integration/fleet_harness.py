@@ -308,6 +308,27 @@ class RealFleet:
 
         docs, cell_options = {}, {}
         self.producer_tokens = {}
+        self.workcell_token = None
+        if self.transport_only and "control_unit_config" not in self.extra_app and "workcell_observations" not in self.extra_app:
+            from core_common.protocol.arm_incident.workcell_observations import WorkcellObservationManifest
+            from fleet.server.workcell_observations import WorkcellObservations
+            self.workcell_token = f"int-wc-{secrets.token_hex(12)}"
+            cam_token = f"int-cam-{secrets.token_hex(12)}"
+            manifest = WorkcellObservationManifest.model_validate({
+                "schema": "rosy.workcell-observations/1",
+                "workcells": [{
+                    "workcell_id": WORKCELL, "label": "Sim workcell",
+                    "arms": [{"source_id": "sim_arm_a", "arm_id": "arm_a", "label": "Arm A",
+                              "board_id": "sim-board-1", "joint_topic": "/omx_commissioning/arm_a/joint_states",
+                              "joint_names": ["joint1"], "token_env": "HARBOR_INT_ARM_A_TOKEN",
+                              "credential_sha256": hashlib.sha256(self.workcell_token.encode()).hexdigest()}],
+                    "cameras": [{"source_id": "sim_overhead", "label": "Overhead", "role": "overhead",
+                                 "arm_id": None, "image_topic": "/top_camera/image_raw",
+                                 "token_env": "HARBOR_INT_CAM_TOKEN",
+                                 "credential_sha256": hashlib.sha256(cam_token.encode()).hexdigest()}],
+                }],
+            })
+            cell_options["workcell_observations"] = WorkcellObservations(manifest, {"sim_arm_a": self.workcell_token})
         if not self.transport_only:
             from fleet.server.cell_compiler import PalletizingCellJobCompiler
             from fleet.server.cell_goal_evidence_registry import CellGoalProducer, CellGoalRegistry

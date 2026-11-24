@@ -7,6 +7,9 @@ from django.core.exceptions import ValidationError
 
 # Design 28: one ACTIVE command per order; terminal commands remain as history.
 ACTIVE_COMMAND_STATES = ('PREPARED', 'DISPATCHING', 'RECONCILED', 'UNKNOWN', 'CANCEL_PENDING')
+ACTIVE_OUTBOUND_DISPATCH_STATES = (
+    'PICKUP_PLANNED', 'PICKUP_PROPOSED', 'PICKUP_ARRIVED', 'LOADED', 'EXIT_PROPOSED', 'HOLD'
+)
 
 # Named-person evidence sources (ADR 0023): the ledger (commands) and the producer (human_evidence) share these.
 HUMAN_PLACEMENT_SOURCE = 'human-attested-placement'
@@ -113,3 +116,90 @@ class HumanAttestation(Immutable):
     arms = models.JSONField()
     note = models.CharField(max_length=300, blank=True)
     photo_ref = models.CharField(max_length=200, blank=True)
+
+
+class OutboundDispatchQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        if set(kwargs) - {
+            'state', 'reason', 'assigned_vehicle_id', 'pickup_mission_id',
+            'exit_mission_id', 'loaded_at', 'loaded_by', 'loaded_by_id',
+            'loaded_event_id', 'version', 'updated_at',
+        }:
+            raise ValidationError('Outbound dispatch routing identity is immutable.')
+        return super().update(**kwargs)
+
+    def delete(self):
+        raise ValidationError('Outbound dispatch history cannot be deleted.')
+
+
+class OutboundDispatch(models.Model):
+    """Durable 2-leg ROSY Pinky pickup & exit coordinator for a completed OUTBOUND arm command."""
+    objects = OutboundDispatchQuerySet.as_manager()
+    key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    command = models.OneToOneField(Command, on_delete=models.PROTECT, related_name='outbound_dispatch')
+    cargo = models.ForeignKey('Cargo', on_delete=models.PROTECT)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    stand_zone_id = models.CharField(max_length=64)
+    pickup_stop_id = models.CharField(max_length=64)
+    exit_stop_id = models.CharField(max_length=64)
+    site_places_digest = models.CharField(max_length=64)
+    candidate_robot_ids = models.JSONField()
+    state = models.CharField(
+        max_length=20,
+        default='PICKUP_PLANNED',
+        choices=[(s, s) for s in (
+            'PICKUP_PLANNED', 'PICKUP_PROPOSED', 'PICKUP_ARRIVED',
+            'LOADED', 'EXIT_PROPOSED', 'EXITED', 'HOLD',
+        )],
+    )
+    reason = models.CharField(max_length=192, blank=True)
+    assigned_vehicle_id = models.CharField(max_length=64, blank=True)
+    pickup_mission_id = models.CharField(max_length=192, blank=True)
+    exit_mission_id = models.CharField(max_length=192, blank=True)
+    loaded_at = models.DateTimeField(null=True, blank=True)
+    loaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='+'
+    )
+    loaded_event_id = models.CharField(max_length=64, blank=True, default='')
+    version = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        if self._state.adding:
+            kwargs['force_insert'] = True
+        else:
+            old = type(self).objects.get(pk=self.pk)
+            immutable = (
+                'key', 'command_id', 'cargo_id', 'actor_id', 'stand_zone_id',
+                'pickup_stop_id', 'exit_stop_id', 'site_places_digest', 'candidate_robot_ids',
+            )
+            if any(getattr(old, name) != getattr(self, name) for name in immutable):
+                raise ValidationError('Outbound dispatch routing identity is immutable.')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Outbound dispatch history cannot be deleted.')
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=models.Q(version__gt=0), name='outbound_dispatch_positive_version'),
+            models.UniqueConstraint(
+                fields=('stand_zone_id',),
+                condition=models.Q(state__in=ACTIVE_OUTBOUND_DISPATCH_STATES),
+                name='one_active_outbound_dispatch_per_stand',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(state__in=('LOADED', 'EXIT_PROPOSED', 'EXITED'))
+                    | (
+                        ~models.Q(assigned_vehicle_id='')
+                        & (
+                            models.Q(loaded_by__isnull=False, loaded_event_id='')
+                            | (models.Q(loaded_by__isnull=True) & ~models.Q(loaded_event_id=''))
+                        )
+                    )
+                ),
+                name='outbound_dispatch_loaded_requires_vehicle_and_confirmation',
+            ),
+        ]

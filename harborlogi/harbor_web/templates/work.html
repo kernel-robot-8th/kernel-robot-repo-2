@@ -9,9 +9,9 @@
   <div class="panel-h"><h2 id="work-today">오늘 시간표</h2></div>
   <div class="panel-b">
     {% if timeline %}<ol class="work-timeline" aria-label="오늘 작업 순서">
-    {% for row in timeline %}<li class="work-item work-{{ row.tone }}">
-      {% if row.recorded_at %}<time datetime="{{ row.recorded_at|date:'c' }}">{{ row.recorded_at|date:'H:i' }}</time>{% elif row.state == '진행 중' %}<span class="helptext">지금</span>{% elif row.is_next %}<span class="helptext">다음</span>{% endif %}
-      <a href="{{ row.href }}">{% if row.order.cargo_id %}{{ row.order.cargo.code }} {% endif %}{{ row.kind }}</a>
+    {% for row in timeline %}<li class="work-item work-{{ row.tone }}{% if row.is_next %} is-next{% endif %}">
+      <div class="work-item-head"><span class="work-step" aria-hidden="true">{{ forloop.counter }}</span>{% if row.recorded_at %}<time datetime="{{ row.recorded_at|date:'c' }}">{{ row.recorded_at|date:'H:i' }}</time>{% elif row.state == '진행 중' %}<span class="work-tag">지금</span>{% elif row.is_next %}<span class="work-tag">다음</span>{% endif %}</div>
+      <a class="work-item-title" href="{{ row.href }}">{% if row.order.cargo_id %}{{ row.order.cargo.code }} {% endif %}{{ row.kind }}</a>
       <span class="work-state">{{ row.state }}</span>
     </li>{% endfor %}</ol>{% else %}<p>등록된 작업이 없습니다</p>{% endif %}
   </div>
