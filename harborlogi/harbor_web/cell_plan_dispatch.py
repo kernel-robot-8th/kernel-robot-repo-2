@@ -28,6 +28,25 @@ from harbor_web.models import Audit, Observation, Order, Plan
 logger = logging.getLogger(__name__)
 
 ACTIVE_CELL_PLAN_STATES = ACTIVE_CELL_PLAN_DISPATCH_STATES
+CANCELLABLE_CELL_PLAN_STATES = ('PROPOSED', 'PARTIALLY_ADMITTED', 'QUEUED', 'RUNNING', 'PAUSED_HUMAN')
+
+
+def _default_robot_id() -> str:
+    return os.environ.get('HARBOR_CELL_PLAN_ROBOT_ID', '').strip() or 'rosy_01'
+
+
+def _default_outbound_stand() -> str:
+    return os.environ.get('HARBOR_OUTBOUND_STAND', '').strip() or 'stand'
+
+
+def _record_completed_audit(row: CellPlanDispatch, actor=None) -> None:
+    Audit.objects.create(
+        actor=actor or row.created_by,
+        action='cell_plan.completed',
+        object_type='CellPlanDispatch',
+        object_id=str(row.pk),
+        detail={'order_id': row.order_id, 'rosy_plan_id': row.rosy_plan_id},
+    )
 
 _STATE_LABELS = {
     'SUBMITTING': '전송 준비 중',
@@ -241,10 +260,12 @@ def _create_and_submit(
             object_id=str(row.pk),
             detail={'mode': dispatch_mode, 'order_source': row.order_source, 'rosy_plan_id': row.rosy_plan_id, 'steps': len(parsed.tasks)},
         )
+        if row.state == 'COMPLETED':
+            _record_completed_audit(row, actor=actor)
     return row
 
 
-def preview_harbor_plan(actor, *, plan_id: int, robot_id: str = 'rosy_01', client=None) -> CellPlanDryRunResponse:
+def preview_harbor_plan(actor, *, plan_id: int, robot_id: str | None = None, client=None) -> CellPlanDryRunResponse:
     """Read-only simulation preview for Mode 1 Harbor plan without persisting ROSY tasks."""
     services._role(actor, 'operator')
     plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
@@ -252,7 +273,7 @@ def preview_harbor_plan(actor, *, plan_id: int, robot_id: str = 'rosy_01', clien
         payload = build_harbor_plan_request(
             plan.result,
             observation_payload=plan.observation.payload,
-            robot_id=robot_id,
+            robot_id=robot_id or _default_robot_id(),
             cargo_id=plan.order.cargo.code if plan.order.cargo_id else None,
         )
     except ValueError as error:
@@ -274,9 +295,9 @@ def preview_rosy_directive(
     order_id: int,
     observation_id: int,
     directive_mode: str = 'outbound',
-    destination: str = 'stand',
+    destination: str | None = None,
     goal: dict[str, list[str]] | None = None,
-    robot_id: str = 'rosy_01',
+    robot_id: str | None = None,
     client=None,
 ) -> CellPlanDryRunResponse:
     """Read-only simulation preview for Mode 2 autonomous ROSY directive."""
@@ -288,9 +309,9 @@ def preview_rosy_directive(
             mode=directive_mode,
             observation_payload=observation.payload,
             cargo_id=order.cargo.code if order.cargo_id else None,
-            destination=destination,
+            destination=destination or _default_outbound_stand(),
             goal=goal,
-            robot_id=robot_id,
+            robot_id=robot_id or _default_robot_id(),
         )
     except ValueError as error:
         raise ValidationError(str(error)) from error
@@ -305,7 +326,7 @@ def preview_rosy_directive(
         raise ValidationError(str(error) or 'CELL_PLAN_DRY_RUN_FAILED') from error
 
 
-def dispatch_harbor_plan(actor, *, plan_id: int, robot_id: str = 'rosy_01', client=None) -> CellPlanDispatch:
+def dispatch_harbor_plan(actor, *, plan_id: int, robot_id: str | None = None, client=None) -> CellPlanDispatch:
     """Mode 1: send Harbor plan's explicit move sequence and slot coordinates to ROSY (order_source='harbor')."""
     services._role(actor, 'operator')
     plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
@@ -314,7 +335,7 @@ def dispatch_harbor_plan(actor, *, plan_id: int, robot_id: str = 'rosy_01', clie
         payload = build_harbor_plan_request(
             plan.result,
             observation_payload=plan.observation.payload,
-            robot_id=robot_id,
+            robot_id=robot_id or _default_robot_id(),
             cargo_id=plan.order.cargo.code if plan.order.cargo_id else None,
         )
     except ValueError as error:
@@ -343,10 +364,10 @@ def dispatch_rosy_directive(
     order_id: int,
     observation_id: int,
     directive_mode: str = 'outbound',
-    destination: str = 'stand',
+    destination: str | None = None,
     goal: dict[str, list[str]] | None = None,
     plan_id: int | None = None,
-    robot_id: str = 'rosy_01',
+    robot_id: str | None = None,
     client=None,
 ) -> CellPlanDispatch:
     """Mode 2: send a high-level directive and let ROSY compute the move order and coords (order_source='rosy_r')."""
@@ -361,9 +382,9 @@ def dispatch_rosy_directive(
             mode=directive_mode,
             observation_payload=observation.payload,
             cargo_id=cargo_code,
-            destination=destination,
+            destination=destination or _default_outbound_stand(),
             goal=goal,
-            robot_id=robot_id,
+            robot_id=robot_id or _default_robot_id(),
         )
     except ValueError as error:
         raise ValidationError(str(error)) from error
@@ -419,6 +440,7 @@ def reconcile_cell_plan_dispatch(dispatch_id: int, *, client=None) -> CellPlanDi
     )
     rosy_plan = parsed.plan
     with transaction.atomic():
+        prev_state = row.state
         row.rosy_plan_id = rosy_plan.plan_id
         row.state = rosy_plan.status
         if not row.planned_steps:
@@ -433,6 +455,8 @@ def reconcile_cell_plan_dispatch(dispatch_id: int, *, client=None) -> CellPlanDi
             object_id=str(row.pk),
             detail={'request_key': row.request_key, 'rosy_plan_id': row.rosy_plan_id, 'state': row.state},
         )
+        if prev_state != 'COMPLETED' and row.state == 'COMPLETED':
+            _record_completed_audit(row)
     return row
 
 
@@ -451,24 +475,28 @@ def sync_cell_plan_dispatch(dispatch_id: int, *, client=None) -> CellPlanDispatc
         expected_plan_id=row.rosy_plan_id,
     )
     new_state = parsed.plan.status
-    new_reason = _failure_reason(parsed) if new_state in ('PAUSED_HUMAN', 'ABORTED', 'CANCELLED') else _failure_reason(parsed)
+    new_reason = '' if new_state == 'COMPLETED' else _failure_reason(parsed)
     update_fields: list[str] = []
+    prev_state = row.state
     if new_state != row.state:
         row.state = new_state
         update_fields.append('state')
     if new_reason != row.reason and (new_reason or new_state == 'COMPLETED'):
-        row.reason = '' if new_state == 'COMPLETED' else new_reason
+        row.reason = new_reason
         update_fields.append('reason')
     if update_fields:
-        row.save(update_fields=[*update_fields, 'updated_at'])
+        with transaction.atomic():
+            row.save(update_fields=[*update_fields, 'updated_at'])
+            if prev_state != 'COMPLETED' and row.state == 'COMPLETED':
+                _record_completed_audit(row)
     return row
 
 
 def cancel_cell_plan_dispatch(actor, *, dispatch_id: int, reason: str, client=None) -> CellPlanDispatch:
-    """Cancel pending PROPOSED/QUEUED steps for one CellPlanDispatch via POST /cell-plans/{plan_id}/cancel."""
+    """Cancel pending PROPOSED/QUEUED/RUNNING/PAUSED_HUMAN steps via POST /cell-plans/{plan_id}/cancel."""
     services._role(actor, 'operator')
     row = CellPlanDispatch.objects.select_related('order').get(pk=dispatch_id)
-    if not row.rosy_plan_id or row.state not in ('PROPOSED', 'PARTIALLY_ADMITTED', 'QUEUED'):
+    if not row.rosy_plan_id or row.state not in CANCELLABLE_CELL_PLAN_STATES:
         raise services.Conflict('Cell plan dispatch cannot be cancelled in its current state.')
     rosy_client = client if client is not None else _default_client()
     try:
@@ -565,7 +593,7 @@ def dispatch_views_for_order(order: Order) -> list[dict]:
             'planned_steps': row.planned_steps,
             'created_at': row.created_at,
             'can_sync': row.state in ACTIVE_CELL_PLAN_STATES,
-            'can_cancel': row.state in ('PROPOSED', 'PARTIALLY_ADMITTED', 'QUEUED') and bool(row.rosy_plan_id),
+            'can_cancel': row.state in CANCELLABLE_CELL_PLAN_STATES and bool(row.rosy_plan_id),
             'can_start_outbound': row.state == 'COMPLETED' and _targets_stand(row) and od is None,
             'outbound': outbound_view,
         })

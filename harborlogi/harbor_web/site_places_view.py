@@ -2,7 +2,7 @@
 import os
 from urllib.error import HTTPError, URLError
 
-from harbor.cell_site_map import compare_condition_with_rosy
+from harbor.cell_site_map import compare_condition_with_rosy, normalize_cell_site_map
 from harbor.site_places import (
     parse_site_places,
     resolve_intake_destination,
@@ -39,8 +39,9 @@ def site_places_context(*, condition=None):
         return dict(available=False, status='ROSY 연동 전')
     if not config['allowed']:
         return dict(available=False, status='ROSY 허용 주소 아님')
+    client = fleet_connection.fleet_client(config, token, timeout=1, verify_identity=True)
     try:
-        payload = fleet_connection.fleet_client(config, token, timeout=1).site_places()
+        payload = client.site_places()
     except (HTTPError, URLError, TimeoutError, OSError, ValueError):
         return dict(available=False, status='ROSY 위치 계약 확인 불가')
     try:
@@ -48,10 +49,19 @@ def site_places_context(*, condition=None):
     except ValueError:
         return dict(available=False, status='ROSY 위치 계약 검증 실패')
 
+    live_cell_site_map = None
+    try:
+        raw_sites = client.cell_sites()
+        if isinstance(raw_sites, dict) and raw_sites.get('zones'):
+            live_cell_site_map = normalize_cell_site_map(raw_sites)
+    except (HTTPError, URLError, TimeoutError, OSError, ValueError):
+        live_cell_site_map = None
+
     intake_stop, intake_reason = resolve_intake_destination(places)
     outbound_stops, outbound_reason = resolve_outbound_dispatch_stops(places)
     report = compare_condition_with_rosy(
         condition.payload if condition is not None else None,
+        cell_site_map=live_cell_site_map,
         site_places=places,
     )
     alignment = dict(

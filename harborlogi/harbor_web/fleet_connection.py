@@ -4,6 +4,8 @@ import json
 import os
 import socket
 import ssl
+import threading
+import time
 import uuid
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -59,8 +61,12 @@ def fingerprint(config):
                                     sort_keys=True).encode()).hexdigest()
 
 
-def fleet_client(config, token, *, timeout=10):
-    return RosyClient(config['origin'], token, timeout=timeout, ca_file=config.get('ca_file') or None)
+def fleet_client(config, token, *, timeout=10, verify_identity=False):
+    client = RosyClient(config['origin'], token, timeout=timeout, ca_file=config.get('ca_file') or None)
+    if verify_identity and config.get('principal'):
+        client.expected_principal = config['principal']
+        client.expected_role = 'service'
+    return client
 
 
 def _network_reason(error):
@@ -232,6 +238,28 @@ def _workcell_incident_probe(client):
         return 'UNKNOWN', []
 
 
+def _probe_read(read):
+    try:
+        read()
+        return 'MET'
+    except HTTPError as error:
+        status, _ = _error_code(error)
+        return 'UNMET' if status in {404, 503} else 'UNKNOWN'
+    except (URLError, TimeoutError, OSError, ValueError, TypeError, AttributeError):
+        return 'UNKNOWN'
+
+
+def probe_extended_capabilities(client):
+    """Non-gating read-only capability summary for cell-plans, cell-sites, site-points, and state."""
+    key = 'harbor-probe-' + uuid.uuid4().hex
+    return dict(
+        site_places=_probe_read(client.site_places),
+        cell_sites=_probe_read(client.cell_sites),
+        cell_plans=_probe(lambda: client.cell_plan_request(key), 'UNKNOWN_CELL_PLAN'),
+        fleet_state=_probe_read(client.fleet_state),
+    )
+
+
 def probe_conditions(client, result):
     """Per-condition outcome of read-only GETs on keys that do not exist (ADR0022); nothing is created."""
     mission, key = 'harbor-probe-' + uuid.uuid4().hex, 'harbor-probe-' + uuid.uuid4().hex
@@ -301,3 +329,77 @@ def check_connection(actor, *, expected_version):
         Audit.objects.create(actor=actor, action='fleet.check', object_type='FleetConnection', object_id='1',
                              detail=dict(result, fingerprint=original))
     return result
+
+
+_FLEET_CACHE_TTL_S = 5.0
+_fleet_cache_lock = threading.Lock()
+_fleet_cache: dict[tuple[str, str], tuple[float, str, str, str, dict | None]] = {}
+
+
+def clear_strip_fleet_cache():
+    with _fleet_cache_lock:
+        _fleet_cache.clear()
+
+
+def _summarize_fleet_state(payload):
+    robots = payload.get('robots') if isinstance(payload, dict) else None
+    if not isinstance(robots, list):
+        raise ValueError('Invalid fleet state')
+    total = len(robots)
+    online = sum(1 for r in robots if isinstance(r, dict) and r.get('online') is True)
+    estop_active = sum(
+        1 for r in robots
+        if isinstance(r, dict) and isinstance(r.get('state'), dict)
+        and isinstance(r['state'].get('safety'), dict)
+        and r['state']['safety'].get('estop') is True
+    )
+    if estop_active:
+        return (f'비상 정지 활성 ({estop_active}대)', 'attention', 'ROSY Fleet 비상 정지 작동 중')
+    if online:
+        return (f'차량 {online}/{total}대 연결', 'good', 'ROSY Fleet 비상 정지 해제')
+    return ('연결된 차량 없음', 'neutral', 'ROSY Fleet에서 정지 제어')
+
+
+def record_fleet_state(payload):
+    """Store latest Fleet state fetched by executor for read-only web strip and vehicle checks."""
+    config = connection_settings()
+    token = os.environ.get('HARBOR_FLEET_TOKEN', '').strip()
+    if not config['origin'] or not token or not config['allowed']:
+        return None
+    key = (config['origin'], hashlib.sha256(token.encode('utf-8')).hexdigest())
+    try:
+        summary = _summarize_fleet_state(payload)
+    except ValueError:
+        summary = ('장비 상태 확인 불가', 'attention', 'ROSY Fleet 연결 확인 필요')
+    with _fleet_cache_lock:
+        _fleet_cache[key] = (time.monotonic(), *summary, payload if isinstance(payload, dict) else None)
+    return summary
+
+
+def cached_fleet_state():
+    config = connection_settings()
+    token = os.environ.get('HARBOR_FLEET_TOKEN', '').strip()
+    if not config['origin'] or not token or not config['allowed']:
+        return None
+    key = (config['origin'], hashlib.sha256(token.encode('utf-8')).hexdigest())
+    now_mono = time.monotonic()
+    with _fleet_cache_lock:
+        hit = _fleet_cache.get(key)
+        if hit is not None and now_mono - hit[0] < _FLEET_CACHE_TTL_S:
+            return hit[4]
+    return None
+
+
+def _fleet_live_summary():
+    """Return cached (equipment_label, equipment_tone, estop_note) without making network calls on GET."""
+    config = connection_settings()
+    token = os.environ.get('HARBOR_FLEET_TOKEN', '').strip()
+    if not config['origin'] or not token or not config['allowed']:
+        return '장비 상태 연동 전', 'neutral', 'ROSY Fleet에서 정지 · 연동 전'
+    key = (config['origin'], hashlib.sha256(token.encode('utf-8')).hexdigest())
+    now_mono = time.monotonic()
+    with _fleet_cache_lock:
+        hit = _fleet_cache.get(key)
+        if hit is not None and now_mono - hit[0] < _FLEET_CACHE_TTL_S:
+            return hit[1], hit[2], hit[3]
+    return '장비 상태 연동 전', 'neutral', 'ROSY Fleet에서 정지 · 연동 전'

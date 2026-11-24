@@ -11,7 +11,7 @@ from django.views.decorators.http import require_http_methods
 
 from harbor_web import forms, services
 from harbor_web.auth import has_role, require_roles
-from harbor_web.models import DepartureIntent, FieldConfirmation, FieldEpisode, Order
+from harbor_web.models import DepartureIntent, FieldConfirmation, FieldEpisode, Order, OutboundDispatch
 from harbor_web.page_helpers import form_error, form_page, page, paginate
 
 
@@ -60,7 +60,24 @@ def field_list(request):
     state = request.GET.get('state', '')
     if state in {'OPEN', 'CONFIRMED', 'MISMATCH', 'UNABLE', 'REASSIGNED'}:
         items = items.filter(state=state)
-    return page(request, 'field.html', section='field', state=state, **paginate(request, items))
+    pickups = []
+    for od in OutboundDispatch.objects.filter(state='PICKUP_ARRIVED').select_related(
+        'cargo', 'command', 'cell_plan_dispatch'
+    ).order_by('-pk'):
+        href = (
+            f'/work/{od.command_id}/'
+            if od.command_id
+            else (f'/plans/{od.cell_plan_dispatch.plan_id}/' if (od.cell_plan_dispatch and od.cell_plan_dispatch.plan_id)
+                  else f'/requests/{od.cell_plan_dispatch.order_id}/')
+        )
+        pickups.append(dict(
+            id=od.pk,
+            vehicle_id=od.assigned_vehicle_id,
+            cargo_code=od.cargo.code,
+            pickup_stop_id=od.pickup_stop_id,
+            href=href,
+        ))
+    return page(request, 'field.html', section='field', state=state, outbound_pickups=pickups, **paginate(request, items))
 
 
 @require_roles('operator')

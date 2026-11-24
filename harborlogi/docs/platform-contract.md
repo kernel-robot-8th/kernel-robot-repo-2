@@ -23,11 +23,11 @@ A와 C는 주소가 서로 다를 수 있다. Fleet 주소는 `HARBOR_FLEET_ORIG
 전송과 신뢰
 
 1. Harbor가 R과 Account를 부를 때는 https만 쓴다. 평문 http는 같은 PC 안의 시험(loopback)에서만 허용한다. redirect는 따라가지 않는다.
-2. 인증서와 호스트 이름 검증을 끄지 않는다. 주소는 인증서에 적힌 이름으로 설정하고 IP 주소로 적지 않는다. 사설 CA는 `SSL_CERT_FILE`로만 더한다.
+2. 인증서와 호스트 이름 검증을 끄지 않는다. 주소는 인증서에 적힌 이름으로 설정하고 IP 주소로 적지 않는다. 사설 CA는 `SSL_CERT_FILE` 또는 `HARBOR_FLEET_CA_FILE`로 더한다.
 
 기계 신원(경로 A)
 
-3. Harbor 서버는 R이 발급한 service principal 하나(96자 이하)의 Bearer 토큰만 쓴다. 토큰은 서버 환경 변수에만 두고 DB·화면·기록에 남기지 않는다. 사람의 로그인 토큰으로 R을 부르지 않는다.
+3. Harbor 서버는 R이 발급한 service principal 하나(96자 이하)의 Bearer 토큰만 쓴다. 토큰은 서버 환경 변수에만 두고 DB·화면·기록에 남기지 않는다. 실행·제안 경로는 사람의 로그인 토큰으로 R을 부르지 않는다(단, 읽기 전용 탑뷰 프록시는 ADR 0037에 따라 로그인한 사용자의 Rosy 계정 토큰을 서버에서 전달하며 브라우저에 노출하지 않는다).
 4. 실행 경로는 R을 부를 때마다 먼저 `GET /api/fleet/session`으로 `principal_id`가 설정값과 같고 `role`이 `service`인지 확인한다. 다르면 요청을 보내지 않는다.
 5. Harbor는 작업을 제안하고 결과를 읽기만 한다. 승인(admission)은 ROSY가 하고, 셀 API는 직접 부르지 않는다.
 

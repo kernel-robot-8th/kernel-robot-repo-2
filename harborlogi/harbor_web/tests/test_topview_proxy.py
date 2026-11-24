@@ -7,10 +7,13 @@ from django.test import TestCase
 from django.urls import reverse
 
 from harbor.rosy_vision import MAP_RECTIFICATION, PlaneUnavailableError, StaleFrameError
+from harbor_web.topview_proxy import clear_topview_cache
 
 
 class TopviewProxyTests(TestCase):
     def setUp(self):
+        clear_topview_cache()
+        self.addCleanup(clear_topview_cache)
         self.user = User.objects.create_user('topview-reader')
         self.user.groups.add(Group.objects.get_or_create(name='viewer')[0])
         self.client.force_login(self.user)
@@ -148,6 +151,8 @@ class TopviewUserTokenTests(TestCase):
 
     def setUp(self):
         import time
+        clear_topview_cache()
+        self.addCleanup(clear_topview_cache)
         self.user = User.objects.create_user('rosy-acc-1')
         self.user.groups.add(Group.objects.get_or_create(name='viewer')[0])
         self.client.force_login(self.user)
@@ -200,3 +205,20 @@ class TopviewUserTokenTests(TestCase):
         with patch.dict(os.environ, {'HARBOR_FLEET_TOKEN': 'service-token'}):
             self.assertEqual(self.client.get(self.url).status_code, 200)
         self.assertEqual(self.vision_class.call_args.args[1], 'service-token')
+
+    def test_topview_caches_sources_and_lease_and_retries_expired_401(self):
+        from urllib.error import HTTPError
+        with patch.dict(os.environ, {'HARBOR_FLEET_TOKEN': 'service-token'}):
+            self.assertEqual(self.client.get(self.url).status_code, 200)
+            self.assertEqual(self.client.get(self.url).status_code, 200)
+            camera = self.vision_class.return_value
+            self.assertEqual(camera.sources.call_count, 1)
+            self.assertEqual(camera.lease.call_count, 1)
+
+            camera.fetch_frame.side_effect = [
+                HTTPError('https://fleet.example/frame', 401, 'expired', {}, None),
+                (b'jpeg-refreshed', {}),
+            ]
+            refreshed = self.client.get(self.url)
+        self.assertEqual((refreshed.status_code, refreshed.content), (200, b'jpeg-refreshed'))
+        self.assertEqual(camera.lease.call_count, 2)

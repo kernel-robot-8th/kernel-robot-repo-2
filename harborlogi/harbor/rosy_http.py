@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import uuid
 from urllib.error import HTTPError
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPSHandler, Request, build_opener
@@ -12,7 +13,7 @@ from harbor.cell_site_map import decode_cell_site_json
 from harbor.fleet_discovery import _NoRedirect
 from harbor.site_recognition import parse_site_recognition
 
-# D-1075 확정 전 제안 경로. ROSY가 경로를 정하면 이 값만 바꾼다.
+# ADR 0032 미확정 제안 경로(ROSY origin/main 미구현; ROSY D-1075와 별개). ROSY가 경로를 정하면 이 값만 바꾼다.
 SITE_RECOGNITION_PATH_PROPOSED = '/api/fleet/cell-site-recognition'
 
 
@@ -55,8 +56,12 @@ class RosyClient:
 
     def _http(self, method, path, body):
         data = json.dumps(body, allow_nan=False).encode() if body is not None else None
-        request = Request(self._origin + path, data=data, method=method,
-                          headers={"Authorization": "Bearer " + self._token, "Content-Type": "application/json"})
+        headers = {
+            "Authorization": "Bearer " + self._token,
+            "Content-Type": "application/json",
+            "X-Request-Id": uuid.uuid4().hex,
+        }
+        request = Request(self._origin + path, data=data, method=method, headers=headers)
         opener = self._opener
         if self._discover:
             from harbor.fleet_discovery import discovery_opener
@@ -177,7 +182,7 @@ class RosyClient:
         return self._call("GET", "/api/fleet/pipeline/cell-sites", None)
 
     def site_recognition(self, *, known_site_refs=None):
-        """Read and validate a proposed D-1075 snapshot; never updates the ledger."""
+        """Read and validate a proposed ADR 0032 cell-site recognition snapshot; never updates the ledger."""
         path = self._site_recognition_path
         if (not isinstance(path, str) or not path.startswith('/') or path.startswith('//')
                 or any(c.isspace() or ord(c) < 32 or c in '\\?#' for c in path)):
@@ -187,6 +192,15 @@ class RosyClient:
     def site_places(self):
         """Read-only geometry-free port site places (rosy.port-site-places.v1)."""
         return self._call("GET", "/api/fleet/site-points?view=port", None)
+
+    def fleet_state(self):
+        """Read-only Fleet robot states, battery/power health, and per-robot E-STOP status."""
+        return self._call("GET", "/api/fleet/state", None)
+
+    def cell_tasks(self, *, cell_id=None):
+        """Read-only OMX cell task statuses and human_safety indicators."""
+        suffix = ("?cell_id=" + quote(str(cell_id), safe="")) if cell_id else ""
+        return self._call("GET", "/api/fleet/pipeline/cell-tasks" + suffix, None)
 
     def _checked_key(self, value, label):
         if (not isinstance(value, str) or not value.strip() or len(value) > 128

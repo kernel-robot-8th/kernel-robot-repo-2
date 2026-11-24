@@ -1,4 +1,4 @@
-"""Read-only validation and ledger comparison for proposed ROSY D-1075 snapshots."""
+"""Read-only validation and ledger comparison for proposed ADR 0032 cell-site recognition snapshots."""
 from datetime import datetime
 import math
 import re

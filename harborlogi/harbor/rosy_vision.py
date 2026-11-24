@@ -12,6 +12,7 @@ RosyClient._http는 JSON 전용이므로 바꾸지 않는다. 여기서는 같�
 """
 import http.client
 import json
+import uuid
 from urllib.error import HTTPError
 from urllib.parse import quote, urljoin, urlsplit
 from urllib.request import Request
@@ -50,7 +51,9 @@ class VisionClient(RosyClient):
     def _open(self, method, url, headers, *, max_bytes, data=None):
         if self._transport is not None:
             return self._transport(method, url, headers, data)
-        request = Request(url, data=data, method=method, headers=headers)
+        req_headers = dict(headers)
+        req_headers.setdefault('X-Request-Id', uuid.uuid4().hex)
+        request = Request(url, data=data, method=method, headers=req_headers)
         opener = self._opener
         if self._discover:
             from harbor.fleet_discovery import discovery_opener

@@ -4,11 +4,11 @@ import json
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Exists, Max, OuterRef
 from django.utils import timezone
 
 from harbor_web.coordination import serialized
-from harbor_web.models import Audit, Command, Order
+from harbor_web.models import Audit, CellPlanDispatch, Command, Order
 from harbor_web.service_common import Conflict, _role
 
 
@@ -194,8 +194,11 @@ def apply_tier_order(actor, *, group, orders):
 
 
 def completed_order_ids():
-    """Orders have no close state: a ledger-completed Command is what closes one."""
-    return Command.objects.filter(state='COMPLETED').values('order_id')
+    """Orders have no close state: a ledger-completed Command or CellPlanDispatch closes one."""
+    return Order.objects.filter(
+        Exists(Command.objects.filter(order_id=OuterRef('pk'), state='COMPLETED'))
+        | Exists(CellPlanDispatch.objects.filter(order_id=OuterRef('pk'), state='COMPLETED'))
+    ).values('pk')
 
 
 def open_outbound_orders():
@@ -205,8 +208,11 @@ def open_outbound_orders():
 def queue_digest():
     # REARRANGE orders are not queue entries: they must not invalidate other plans.
     rows = list(Order.objects.exclude(kind='REARRANGE').order_by('pk').values('id', 'cargo_id', 'kind', 'priority_group', 'sequence', 'tie_policy', 'note', 'version'))
-    closed = sorted(set(Command.objects.filter(state='COMPLETED').exclude(order__kind='REARRANGE')
-                        .values_list('order_id', flat=True)))
+    closed = sorted(
+        Order.objects.exclude(kind='REARRANGE')
+        .filter(pk__in=completed_order_ids())
+        .values_list('pk', flat=True)
+    )
     # A completion leaves the queue, so plans made before it must be reviewed; the digest is unchanged until one exists.
     payload = dict(rows=rows, closed=closed) if closed else rows
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()

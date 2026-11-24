@@ -12,6 +12,7 @@ stay there. Intake or immutable physical step evidence is explicit opt-in. Start
 HARBOR_EXECUTOR_ENABLED=1 in the serving process. When dev autoreload spawns a second
 loop, the SQLite writer lease leaves the loser idling harmlessly.
 """
+import logging
 import math
 import os
 import threading
@@ -20,6 +21,8 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from harbor_web import commands
+
+logger = logging.getLogger(__name__)
 
 # DISPATCHING survives only a crash between the state save and the first proposal;
 # RECONCILED is the steady progression state; UNKNOWN is reconciled by the original key.
@@ -99,22 +102,44 @@ def tick(*, evidence=None, now=None, registry=None):
             _record(command.pk, True, interval)
     if not active:
         _rearrange_when_idle(now)
-    try:
-        from harbor_web import intake_loop
-        intake_loop.tick(registry, now=now)
-    except Exception:
-        pass  # R not reachable or not yet serving port events; the next tick retries.
-    try:
-        from harbor_web import cell_plan_dispatch
-        cell_plan_dispatch.tick(registry, now=now)
-    except Exception:
-        pass
-    try:
-        from harbor_web import outbound_loop
-        outbound_loop.tick(registry, now=now)
-    except Exception:
-        pass
+    for loop_name, fn in _SUB_LOOPS:
+        key = ('sub_loop', loop_name)
+        if not _eligible(key, now):
+            continue
+        try:
+            outcome = fn(registry, now)
+            has_err = isinstance(outcome, dict) and any(
+                isinstance(v, str) and v.startswith('ERROR:') for v in outcome.values()
+            )
+            _record(key, has_err, interval)
+            if has_err:
+                logger.warning('Executor sub-loop %s reported item error; backing off', loop_name)
+        except Exception as error:
+            logger.warning('Executor sub-loop %s failed (%s); backing off', loop_name, type(error).__name__)
+            _record(key, True, interval)
     return dict(ran=True, reason='', results=results)
+
+
+def _run_intake_tick(registry, now):
+    from harbor_web import intake_loop
+    return intake_loop.tick(registry, now=now)
+
+
+def _run_cell_plan_tick(registry, now):
+    from harbor_web import cell_plan_dispatch
+    return cell_plan_dispatch.tick(registry, now=now)
+
+
+def _run_outbound_tick(registry, now):
+    from harbor_web import outbound_loop
+    return outbound_loop.tick(registry, now=now)
+
+
+_SUB_LOOPS = (
+    ('intake', _run_intake_tick),
+    ('cell_plan', _run_cell_plan_tick),
+    ('outbound', _run_outbound_tick),
+)
 
 
 def _loop_evidence():
