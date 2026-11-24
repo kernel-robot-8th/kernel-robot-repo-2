@@ -340,3 +340,66 @@ class CellPlanDispatchTests(TestCase):
                 self.assertEqual(r2.status_code, 302)
         rows = list(CellPlanDispatch.objects.filter(order=self.order).order_by('pk'))
         self.assertEqual([r.order_source for r in rows], ['harbor', 'rosy_r'])
+
+    def test_plan_detail_manual_sync_and_outbound_pinky_actions(self):
+        import tempfile
+        client = _FakeCellPlanClient()
+        self.client.force_login(self.operator)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ledger_path = Path(tmpdir) / 'manual-outbound.sqlite3'
+            transport = _FakeOutboundTransport(ledger_path)
+
+            class _Reg:
+                def __init__(self):
+                    self.client = client
+                    self.transport = transport
+                    self.config = {'path': str(ledger_path)}
+
+            with self.settings(ROOT_URLCONF='harbor_web.urls'), patch.dict(
+                os.environ, {'HARBOR_OUTBOUND_VEHICLES': 'pinky-01,pinky-02'}, clear=False
+            ), patch.object(cell_plan_dispatch, '_default_client', return_value=client), patch(
+                'harbor_web.commands.acquire_registry', return_value=_Reg()
+            ):
+                client.post_error = URLError('lost response')
+                r1 = self.client.post(f'/plans/{self.plan.pk}/', {'action': 'cell_plan_harbor'})
+                self.assertEqual(r1.status_code, 302)
+                row = CellPlanDispatch.objects.get(order=self.order)
+                self.assertEqual(row.state, 'UNCERTAIN')
+
+                page1 = self.client.get(f'/plans/{self.plan.pk}/')
+                self.assertEqual(page1.status_code, 200)
+                html1 = page1.content.decode('utf-8')
+                self.assertIn('응답 확인 중', html1)
+                self.assertIn('진행 상태 확인', html1)
+                self.assertNotIn('()', html1)
+
+                client.post_error = None
+                client.status = 'COMPLETED'
+                r2 = self.client.post(f'/plans/{self.plan.pk}/', {'action': 'cell_plan_sync', 'dispatch_id': row.pk})
+                self.assertEqual(r2.status_code, 302)
+                row.refresh_from_db()
+                self.assertEqual(row.state, 'COMPLETED')
+
+                html2 = self.client.get(f'/plans/{self.plan.pk}/').content.decode('utf-8')
+                self.assertIn('반출대 차량 호출', html2)
+
+                r3 = self.client.post(f'/plans/{self.plan.pk}/', {'action': 'cell_plan_outbound_dispatch', 'dispatch_id': row.pk})
+                self.assertEqual(r3.status_code, 302)
+                od = OutboundDispatch.objects.get(cell_plan_dispatch=row)
+                self.assertEqual(od.state, 'PICKUP_PLANNED')
+
+                od.state = 'PICKUP_ARRIVED'
+                od.assigned_vehicle_id = 'pinky-01'
+                od.save(update_fields=['state', 'assigned_vehicle_id'])
+
+                html3 = self.client.get(f'/plans/{self.plan.pk}/').content.decode('utf-8')
+                self.assertIn('차량 적재 확인', html3)
+
+                r4 = self.client.post(f'/plans/{self.plan.pk}/', {
+                    'action': 'cell_plan_outbound_loaded',
+                    'outbound_dispatch_id': od.pk,
+                    'expected_version': od.version,
+                })
+                self.assertEqual(r4.status_code, 302)
+                od.refresh_from_db()
+                self.assertEqual(od.state, 'LOADED')

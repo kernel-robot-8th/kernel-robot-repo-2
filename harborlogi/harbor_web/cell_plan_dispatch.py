@@ -7,7 +7,7 @@ import os
 import uuid
 from urllib.error import HTTPError, URLError
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction
 
 from harbor.cell_plan import (
@@ -392,9 +392,33 @@ def tick(registry, *, now=None) -> dict[int, str]:
 
 
 def dispatch_views_for_order(order: Order) -> list[dict]:
-    rows = CellPlanDispatch.objects.filter(order=order).order_by('-created_at', '-pk')[:10]
-    return [
-        {
+    from harbor_web import outbound_loop
+
+    rows = (
+        CellPlanDispatch.objects.select_related('order', 'outbound_dispatch')
+        .filter(order=order)
+        .order_by('-created_at', '-pk')[:10]
+    )
+    views = []
+    for row in rows:
+        try:
+            od = row.outbound_dispatch
+        except ObjectDoesNotExist:
+            od = None
+        outbound_view = None
+        if od is not None:
+            outbound_view = {
+                'id': od.pk,
+                'version': od.version,
+                'state': od.state,
+                'status_label': outbound_loop._STATE_LABELS.get(od.state, od.state),
+                'pickup_stop_id': od.pickup_stop_id,
+                'exit_stop_id': od.exit_stop_id,
+                'vehicle_label': od.assigned_vehicle_id or '미배정',
+                'reason': od.reason,
+                'can_confirm_load': od.state == 'PICKUP_ARRIVED',
+            }
+        views.append({
             'id': row.pk,
             'dispatch_mode': row.dispatch_mode,
             'directive_mode': row.directive_mode,
@@ -402,10 +426,13 @@ def dispatch_views_for_order(order: Order) -> list[dict]:
             'source_label': _SOURCE_LABELS.get(row.order_source, row.order_source),
             'state': row.state,
             'state_label': _STATE_LABELS.get(row.state, row.state),
+            'reason': row.reason,
             'step_count': len(row.rosy_task_ids),
             'rosy_plan_id': row.rosy_plan_id,
             'planned_steps': row.planned_steps,
             'created_at': row.created_at,
-        }
-        for row in rows
-    ]
+            'can_sync': row.state in ACTIVE_CELL_PLAN_STATES,
+            'can_start_outbound': row.state == 'COMPLETED' and _targets_stand(row) and od is None,
+            'outbound': outbound_view,
+        })
+    return views
