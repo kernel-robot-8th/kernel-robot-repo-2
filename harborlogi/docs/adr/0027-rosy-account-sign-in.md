@@ -3,6 +3,7 @@
 날짜: 2026-11-07
 
 상태: 수락(2026-11-07, 사용자 결정 "모든 어플리케이션 rosy는 core 인 account 나 기타를 해서 서로 연동이 되어야해", Harbor 진행 방식 권고 승인). 구현과 단독 시험 완료. 운영 client 등록·설치·실사용 수용은 미완료다.
+- 결정 6에 읽기 전용 ROSY 화면(탑뷰) 예외를 [ADR 0037](0037-read-only-rosy-views-with-signed-in-account.md)이 둔다.
 - 번호: ADR 0024~0026은 열린 PR이 쓴다. 병합 시점 `main`의 번호를 다시 확인한다.
 - 고치는 결정: [ADR 0015](0015-service-identity-and-independent-integration.md) 결정 1(사람 인증). 결정 2~8(서버 간 service 신원, 매 호출 결속 등)은 그대로다.
 - 플랫폼 쪽 근거: rosy-platform D-955 결정 7과 `docs/reference/rosy-account-protocol.md`의 「바깥 앱 수신 계약」.

@@ -111,6 +111,12 @@ def _claims(token):
     return claims
 
 
+def access_token(request):
+    """The signed-in person's Rosy access token while unexpired, for read-only ROSY views (ADR 0037); else None."""
+    tokens = request.session.get(_SESSION) if settings.ROSY_ACCOUNT else None
+    return tokens['access'] if tokens and tokens['exp'] > time.time() else None
+
+
 def granted_roles(claims):
     capabilities = {c for g in claims['grants'] if isinstance(g, dict) and g.get('resource') == claims['aud']
                     for c in g.get('capabilities', ()) if isinstance(c, str)}

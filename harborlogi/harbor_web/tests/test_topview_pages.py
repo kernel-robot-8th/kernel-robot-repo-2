@@ -39,10 +39,10 @@ class TopviewPagesTests(TestCase):
             yield response
 
     def test_missing_settings_are_visible_even_without_yard_observation(self):
-        for key in ('HARBOR_FLEET_ORIGIN', 'HARBOR_FLEET_TOKEN'):
+        for key, status in (('HARBOR_FLEET_ORIGIN', 'ROSY 연동 전'), ('HARBOR_FLEET_TOKEN', 'ROSY 로그인 필요')):
             with self.subTest(key=key), patch.dict(os.environ, {key: ''}):
                 for response in self.pages():
-                    self.assertContains(response, 'ROSY 연동 전')
+                    self.assertContains(response, status)
                     self.assertNotContains(response, 'data-topview-source')
         self.reader.workcell_observations.assert_not_called()
 

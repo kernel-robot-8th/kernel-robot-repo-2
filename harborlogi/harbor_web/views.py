@@ -101,7 +101,7 @@ def overview(request):
     request._open_field_episodes = open_episodes
     board = board_context(request, observation=observation, operations=operations)
     return page(request, 'overview.html', section='overview', rows=rows, operations=operations, board=board,
-                observations=observations, topview=topview_context(),
+                observations=observations, topview=topview_context(request),
                 observation=observation, condition=observation.condition if observation else None,
                 field_pending=open_field)
 
@@ -396,7 +396,7 @@ def inventory(request):
                       for item in (selected.payload.get('placements', []) if selected else [])]
     from harbor_web.site_places_view import site_places_context
     from harbor_web.yard_pages import yard_page_context
-    return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices, topview=topview_context(),
+    return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices, topview=topview_context(request),
                 site_places=site_places_context(),
                 condition=condition, condition_filter='condition' in request.GET,
                 conditions=Condition.objects.order_by('-pk'), definition_rows=definition_rows,
