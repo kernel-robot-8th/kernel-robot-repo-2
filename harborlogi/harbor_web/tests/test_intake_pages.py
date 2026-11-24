@@ -116,3 +116,24 @@ class IntakePagesTests(TestCase):
                          ('RECEIVED_AT_INTAKE', 'attested', self.operator.username, None))
         self.assertTrue(Audit.objects.filter(action='intake.attested_received', object_id='C-UNREAD').exists())
         self.assertEqual(self.client.get('/alerts/').context['alert_total'], 2)
+
+    def test_unnamed_unknown_events_surface_on_alerts(self):
+        ledger = self._ledger()
+        now = timezone.now()
+        from harbor.port_events import parse_event
+        ledger.consume([
+            parse_event(self._event('container.handling_failed', object_ref=None, reason='UNREADABLE', suffix='x')),
+            parse_event(self._event('container.handling_failed', object_ref=None, reason='MISMATCH', suffix='y')),
+        ], now=now)
+        self.assertEqual(len(ledger.unknown_events()), 2)
+        self.assertEqual(ledger.holds(), [])  # no cargo row exists to hold; the events must not disappear
+
+        self.client.force_login(self.operator)
+        alerts = self.client.get('/alerts/')
+        self.assertEqual(alerts.status_code, 200)
+        items = [item for item in alerts.context['alerts'] if item['kind'] == '반입 확인']
+        self.assertEqual(len(items), 2)
+        for item in items:
+            self.assertIsNone(item['href'])
+        self.assertContains(alerts, '등록되지 않은 반입 · 반입 번호 못 읽음')
+        self.assertContains(alerts, '등록되지 않은 반입 · ROSY 인식이 다름')

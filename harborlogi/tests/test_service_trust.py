@@ -59,6 +59,31 @@ class ServiceTrustTests(unittest.TestCase):
             with self.assertRaises(ValueError): read()
             self.assertEqual(self.calls,[('GET','/api/fleet/session')])
 
+    def test_role_only_expectation_still_probes_the_session_before_every_call(self):
+        """Rule 4: expected_role alone (unknown principal) must not skip the identity preflight."""
+        calls = []
+        def transport(method, path, body):
+            calls.append((method, path))
+            if path == '/api/fleet/session':
+                return self.identity
+            return {'job': {'proposal_principal_id': 'whoever'}}
+        client = RosyClient(transport=transport)
+        client.expected_role = 'service'
+        self.identity = {'principal_id': 'whoever', 'role': 'service'}
+        client.arm_request('key')
+        self.assertEqual(calls, [('GET', '/api/fleet/session'), ('GET', '/api/fleet/arm-transfers/jobs?request_key=key')])
+
+        calls.clear()
+        self.identity = {'principal_id': 'whoever', 'role': 'operator'}
+        with self.assertRaises(ValueError):
+            client.arm_request('key')
+        self.assertEqual(calls, [('GET', '/api/fleet/session')])
+
+        calls.clear()
+        client.expected_role = None
+        client.arm_request('key')
+        self.assertEqual(calls, [('GET', '/api/fleet/arm-transfers/jobs?request_key=key')])
+
     def test_real_http_rechecks_current_identity_before_a_write(self):
         from test_http_execution import server
         calls = []

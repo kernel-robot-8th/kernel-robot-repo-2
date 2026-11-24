@@ -15,6 +15,19 @@ def _json(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
 
 
+def _proposal_unavailable(error):
+    """True when a 503 body carries detail.code TRIP_PROPOSAL_UNAVAILABLE: a refusal that stored nothing."""
+    try:
+        body = json.loads(error.read().decode("utf-8"))
+        detail = body.get("detail") if isinstance(body, dict) else None
+        return isinstance(detail, dict) and detail.get("code") == "TRIP_PROPOSAL_UNAVAILABLE"
+    except (AttributeError, OSError, UnicodeDecodeError, ValueError):
+        return False
+    finally:
+        if getattr(error, "fp", None) is not None:
+            error.close()
+
+
 @dataclass(frozen=True)
 class TripIntent:
     request_key: str
@@ -124,6 +137,11 @@ class TransportLedger:
         """D-908: ask Fleet for approval once. Nothing moves until a different named operator admits."""
         return self._submit(key, client, submit_trip_proposal_execution)
 
+    def _fallback(self, key, version, state):
+        with closing(self._connect()) as connection, connection:
+            connection.execute("UPDATE transport_intents SET state=?,version=version+1 "
+                               "WHERE request_key=? AND version=? AND state='SUBMITTING'", (state, key, version))
+
     def _submit(self, key, client, send):
         row = self.read(key)
         if row["state"] != "PLANNED":
@@ -138,10 +156,10 @@ class TransportLedger:
         try:
             job = send(client, intent)
             return self._adopt(row, job)
-        except BaseException:
-            with closing(self._connect()) as connection, connection:
-                connection.execute("UPDATE transport_intents SET state='UNCERTAIN',version=version+1 "
-                                   "WHERE request_key=? AND version=? AND state='SUBMITTING'", (key, row["version"]))
+        except BaseException as error:
+            # A coded 503 refusal means ROSY stored nothing, so the intent may safely go back to PLANNED.
+            unavailable = (isinstance(error, HTTPError) and error.code == 503 and _proposal_unavailable(error))
+            self._fallback(key, row["version"], "PLANNED" if unavailable else "UNCERTAIN")
             raise
 
     def reconcile(self, key, client):
@@ -153,7 +171,7 @@ class TransportLedger:
         except HTTPError as error:
             row = self.read(key)
             body = None
-            if error.code == 404 and row["state"] == "UNCERTAIN" and row["mission_id"] is None:
+            if error.code == 404 and row["state"] in ("PLANNED", "UNCERTAIN") and row["mission_id"] is None:
                 try:
                     body = json.loads(error.read().decode("utf-8"))
                 except (AttributeError, OSError, UnicodeDecodeError, ValueError):
@@ -163,12 +181,13 @@ class TransportLedger:
             if (isinstance(body, dict) and isinstance(body.get("detail"), dict)
                     and body["detail"].get("code") == "TRIP_PROPOSAL_NOT_FOUND"):
                 # D-908: a proposal creates no job until a human admits it, so a coded 404 means nothing was saved.
-                with closing(self._connect()) as connection, connection:
-                    connection.execute(
-                        "UPDATE transport_intents SET state='PLANNED',version=version+1 "
-                        "WHERE request_key=? AND version=? AND state='UNCERTAIN' AND mission_id IS NULL",
-                        (row["request_key"], row["version"]),
-                    )
+                if row["state"] == "UNCERTAIN":
+                    with closing(self._connect()) as connection, connection:
+                        connection.execute(
+                            "UPDATE transport_intents SET state='PLANNED',version=version+1 "
+                            "WHERE request_key=? AND version=? AND state='UNCERTAIN' AND mission_id IS NULL",
+                            (row["request_key"], row["version"]),
+                        )
                 return None
             raise
 

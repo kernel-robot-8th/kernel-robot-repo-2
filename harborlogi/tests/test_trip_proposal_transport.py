@@ -26,7 +26,8 @@ class ProposalFleet:
             return {"principal_id": PRINCIPAL, "role": "service"}
         self.calls.append((method, path))
         if self.unavailable:
-            raise HTTPError(path, 503, "TRIP_PROPOSAL_UNAVAILABLE", {}, None)
+            raise HTTPError(path, 503, "Service Unavailable", {}, io.BytesIO(
+                json.dumps({"detail": {"code": "TRIP_PROPOSAL_UNAVAILABLE"}}).encode()))
         if (method, path) == ("POST", "/api/fleet/trip-proposals"):
             key = body["request_key"]
             if key not in self.proposals:
@@ -121,16 +122,17 @@ class TripProposalTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.ledger.reconcile_proposal(self.key, self.client)
 
-    def test_not_installed_is_503_and_leaves_uncertain(self):
+    def test_coded_unavailable_503_rolls_back_to_planned_and_retries_cleanly(self):
+        """P0-5: the coded refusal proves nothing was stored, so the intent is reusable at once."""
         self.fleet.unavailable = True
         with self.assertRaises(HTTPError) as caught:
             self.ledger.propose(self.key, self.client)
         self.assertEqual(caught.exception.code, 503)
-        self.assertEqual(self.ledger.read(self.key)["state"], "UNCERTAIN")
+        self.assertEqual(self.ledger.read(self.key)["state"], "PLANNED")
         with self.assertRaises(HTTPError) as still_down:
             self.ledger.reconcile_proposal(self.key, self.client)
         self.assertEqual(still_down.exception.code, 503)
-        self.assertEqual(self.ledger.read(self.key)["state"], "UNCERTAIN")
+        self.assertEqual(self.ledger.read(self.key)["state"], "PLANNED")
         self.fleet.unavailable = False
         self.assertIsNone(self.ledger.reconcile_proposal(self.key, self.client))
         self.assertEqual(self.ledger.read(self.key)["state"], "PLANNED")

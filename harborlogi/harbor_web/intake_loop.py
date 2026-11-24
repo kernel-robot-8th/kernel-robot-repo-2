@@ -38,29 +38,28 @@ def prepare_trip(departure, *, now):
 
 def tick(registry, *, now):
     """Propose planned trips, mark arrivals, then read one page of port events. Returns the poll result."""
-    if not _destination():
-        return None
     from harbor_web.models import DepartureIntent
     path, client = registry.config['path'], registry.client
     transport, intake = TransportLedger(path), IntakeLedger(path)
-    # shortcut: scans every departure each tick and skips arrived ones; add an index when departures grow large.
-    for departure in DepartureIntent.objects.select_related('cargo').order_by('pk'):
-        key, cargo = trip_key(departure), departure.cargo.code
-        try:
-            # 멱등 준비로 intent만 남거나 manifest 저장이 실패한 회차도 복구한다.
-            prepare_trip(departure, now=now)
-            row = transport.read(key)
-            if RANK.get(intake.read(cargo)['state'], len(RANK)) >= RANK['TRIP_ARRIVED']:
-                continue  # arrived, further along, or HOLD
-            if row['state'] == 'PLANNED':
-                transport.propose(key, client)
-            elif row['state'] != 'SUBMITTING':
-                job = transport.reconcile_proposal(key, client)
-                if job is not None and job.get('status') == 'GOAL_CONFIRMED':
-                    intake.arrive(cargo, now=now)
-        except Exception:
-            logger.exception('출발 준비 %s의 이송 처리 실패; 다음 틱에 재시도', departure.pk)
-            continue
+    if _destination():
+        # shortcut: scans every departure each tick and skips arrived ones; add an index when departures grow large.
+        for departure in DepartureIntent.objects.select_related('cargo').order_by('pk'):
+            key, cargo = trip_key(departure), departure.cargo.code
+            try:
+                # 멱등 준비로 intent만 남거나 manifest 저장이 실패한 회차도 복구한다.
+                prepare_trip(departure, now=now)
+                row = transport.read(key)
+                if RANK.get(intake.read(cargo)['state'], len(RANK)) >= RANK['TRIP_ARRIVED']:
+                    continue  # arrived, further along, or HOLD
+                if row['state'] == 'PLANNED':
+                    transport.propose(key, client)
+                elif row['state'] != 'SUBMITTING':
+                    job = transport.reconcile_proposal(key, client)
+                    if job is not None and job.get('status') == 'GOAL_CONFIRMED':
+                        intake.arrive(cargo, now=now)
+            except Exception:
+                logger.exception('출발 준비 %s의 이송 처리 실패; 다음 틱에 재시도', departure.pk)
+                continue
     intake.expire(now=now, connection=registry.config['origin'])  # An R that answered before, then went silent.
     result = intake.poll(client, connection=registry.config['origin'], now=now)
     try:

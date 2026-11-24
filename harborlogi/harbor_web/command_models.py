@@ -10,6 +10,10 @@ ACTIVE_COMMAND_STATES = ('PREPARED', 'DISPATCHING', 'RECONCILED', 'UNKNOWN', 'CA
 ACTIVE_OUTBOUND_DISPATCH_STATES = (
     'PICKUP_PLANNED', 'PICKUP_PROPOSED', 'PICKUP_ARRIVED', 'LOADED', 'EXIT_PROPOSED', 'HOLD'
 )
+# A completed, cancelled, aborted, rejected or not-found cell plan dispatch is history.
+ACTIVE_CELL_PLAN_DISPATCH_STATES = (
+    'SUBMITTING', 'UNCERTAIN', 'PROPOSED', 'PARTIALLY_ADMITTED', 'QUEUED', 'RUNNING', 'PAUSED_HUMAN'
+)
 
 # Named-person evidence sources (ADR 0023): the ledger (commands) and the producer (human_evidence) share these.
 HUMAN_PLACEMENT_SOURCE = 'human-attested-placement'
@@ -155,6 +159,12 @@ class CellPlanDispatch(models.Model):
     def delete(self, *args, **kwargs):
         raise ValidationError('Cell plan dispatch history cannot be deleted.')
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['order'], condition=models.Q(state__in=ACTIVE_CELL_PLAN_DISPATCH_STATES),
+                                    name='one_active_cell_plan_dispatch_per_order'),
+        ]
+
 
 class OutboundDispatchQuerySet(models.QuerySet):
     def update(self, **kwargs):
@@ -190,7 +200,7 @@ class OutboundDispatch(models.Model):
         default='PICKUP_PLANNED',
         choices=[(s, s) for s in (
             'PICKUP_PLANNED', 'PICKUP_PROPOSED', 'PICKUP_ARRIVED',
-            'LOADED', 'EXIT_PROPOSED', 'EXITED', 'HOLD',
+            'LOADED', 'EXIT_PROPOSED', 'EXITED', 'CANCELLED', 'HOLD',
         )],
     )
     reason = models.CharField(max_length=192, blank=True)

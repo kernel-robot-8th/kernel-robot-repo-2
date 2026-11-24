@@ -54,6 +54,14 @@ class IntegrationSetupTests(unittest.TestCase):
         self.assertTrue(any(isinstance(n, ast.ClassDef) and n.name == 'RealFleet' for n in tree.body))
         self.assertNotIn('fleet_harness', sys.modules)
 
+    def test_evidence_only_mode_is_wired_to_the_physical_evidence_suite(self):
+        source = (Path(__file__).resolve().parents[1] / 'tools/integration/real_fleet_http.py').read_text(encoding='utf-8')
+        self.assertIn("arm = args.arm_only or args.web_arm_only or args.full_flow or args.arm_via_r or args.evidence_only", source)
+        self.assertIn("'arm_fleet_harness.py' if arm else 'fleet_harness.py'", source)
+        self.assertIn("'physical_evidence_http.py' if args.evidence_only", source)
+        self.assertIn("config['schema'] = 'harbor.physical-evidence-http-test/1'", source)
+        self.assertEqual(source.count("'service': fleet.tokens.get('service'),"), 1)
+
 
 def _launcher():
     source = Path(__file__).resolve().parents[1] / 'tools/integration/real_fleet_http.py'

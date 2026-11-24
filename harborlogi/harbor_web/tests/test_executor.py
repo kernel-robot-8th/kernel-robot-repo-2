@@ -38,6 +38,9 @@ class Fleet:
             # operation (ADR0015); fakes must answer that check like the real Fleet.
             # Identity probes stay out of `calls`, which is the ARM operation log.
             return {'principal_id': PRINCIPAL, 'role': 'service'}
+        if path.startswith('/api/fleet/port-events'):
+            # The intake poll runs beside the ARM pass; it is not part of the ARM operation log.
+            return {'events': [], 'cursor': 'c', 'complete': True}
         self.calls.append((method, path, body))
         if method == 'POST' and path == '/api/fleet/arm-transfers/jobs':
             request_key = body['request_key']

@@ -31,7 +31,7 @@ let nextTimer = 0;
 let respond = () => Promise.resolve(new Response('jpeg', {
   headers: {'Content-Type': 'image/jpeg', 'X-Frame-Captured-At': captured},
 }));
-const image = {hidden: true, removeAttribute(name) { delete this[name]; }};
+const image = {hidden: true, style: {}, removeAttribute(name) { delete this[name]; }};
 const statusText = {textContent: ''};
 const select = new EventTarget();
 select.value = '/topview/cam-one/frame/';
@@ -75,6 +75,26 @@ try {
   assert.equal(statusText.textContent, 'ROSY 연결 안 됨');
   assert.equal(timers.values().next().value.delay, 3000);
 
+  // X-Frame-Rotation-Deg: a valid degree rotates the image inline; an invalid one resets to the CSS default.
+  respond = () => Promise.resolve(new Response('rotated jpeg', {
+    headers: {'Content-Type': 'image/jpeg', 'X-Frame-Rotation-Deg': '90'},
+  }));
+  tick(); await settle();
+  assert.equal(image.hidden, false);
+  assert.equal(image.style.transform, 'rotate(90deg)');
+  respond = () => Promise.resolve(new Response('tilted jpeg', {
+    headers: {'Content-Type': 'image/jpeg', 'X-Frame-Rotation-Deg': '45'},
+  }));
+  tick(); await settle();
+  assert.equal(image.style.transform, '');
+  respond = () => Promise.resolve(new Response('plain jpeg', {headers: {'Content-Type': 'image/jpeg'}}));
+  tick(); await settle();
+  assert.equal(image.style.transform, '');
+  respond = () => Promise.reject(new TypeError('network unavailable'));
+  tick(); await settle();
+  assert.equal(image.hidden, true);
+  assert.equal(timers.values().next().value.delay, 3000);
+
   let finish;
   respond = () => new Promise(resolve => { finish = resolve; });
   tick();
@@ -109,6 +129,7 @@ try {
   const swapImage = {
     get hidden() { return hiddenState; },
     set hidden(value) { hiddenState = value; hiddenTransitions.push(value); },
+    style: {},
     removeAttribute(name) { removedAttrs.push(name); delete this[name]; },
   };
   const swapStatus = {textContent: ''};

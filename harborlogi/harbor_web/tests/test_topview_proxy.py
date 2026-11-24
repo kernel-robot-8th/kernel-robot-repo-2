@@ -72,6 +72,19 @@ class TopviewProxyTests(TestCase):
                 self.assertEqual(response.status_code, 503)
                 self.assertContains(response, text, status_code=503)
 
+    def test_db_fleet_connection_serves_origin_and_allow_list_gates_it(self):
+        """탑뷰는 DB에 저장된 Fleet 연결(출처·CA 파일)을 쓰고, 허용 목록 밖 출처는 연동 전으로 닫는다."""
+        from harbor_web.runtime_models import FleetConnection
+        FleetConnection.objects.update_or_create(
+            pk=1, defaults={'origin': 'https://fleet.example', 'principal': 'svc', 'version': 4})
+        with patch.dict(os.environ, {'HARBOR_FLEET_ORIGIN': '', 'HARBOR_FLEET_CA_FILE': ''}):
+            blocked = self.client.get(self.url)
+            self.assertEqual((blocked.status_code, blocked.content.decode()), (503, 'ROSY 연동 전'))
+            with patch.dict(os.environ, {'HARBOR_FLEET_ALLOWED_ORIGINS': 'https://fleet.example'}):
+                allowed = self.client.get(self.url)
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(allowed.content, b'jpeg-test')
+
     def test_unknown_camera_is_rejected_before_leasing(self):
         response = self.client.get(reverse('topview_frame', args=['unknown']))
         self.assertEqual(response.status_code, 404)

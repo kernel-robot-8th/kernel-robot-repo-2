@@ -79,13 +79,14 @@ class RosyClient:
         return self._request('GET', '/api/fleet/session', None)
 
     def _call(self, method, path, body):
-        expected = getattr(self, 'expected_principal', None)
-        if expected is not None:
+        principal = getattr(self, 'expected_principal', None)
+        role = getattr(self, 'expected_role', None)
+        if principal is not None or role is not None:
             identity = self.session()
-            role = getattr(self, 'expected_role', None)
-            if (not isinstance(identity, dict) or identity.get('principal_id') != expected
+            if (not isinstance(identity, dict)
+                    or (principal is not None and identity.get('principal_id') != principal)
                     or identity.get('role') not in ('service', 'operator')
-                    or role is not None and identity.get('role') != role):
+                    or (role is not None and identity.get('role') != role)):
                 raise FleetIdentityError('Configured Fleet application identity was not verified')
         return self._request(method, path, body)
 
