@@ -56,25 +56,28 @@ def human_confirmation_ready():
                 and get_user_model().objects.filter(is_active=True, groups__name='field').exists())
 
 
-def _observation_state(provenance):
+def _observation_state(provenance, *, port_events_met=False):
     if provenance == 'MEASURED':
         return 'MET'
     if provenance == 'DECLARED':
         return 'MET' if human_confirmation_ready() else 'UNMET'
+    if provenance == 'PORT_EVENT':
+        return 'MET' if (port_events_met or human_confirmation_ready()) else 'UNMET'
     return 'UNMET'
 
 
 def states(plan, check):
     """condition key -> MET | UNMET | UNKNOWN for one plan against the stored check."""
     found = (check.detail.get('conditions') or {}) if check else {}
+    port_events_met = found.get('port_events') == 'MET'
     value = dict(
         binding=_binding_state(plan) if plan is not None else 'UNKNOWN',
         session='MET' if check and check.detail.get('session') == 'MATCHED' else 'UNKNOWN' if not check else 'UNMET',
         evidence='MET' if found.get('evidence') == found.get('recheck') == 'MET' else
                  'UNMET' if 'UNMET' in (found.get('evidence'), found.get('recheck')) else 'UNKNOWN',
-        # SYNTHETIC and PORT_EVENT never open production alone; MEASURED stands for an authenticated observation
-        # producer, and person-DECLARED runs only while named-person confirmation is enabled (2026-11-04 decision).
-        observation='UNKNOWN' if plan is None else _observation_state(plan.observation.provenance))
+        # SYNTHETIC never opens production; PORT_EVENT opens when ROSY port_events check or human confirmation holds.
+        observation='UNKNOWN' if plan is None else _observation_state(
+            plan.observation.provenance, port_events_met=port_events_met))
     value['producer'] = 'MET' if found.get('auto_producer') == 'MET' or human_confirmation_ready() else 'UNMET'
     for key in ('arm', 'arm_live', 'arm_clear', 'proposal', 'port_events'):
         value[key] = found.get(key) if found.get(key) in {'MET', 'UNMET'} else 'UNKNOWN'

@@ -17,6 +17,8 @@ OBJECT_LABELS = {
     'RearrangeAuthorization': '자동 재배치 설정',
     'HumanAttestation': '사람 확인',
     'Intake': '입고 기록',
+    'CargoTag': '화물 태그',
+    'ArrivalEvent': '도착 기록',
 }
 
 ACTION_SENTENCES = {
@@ -55,6 +57,9 @@ ACTION_SENTENCES = {
     'rearrange.authorization.enable': '자동 재배치를 허용했습니다.',
     'rearrange.authorization.disable': '자동 재배치 허용을 껐습니다.',
     'rearrange.hold': '자동 재배치를 진행하지 못한 이유를 기록했습니다.',
+    'cargo.tag.bind': '화물에 EPC·바코드 태그를 연결했습니다.',
+    'arrival.record': '화물 도착 스캔을 기록했습니다.',
+    'order.schedule.apply': '화주·배편 기준으로 반출 순서를 정리했습니다.',
 }
 
 

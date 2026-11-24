@@ -12,9 +12,17 @@
     {% for lane in lanes %}<input type="hidden" name="lane" value="{% if lane.fixed %}FIXED{% else %}ANY{% endif %}|{% for order in lane.orders %}{{ order.pk }}:{{ order.version }}{% if not forloop.last %},{% endif %}{% endfor %}">{% endfor %}
     <div class="actions" data-queue-tools hidden><button type="submit">순서 저장</button><a class="button quiet" href="/outbound/">되돌리기</a><span class="muted" role="status" data-queue-status></span></div>
   </form>{% endif %}
+  {% if schedule_proposal and schedule_proposal.preview_rows %}
+  <div class="notice info">
+    <strong>화주·배편 기준 순서 제안</strong>
+    <p>출항 마감 시각과 화주 등급, 같은 배편 내 재취급 최소를 반영해 {{ schedule_proposal.preview_rows|length }}건을 정렬했습니다.{% if schedule_proposal.changed_count %} (변경 {{ schedule_proposal.changed_count }}건){% else %} (현재 순서와 동일){% endif %}</p>
+    <ul>{% for item in schedule_proposal.preview_rows %}<li>{{ item.tier_name }} {{ item.position }}위 · {{ item.order.cargo.code }}{% if item.order.voyage_code %} [{{ item.order.voyage_code }}]{% endif %} — {{ item.reason }}</li>{% endfor %}</ul>
+    {% if can_operate and schedule_proposal.changed_count %}<form method="post" action="/outbound/schedule/apply/">{% csrf_token %}<button type="submit" class="quiet">화주·배편 순서 적용</button></form>{% endif %}
+  </div>
+  {% endif %}
 </section>{% endif %}
 {% if rows %}<div class="table-wrap"><table class="action-table"><caption>반출 업무 {{ page.paginator.count }}건</caption><thead><tr><th scope="col">요청·대상 화물</th><th scope="col">검토 상태</th><th scope="col">필요한 판단</th><th scope="col">업무 열기</th></tr></thead><tbody>
-{% for row in rows %}<tr><td><a class="cargo-link" href="/requests/{{ row.order.pk }}/{% if observation %}?observation={{ observation.pk }}{% endif %}">{{ row.order.title|default:row.order.cargo.code }}</a><small>{{ row.order.cargo.code }} {{ row.order.cargo.name }} · 요청 #{{ row.order.pk }} · v{{ row.order.version }}</small><small>{{ row.order.tier_label }} · {{ row.order.sequence }}번째 · {% if row.order.tie_policy == 'ANY' %}단계 안 선택 허용{% else %}순서 고정{% endif %}</small></td><td><span class="badge {{ row.status }}">{{ row.status_label }}</span></td><td>{{ row.reason }}</td><td><a href="/requests/{{ row.order.pk }}/{% if observation %}?observation={{ observation.pk }}{% endif %}">업무 열기</a></td></tr>{% endfor %}
+{% for row in rows %}<tr><td><a class="cargo-link" href="/requests/{{ row.order.pk }}/{% if observation %}?observation={{ observation.pk }}{% endif %}">{{ row.order.title|default:row.order.cargo.code }}</a><small>{{ row.order.cargo.code }} {{ row.order.cargo.name }}{% if row.order.voyage_code %} · {{ row.order.voyage_code }}{% endif %}{% if row.order.cutoff_at %} (마감 {{ row.order.cutoff_at|date:'m-d H:i' }}){% endif %} · 요청 #{{ row.order.pk }} · v{{ row.order.version }}</small><small>{{ row.order.tier_label }} · {{ row.order.sequence }}번째 · {% if row.order.tie_policy == 'ANY' %}단계 안 선택 허용{% else %}순서 고정{% endif %}</small></td><td><span class="badge {{ row.status }}">{{ row.status_label }}</span></td><td>{{ row.reason }}</td><td><a href="/requests/{{ row.order.pk }}/{% if observation %}?observation={{ observation.pk }}{% endif %}">업무 열기</a></td></tr>{% endfor %}
 </tbody></table></div>{% include 'pagination.html' %}
 {% else %}<section class="empty"><h2>{% if q %}검색 결과가 없습니다{% else %}반출 지시를 등록하세요{% endif %}</h2><p>{% if q %}다른 화물 ID나 이름으로 찾아보세요.{% else %}등록된 화물에 반출 지시와 우선순위를 연결하면 야드 관측을 기준으로 재취급을 검토할 수 있습니다.{% endif %}</p>{% if can_operate and not q %}<div class="actions"><a class="button" href="/requests/new/?kind=OUTBOUND">반출 요청 등록</a><a href="/cargo/">화물 확인</a></div>{% endif %}</section>{% endif %}
 {% endblock %}
