@@ -234,6 +234,7 @@ class RosyClient:
         return parse_workcell_observations(self.workcell_observations())
 
     def site_places_typed(self):
+        from harbor.site_places import parse_site_places
         return parse_site_places(self.site_places())
 
     def cell_sites_typed(self):

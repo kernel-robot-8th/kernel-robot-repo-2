@@ -178,12 +178,23 @@ class FleetTypesTests(unittest.TestCase):
                 return {'profile': 'sim', 'arm_execution': 'open', 'observation_producers': [], 'evidence_producers': []}
             if path == '/api/fleet/workcell-observations':
                 return {'read_only': True, 'workcells': []}
+            if path == '/api/fleet/site-points?view=port':
+                from tests.test_site_places import _verified_payload
+                return _verified_payload()
+            if path == '/api/fleet/pipeline/cell-sites':
+                from tests.test_cell_site_map import _build_canonical_fixture
+                return _build_canonical_fixture()
+            if path == '/api/fleet/port-events?limit=100':
+                return {'events': [], 'cursor': '', 'complete': True}
             raise AssertionError(path)
 
         typed_client = RosyClient('https://fleet.example', 'tok', transport=fake_transport)
         self.assertEqual(typed_client.session_typed().principal_id, 'svc-1')
         self.assertEqual(typed_client.execution_profile_typed().profile, 'sim')
         self.assertTrue(typed_client.workcell_observations_typed().read_only)
+        self.assertEqual(typed_client.site_places_typed().schema, 'rosy.port-site-places.v1')
+        self.assertEqual(len(typed_client.cell_sites_typed().sites), 37)
+        self.assertTrue(typed_client.port_events_typed().complete)
 
 
 if __name__ == '__main__':
