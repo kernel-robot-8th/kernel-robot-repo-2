@@ -242,5 +242,5 @@ class TransportHttpTests(unittest.TestCase):
             self.assertEqual(parse_slot_ref(row['slot_ref']), ('yard', 1, 1, 1))
             # Second poll with persisted cursor consumes zero new events.
             second = intake.poll(client, connection=config['origin'], now=now)
-            self.assertEqual(second['outcomes'], [])
+            self.assertEqual(second['outcomes'], {})
             self.assertIs(second['complete'], True)
