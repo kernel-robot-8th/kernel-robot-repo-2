@@ -4,7 +4,7 @@
   <div class="panel-b">
     {% if topview.sources %}<img data-topview-image alt="ROSY 카메라의 최신 야드 탑뷰" hidden><noscript><p>탑뷰를 보려면 JavaScript를 켜세요.</p></noscript>{% endif %}
     <p role="status" data-topview-status>{{ topview.status }}</p>
-    <p class="helptext topview-orientation">탑뷰 시점은 야드 평면과 180° 반전 방향입니다 (위쪽 컨베이어·반출대, 오른쪽 팔 A).</p>
+    <p class="helptext topview-orientation">탑뷰를 180° 돌려 야드 평면과 같은 방향으로 보여 줍니다 (아래쪽 컨베이어·반출대, 왼쪽 팔 A).</p>
   </div>
 </section>
 {% if topview.sources %}<script type="module" src="{% static 'harbor_web/topview.mjs' %}"></script>{% endif %}
