@@ -2,7 +2,7 @@
 
 날짜: 2026-11-20
 
-상태: 제안.
+상태: 수락(2026-11-24, 서정민 결정 — 자동 운전은 ROSY 판단으로 하고 "출발 허락 방식도 그에 맞춰서"). ROSY `release_permitted`(rosy-platform D-1047 수락)가 기본이고, 사람 현장 비움 확인은 신호가 늦을 때의 대비책이다.
 
 대체: [ADR 0029: Harbor는 반입 화물을 ROSY 항만 사건 4개로 받는다](0029-port-events-and-intake-identity.md)의 결과 절 중 「release_permitted로만 출발 허용」 부분. 다른 결정과 Fleet 승인 경계는 유지한다.
 
