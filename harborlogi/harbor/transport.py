@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import json
 import re
 import sqlite3
+from urllib.error import HTTPError
 
 from harbor.model import identifier, identifiers
 from harbor.execution import (read_trip_execution, read_trip_proposal_execution,
@@ -36,7 +37,7 @@ class TripIntent:
             if len(place) > 64 or any(ord(c) < 32 for c in place):
                 raise ValueError("Invalid registered place reference")
         if self.object_ref and (self.object_ref != self.object_ref.strip() or len(self.object_ref) > 128
-                                or any(ord(c) < 32 for c in self.object_ref)):
+                                or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in self.object_ref)):
             raise ValueError("Invalid cargo object reference")
 
     @property
@@ -147,7 +148,29 @@ class TransportLedger:
         return self._reconcile(key, client, read_trip_execution)
 
     def reconcile_proposal(self, key, client):
-        return self._reconcile(key, client, read_trip_proposal_execution)
+        try:
+            return self._reconcile(key, client, read_trip_proposal_execution)
+        except HTTPError as error:
+            row = self.read(key)
+            body = None
+            if error.code == 404 and row["state"] == "UNCERTAIN" and row["mission_id"] is None:
+                try:
+                    body = json.loads(error.read().decode("utf-8"))
+                except (AttributeError, OSError, UnicodeDecodeError, ValueError):
+                    body = None
+            if getattr(error, "fp", None) is not None:
+                error.close()
+            if (isinstance(body, dict) and isinstance(body.get("detail"), dict)
+                    and body["detail"].get("code") == "TRIP_PROPOSAL_NOT_FOUND"):
+                # D-908: a proposal creates no job until a human admits it, so a coded 404 means nothing was saved.
+                with closing(self._connect()) as connection, connection:
+                    connection.execute(
+                        "UPDATE transport_intents SET state='PLANNED',version=version+1 "
+                        "WHERE request_key=? AND version=? AND state='UNCERTAIN' AND mission_id IS NULL",
+                        (row["request_key"], row["version"]),
+                    )
+                return None
+            raise
 
     def _reconcile(self, key, client, read):
         row = self.read(key)
