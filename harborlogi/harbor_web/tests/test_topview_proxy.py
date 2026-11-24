@@ -22,14 +22,10 @@ class TopviewProxyTests(TestCase):
         })
         self.env.start()
         self.addCleanup(self.env.stop)
-        self.observations = patch('harbor_web.topview_proxy.RosyClient')
-        self.reader = self.observations.start().return_value
-        self.addCleanup(self.observations.stop)
-        self.reader.workcell_observations.return_value = {
-            'workcells': [{'cameras': [{'source_id': 'test-cam', 'role': 'top'}]}]}
         self.vision = patch('harbor_web.topview_proxy.VisionClient')
         self.camera = self.vision.start().return_value
         self.addCleanup(self.vision.stop)
+        self.camera.sources.return_value = {'sources': ['test-cam']}
         self.camera.lease.return_value = {
             'source_id': 'test-cam', 'lease': 'test-lease-secret',
             'frame_path': '/api/vision/sources/test-cam/frame'}
@@ -82,10 +78,24 @@ class TopviewProxyTests(TestCase):
         self.camera.lease.assert_not_called()
 
     def test_unusable_peer_source_does_not_block_known_camera(self):
-        self.reader.workcell_observations.return_value['workcells'][0]['cameras'].append({})
+        self.camera.sources.return_value = {'sources': [None, '', 'bad/source', '.', '..', 'test-cam']}
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b'jpeg-test')
+
+    def test_vision_only_source_is_allowed_and_unlisted_source_is_rejected(self):
+        self.camera.sources.return_value = {'sources': ['test-cam', 'ceiling_north']}
+        self.camera.lease.return_value = {
+            'source_id': 'ceiling_north', 'lease': 'test-lease-secret',
+            'frame_path': '/api/vision/sources/ceiling_north/frame'}
+        allowed = self.client.get(reverse('topview_frame', args=['ceiling_north']))
+        self.assertEqual((allowed.status_code, allowed.content), (200, b'jpeg-test'))
+        self.camera.lease.assert_called_once_with('ceiling_north')
+
+        self.camera.lease.reset_mock()
+        rejected = self.client.get(reverse('topview_frame', args=['unapproved-cam']))
+        self.assertEqual(rejected.status_code, 404)
+        self.camera.lease.assert_not_called()
 
     def test_stale_and_network_errors_do_not_expose_credentials(self):
         for error, status in ((StaleFrameError('test-lease-secret'), 404),
@@ -116,15 +126,11 @@ class TopviewUserTokenTests(TestCase):
                                            'HARBOR_FLEET_CA_FILE': ''})
         self.env.start()
         self.addCleanup(self.env.stop)
-        reader = patch('harbor_web.topview_proxy.RosyClient')
-        self.reader_class = reader.start()
-        self.addCleanup(reader.stop)
-        self.reader_class.return_value.workcell_observations.return_value = {
-            'workcells': [{'cameras': [{'source_id': 'test-cam'}]}]}
         vision = patch('harbor_web.topview_proxy.VisionClient')
         self.vision_class = vision.start()
         self.addCleanup(vision.stop)
         camera = self.vision_class.return_value
+        camera.sources.return_value = {'sources': ['test-cam']}
         camera.lease.return_value = {'source_id': 'test-cam', 'lease': 'l', 'frame_path': '/api/vision/sources/test-cam/frame'}
         camera.fetch_frame.return_value = (b'jpeg-user', {})
         self.url = reverse('topview_frame', args=['test-cam'])
@@ -139,13 +145,20 @@ class TopviewUserTokenTests(TestCase):
         self.sign_in(self.now + 300)
         response = self.client.get(self.url)
         self.assertEqual((response.status_code, response.content), (200, b'jpeg-user'))
-        self.assertEqual(self.vision_class.call_args.args[1], 'user-access-jwt')
-        self.assertEqual(self.reader_class.call_args.args[1], 'user-access-jwt')
+        self.assertEqual([call.args[1] for call in self.vision_class.call_args_list],
+                         ['user-access-jwt', 'user-access-jwt'])
         self.assertNotIn('user-access-jwt', str(dict(response.headers)))
 
     def test_an_expired_token_or_no_rosy_session_asks_to_sign_in(self):
         self.sign_in(self.now - 1)
         response = self.client.get(self.url)
+        self.assertEqual((response.status_code, response.content.decode()), (503, 'ROSY 로그인 필요'))
+        self.vision_class.assert_not_called()
+
+    def test_expired_rosy_session_does_not_fall_back_to_service_token(self):
+        self.sign_in(self.now - 1)
+        with patch.dict(os.environ, {'HARBOR_FLEET_TOKEN': 'service-token'}):
+            response = self.client.get(self.url)
         self.assertEqual((response.status_code, response.content.decode()), (503, 'ROSY 로그인 필요'))
         self.vision_class.assert_not_called()
 
