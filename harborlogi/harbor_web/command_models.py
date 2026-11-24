@@ -118,6 +118,44 @@ class HumanAttestation(Immutable):
     photo_ref = models.CharField(max_length=200, blank=True)
 
 
+class CellPlanDispatch(models.Model):
+    """Durable Harbor record for dual-mode OMX cell-plan requests (HARBOR_PLAN vs ROSY_DIRECTIVE)."""
+    objects = models.Manager()
+    key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    order = models.ForeignKey('Order', on_delete=models.PROTECT, related_name='cell_plan_dispatches')
+    plan = models.ForeignKey('Plan', null=True, blank=True, on_delete=models.PROTECT, related_name='cell_plan_dispatches')
+    observation = models.ForeignKey('Observation', on_delete=models.PROTECT)
+    dispatch_mode = models.CharField(max_length=16, choices=[('HARBOR_PLAN', 'Harbor Plan'), ('ROSY_DIRECTIVE', 'ROSY Directive')])
+    directive_mode = models.CharField(max_length=16)
+    request_key = models.CharField(max_length=128, unique=True)
+    request_payload = models.JSONField(default=dict)
+    rosy_plan_id = models.CharField(max_length=96, blank=True, default='')
+    order_source = models.CharField(max_length=16, choices=[('harbor', 'harbor'), ('rosy_r', 'rosy_r')])
+    state = models.CharField(max_length=24, default='SUBMITTING')
+    planned_steps = models.JSONField(default=list)
+    rosy_task_ids = models.JSONField(default=list)
+    reason = models.CharField(max_length=192, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        if self._state.adding:
+            kwargs['force_insert'] = True
+        else:
+            old = type(self).objects.get(pk=self.pk)
+            immutable = (
+                'key', 'request_key', 'dispatch_mode', 'directive_mode',
+                'order_source', 'order_id', 'observation_id',
+            )
+            if any(getattr(old, name) != getattr(self, name) for name in immutable):
+                raise ValidationError('Cell plan dispatch request identity is immutable.')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Cell plan dispatch history cannot be deleted.')
+
+
 class OutboundDispatchQuerySet(models.QuerySet):
     def update(self, **kwargs):
         if set(kwargs) - {
@@ -133,10 +171,13 @@ class OutboundDispatchQuerySet(models.QuerySet):
 
 
 class OutboundDispatch(models.Model):
-    """Durable 2-leg ROSY Pinky pickup & exit coordinator for a completed OUTBOUND arm command."""
+    """Durable 2-leg ROSY Pinky pickup & exit coordinator for a completed OUTBOUND arm command or cell plan."""
     objects = OutboundDispatchQuerySet.as_manager()
     key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
-    command = models.OneToOneField(Command, on_delete=models.PROTECT, related_name='outbound_dispatch')
+    command = models.OneToOneField(Command, on_delete=models.PROTECT, related_name='outbound_dispatch', null=True, blank=True)
+    cell_plan_dispatch = models.OneToOneField(
+        'CellPlanDispatch', on_delete=models.PROTECT, related_name='outbound_dispatch', null=True, blank=True
+    )
     cargo = models.ForeignKey('Cargo', on_delete=models.PROTECT)
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
     stand_zone_id = models.CharField(max_length=64)
@@ -171,7 +212,7 @@ class OutboundDispatch(models.Model):
         else:
             old = type(self).objects.get(pk=self.pk)
             immutable = (
-                'key', 'command_id', 'cargo_id', 'actor_id', 'stand_zone_id',
+                'key', 'command_id', 'cell_plan_dispatch_id', 'cargo_id', 'actor_id', 'stand_zone_id',
                 'pickup_stop_id', 'exit_stop_id', 'site_places_digest', 'candidate_robot_ids',
             )
             if any(getattr(old, name) != getattr(self, name) for name in immutable):
@@ -184,6 +225,13 @@ class OutboundDispatch(models.Model):
     class Meta:
         constraints = [
             models.CheckConstraint(condition=models.Q(version__gt=0), name='outbound_dispatch_positive_version'),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(command__isnull=False, cell_plan_dispatch__isnull=True)
+                    | models.Q(command__isnull=True, cell_plan_dispatch__isnull=False)
+                ),
+                name='outbound_dispatch_exactly_one_source',
+            ),
             models.UniqueConstraint(
                 fields=('stand_zone_id',),
                 condition=models.Q(state__in=ACTIVE_OUTBOUND_DISPATCH_STATES),

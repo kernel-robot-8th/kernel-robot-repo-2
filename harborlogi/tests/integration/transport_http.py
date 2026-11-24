@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
+from harbor.cell_plan import build_harbor_plan_request, build_rosy_directive_request, validate_cell_plan_response
 from harbor.cell_site_map import normalize_cell_site_map
 from harbor.port_events import IntakeLedger, parse_slot_ref
 from harbor.rosy_http import RosyClient
@@ -244,6 +245,159 @@ class TransportHttpTests(unittest.TestCase):
             second = intake.poll(client, connection=config['origin'], now=now)
             self.assertEqual(second['outcomes'], {})
             self.assertIs(second['complete'], True)
+
+    def test_z_dual_mode_cell_plan_harbor_and_rosy_over_real_http(self):
+        """Dual-mode OMX cell-plan E2E: Mode 1 explicit Harbor plan order/coords vs Mode 2 ROSY autonomous plan."""
+        config = json.loads(Path(os.environ['HARBOR_INTEGRATION_CONFIG']).read_text(encoding='utf-8'))
+        origin = config['origin'].rstrip('/')
+        service = RosyClient(origin, config['service'])
+        operator = RosyClient(origin, config['operator'])
+        service.expected_principal, service.expected_role = 'cell-app-service', 'service'
+        observation_payload = {
+            'schema': 'grid-placement-v1',
+            'placements': [
+                {'cargo_id': 'C1', 'area_id': 'yard', 'row': 1, 'column': 1, 'level': 1, 'orientation': 0},
+                {'cargo_id': 'C2', 'area_id': 'yard', 'row': 1, 'column': 1, 'level': 2, 'orientation': 0},
+            ],
+        }
+
+        def admit_plan_tasks(tasks):
+            for task in tasks:
+                req_rdy = Request(origin + '/api/fleet/pipeline/cells/cell_ab/readiness', headers={'Authorization': 'Bearer ' + config['operator']})
+                with urlopen(req_rdy, timeout=10) as resp:
+                    rdy = json.loads(resp.read().decode('utf-8'))
+                admit_body = json.dumps({
+                    'expected_dispatch_generation': rdy['dispatch_generation'],
+                    'expected_stop_generation': rdy['stop_generation'],
+                    'expected_readiness_digest': rdy['readiness_digest'],
+                }).encode('utf-8')
+                req_admit = Request(
+                    origin + f"/api/fleet/pipeline/cell-tasks/{task['task_id']}/admit",
+                    data=admit_body,
+                    method='POST',
+                    headers={'Authorization': 'Bearer ' + config['operator'], 'Content-Type': 'application/json'},
+                )
+                with urlopen(req_admit, timeout=10) as resp:
+                    self.assertEqual(resp.status, 200)
+
+        # Typed read-model verification against live ROSY endpoints.
+        sess = service.session_typed()
+        self.assertEqual((sess.principal_id, sess.role), ('cell-app-service', 'service'))
+        places_typed = service.site_places_typed()
+        self.assertEqual(places_typed.schema, 'rosy.port-site-places.v1')
+        sites_typed = service.cell_sites_typed()
+        self.assertEqual(len(sites_typed.sites), 37)
+
+        # Rule 8 capability probe: unknown request_key returns coded 404 UNKNOWN_CELL_PLAN.
+        with self.assertRaises(HTTPError) as missing_probe:
+            service.cell_plan_request('harbor-probe-' + uuid4().hex)
+        self.assertEqual(missing_probe.exception.code, 404)
+        self.assertEqual(json.loads(missing_probe.exception.read())['detail']['code'], 'UNKNOWN_CELL_PLAN')
+
+        # Path 1: Harbor provides exact sequence + slot coordinates -> order_source='harbor'
+        harbor_result = {
+            'status': 'READY',
+            'model': 'grid-placement-v1',
+            'moves': [
+                {
+                    'cargo_id': 'C2', 'primary_arm': 'A', 'phase_label': '재취급',
+                    'source_placement': {'area_id': 'yard', 'row': 1, 'column': 1, 'level': 2},
+                    'destination_placement': {'area_id': 'temp_a', 'row': 1, 'column': 1, 'level': 1},
+                },
+                {
+                    'cargo_id': 'C1', 'primary_arm': 'A', 'phase_label': '반출',
+                    'source_placement': {'area_id': 'yard', 'row': 1, 'column': 1, 'level': 1},
+                    'destination_placement': {'area_id': 'stand', 'row': 1, 'column': 1, 'level': 1},
+                },
+                {
+                    'cargo_id': 'C2', 'primary_arm': 'A', 'phase_label': '복귀',
+                    'source_placement': {'area_id': 'temp_a', 'row': 1, 'column': 1, 'level': 1},
+                    'destination_placement': {'area_id': 'yard', 'row': 1, 'column': 1, 'level': 1},
+                },
+            ],
+        }
+        harbor_req = build_harbor_plan_request(harbor_result, observation_payload=observation_payload)
+        harbor_key = 'harbor-mode1-' + uuid4().hex
+        res1 = validate_cell_plan_response(
+            service.propose_cell_plan(harbor_req, request_key=harbor_key),
+            expected_order_source='harbor',
+            expected_step_count=3,
+        )
+        self.assertEqual([t['dst_wire_ref'] for t in res1['tasks']], ['temp_a-r1-c1-l1', 'stand-r1-c1-l1', 'yard-r1-c1-l1'])
+        self.assertTrue(all(t['status'] == 'PROPOSED' for t in res1['tasks']))
+
+        # Rule 7 lost-response reconciliation via GET ?request_key= returns exact created plan & tasks.
+        reconciled1 = validate_cell_plan_response(
+            service.cell_plan_request(harbor_key),
+            expected_order_source='harbor',
+            expected_step_count=3,
+        )
+        self.assertEqual(reconciled1['plan']['plan_id'], res1['plan']['plan_id'])
+        self.assertEqual([t['task_id'] for t in reconciled1['tasks']], [t['task_id'] for t in res1['tasks']])
+
+        # Bad Harbor order (pull buried C1 first) must fail closed with HTTP 422.
+        bad_req = {**harbor_req, 'steps': [harbor_req['steps'][1]]}
+        with self.assertRaises(HTTPError) as blocked:
+            service.propose_cell_plan(bad_req, request_key='harbor-bad-' + uuid4().hex)
+        self.assertEqual(blocked.exception.code, 422)
+        self.assertEqual(json.loads(blocked.exception.read())['detail']['code'], 'BLOCKED_SOURCE_CARGO')
+
+        admit_plan_tasks(res1['tasks'])
+        self.assertEqual(operator.cell_plan(res1['plan']['plan_id'])['plan']['status'], 'QUEUED')
+
+        # Path 2: Harbor sends simple high-level directive without steps -> ROSY plans autonomously (order_source='rosy_r')
+        rosy_req = build_rosy_directive_request(mode='outbound', cargo_id='C1', destination='stand', observation_payload=observation_payload)
+        rosy_key = 'harbor-mode2-' + uuid4().hex
+        res2 = validate_cell_plan_response(
+            service.propose_cell_plan(rosy_req, request_key=rosy_key),
+            expected_order_source='rosy_r',
+            expected_step_count=3,
+        )
+        self.assertEqual([t['phase_label'] for t in res2['tasks']], ['재취급', '반출', '복귀'])
+        self.assertEqual(res2['tasks'][1]['dst_wire_ref'], 'stand-r1-c1-l1')
+        self.assertEqual(res2['tasks'][2]['dst_wire_ref'], 'yard-r1-c1-l1')
+        reconciled2 = validate_cell_plan_response(
+            service.cell_plan_request(rosy_key),
+            expected_order_source='rosy_r',
+            expected_step_count=3,
+        )
+        self.assertEqual(reconciled2['plan']['plan_id'], res2['plan']['plan_id'])
+
+        admit_plan_tasks(res2['tasks'])
+        self.assertEqual(operator.cell_plan(res2['plan']['plan_id'])['plan']['status'], 'QUEUED')
+
+        # Dry-run typed preview (leaves ledger clean) + plan-level cancel (enforces proposer isolation).
+        dry = service.preview_cell_plan_typed(rosy_req, expected_order_source='rosy_r')
+        self.assertEqual(len(dry.moves), 3)
+        op_plan = operator.propose_cell_plan_typed(
+            {**harbor_req, 'propose': True},
+            request_key='harbor-op-cancel-' + uuid4().hex,
+            expected_order_source='harbor',
+            expected_step_count=3,
+        )
+        with self.assertRaises(HTTPError) as cancel_denied:
+            service.cancel_cell_plan(op_plan.plan.plan_id, reason='unauthorized')
+        self.assertEqual(cancel_denied.exception.code, 403)
+        self.assertEqual(json.loads(cancel_denied.exception.read())['detail']['code'], 'CELL_PLAN_CANCEL_FORBIDDEN')
+
+        cancel_target = service.propose_cell_plan_typed(
+            harbor_req,
+            request_key='harbor-cancel-' + uuid4().hex,
+            expected_order_source='harbor',
+            expected_step_count=3,
+        )
+        cancelled = service.cancel_cell_plan_typed(
+            cancel_target.plan.plan_id,
+            reason='operator cancelled plan',
+            expected_order_source='harbor',
+        )
+        self.assertEqual(cancelled.plan.status, 'CANCELLED')
+        self.assertEqual(cancelled.plan.hold_reason, 'operator cancelled plan')
+        self.assertEqual(list(cancelled.cancelled_task_ids), [t.task_id for t in cancel_target.tasks])
+        with self.assertRaises(HTTPError) as cancel_again:
+            service.cancel_cell_plan(cancel_target.plan.plan_id, reason='duplicate cancel')
+        self.assertEqual(cancel_again.exception.code, 409)
+        self.assertEqual(json.loads(cancel_again.exception.read())['detail']['code'], 'CELL_PLAN_NOT_CANCELLABLE')
 
     def test_z_outbound_stand_two_leg_pickup_and_exit_over_real_http(self):
         """Outbound Stand (S_OUT) -> Pinky docking & pickup -> Exit (S_EXIT) over real ROSY Fleet HTTP."""

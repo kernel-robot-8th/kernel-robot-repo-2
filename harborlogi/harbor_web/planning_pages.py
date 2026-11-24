@@ -9,9 +9,9 @@ from django.http import Http404
 from django.views.decorators.http import require_http_methods
 
 from harbor.ledger import ReadOnlyLedger
-from harbor_web import commands, human_evidence, outbound_loop, services
+from harbor_web import cell_plan_dispatch, commands, human_evidence, outbound_loop, services
 from harbor_web.auth import has_role, require_roles
-from harbor_web.models import Command, Plan
+from harbor_web.models import CellPlanDispatch, Command, OutboundDispatch, Plan
 from harbor_web.pipeline import pipeline_for
 from harbor_web.presentation import gate_text, reason_text
 from harbor_web.page_helpers import page, selected_observation
@@ -32,8 +32,87 @@ def plan_detail(request, pk):
         if not has_role(request.user, 'operator'):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
+        if request.POST.get('action') == 'cell_plan_harbor':
+            try:
+                dispatch = cell_plan_dispatch.dispatch_harbor_plan(request.user, plan_id=pk)
+            except (services.Conflict, ValidationError) as exc:
+                return render(request, 'error.html', dict(heading='OMX 셀 계획 요청을 보내지 못했습니다', reason=exc.messages[0] if getattr(exc, 'messages', None) else '계획·관측·Fleet 연결 상태를 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
+            if dispatch.state == 'UNCERTAIN':
+                messages.warning(request, '요청 응답을 받지 못해 기록된 요청 키로 진행 상태를 확인 중입니다.')
+            else:
+                messages.success(request, f'Harbor 계획 순서·좌표 {len(dispatch.rosy_task_ids)}단계를 ROSY에 제안했습니다.')
+            return redirect(f'/plans/{pk}/')
+        if request.POST.get('action') == 'cell_plan_rosy':
+            directive_mode = request.POST.get('directive_mode') or ('outbound' if plan.order.kind == 'OUTBOUND' else 'rehandle')
+            destination = request.POST.get('destination') or 'stand'
+            try:
+                dispatch = cell_plan_dispatch.dispatch_rosy_directive(
+                    request.user,
+                    order_id=plan.order_id,
+                    observation_id=plan.observation_id,
+                    directive_mode=directive_mode,
+                    destination=destination,
+                    plan_id=pk,
+                )
+            except (services.Conflict, ValidationError) as exc:
+                return render(request, 'error.html', dict(heading='ROSY 자율 계획 요청을 보내지 못했습니다', reason=exc.messages[0] if getattr(exc, 'messages', None) else '관측 배치·지시 대상·Fleet 연결 상태를 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
+            if dispatch.state == 'UNCERTAIN':
+                messages.warning(request, '요청 응답을 받지 못해 기록된 요청 키로 진행 상태를 확인 중입니다.')
+            else:
+                messages.success(request, f'ROSY 자율 계획 {len(dispatch.rosy_task_ids)}단계를 제안했습니다.')
+            return redirect(f'/plans/{pk}/')
+        if request.POST.get('action') == 'cell_plan_sync':
+            try:
+                dispatch_id = int(request.POST.get('dispatch_id', ''))
+            except (TypeError, ValueError):
+                return render(request, 'error.html', dict(reason='셀 계획 식별자가 올바르지 않습니다.', return_url=f'/plans/{pk}/'), status=400)
+            target_row = get_object_or_404(CellPlanDispatch, pk=dispatch_id, order_id=plan.order_id)
+            try:
+                synced = cell_plan_dispatch.sync_cell_plan_dispatch(target_row.pk)
+            except (services.Conflict, ValidationError, OSError, ValueError) as exc:
+                return render(request, 'error.html', dict(heading='셀 계획 진행 상태를 확인하지 못했습니다', reason=exc.messages[0] if getattr(exc, 'messages', None) else 'Fleet 연결 상태를 확인한 뒤 다시 시도하세요.', return_url=f'/plans/{pk}/'), status=409)
+            messages.info(request, f'셀 계획 상태를 확인했습니다: {cell_plan_dispatch._STATE_LABELS.get(synced.state, synced.state)}')
+            return redirect(f'/plans/{pk}/')
+        if request.POST.get('action') == 'cell_plan_outbound_dispatch':
+            try:
+                dispatch_id = int(request.POST.get('dispatch_id', ''))
+            except (TypeError, ValueError):
+                return render(request, 'error.html', dict(reason='셀 계획 식별자가 올바르지 않습니다.', return_url=f'/plans/{pk}/'), status=400)
+            target_row = get_object_or_404(CellPlanDispatch, pk=dispatch_id, order_id=plan.order_id)
+            try:
+                outbound_loop.prepare_outbound_dispatch_from_cell_plan(request.user, cell_plan_dispatch_id=target_row.pk)
+            except (services.Conflict, ValidationError) as exc:
+                msg = exc.messages[0] if isinstance(exc, ValidationError) and exc.messages else str(exc)
+                return render(request, 'error.html', dict(heading='반출대 차량 호출을 준비할 수 없습니다', reason=msg, return_url=f'/plans/{pk}/'), status=409)
+            messages.info(request, '반출대 차량 호출을 등록했습니다. ROSY 독립 승인 후 도킹이 진행됩니다.')
+            return redirect(f'/plans/{pk}/')
+        if request.POST.get('action') == 'cell_plan_outbound_loaded':
+            try:
+                outbound_id = int(request.POST.get('outbound_dispatch_id', ''))
+                expected_version = int(request.POST.get('expected_version', ''))
+            except (TypeError, ValueError):
+                return render(request, 'error.html', dict(reason='적재 확인 형식이 올바르지 않습니다.', return_url=f'/plans/{pk}/'), status=400)
+            target_od = get_object_or_404(OutboundDispatch, pk=outbound_id, cell_plan_dispatch__order_id=plan.order_id)
+            try:
+                outbound_loop.confirm_outbound_loaded(request.user, dispatch_id=target_od.pk, expected_version=expected_version)
+            except (services.Conflict, ValidationError):
+                return render(request, 'error.html', dict(heading='적재 확인을 기록할 수 없습니다', reason='도킹 상태나 버전이 바뀌었습니다. 화면을 새로 열어 확인하세요.', return_url=f'/plans/{pk}/'), status=409)
+            messages.info(request, '차량 적재를 확인했습니다. 출구 이동이 준비됩니다.')
+            return redirect(f'/plans/{pk}/')
+        if request.POST.get('action') == 'cell_plan_cancel':
+            try:
+                dispatch_id = int(request.POST.get('dispatch_id', ''))
+            except (TypeError, ValueError):
+                return render(request, 'error.html', dict(reason='셀 계획 식별자가 올바르지 않습니다.', return_url=f'/plans/{pk}/'), status=400)
+            target_row = get_object_or_404(CellPlanDispatch, pk=dispatch_id, order_id=plan.order_id)
+            reason = (request.POST.get('reason') or '운영자 취소 요청').strip() or '운영자 취소 요청'
+            try:
+                cancelled = cell_plan_dispatch.cancel_cell_plan_dispatch(request.user, dispatch_id=target_row.pk, reason=reason)
+            except (services.Conflict, ValidationError, OSError, ValueError) as exc:
+                return render(request, 'error.html', dict(heading='셀 계획을 취소할 수 없습니다', reason=exc.messages[0] if getattr(exc, 'messages', None) else '이미 실행되었거나 취소할 수 없는 상태입니다.', return_url=f'/plans/{pk}/'), status=409)
+            messages.info(request, f'셀 계획을 취소했습니다: {cell_plan_dispatch._STATE_LABELS.get(cancelled.state, cancelled.state)}')
+            return redirect(f'/plans/{pk}/')
         if request.POST.get('action') == 'decide':  # a person accepts the algorithm's inbound placement (ADR 0012)
-            from django.contrib import messages
             from harbor_web.inbound_decision import PlacementDecisionForm, decide_placement
             decision_form = PlacementDecisionForm(request.POST)
             if not decision_form.is_valid():
@@ -74,7 +153,11 @@ def plan_detail(request, pk):
                      for move in (plan.result.get('moves', []) if plan.order.kind == 'REARRANGE' else [])]
     return page(request, 'plan.html', section='inventory', plan=plan, display_moves=display_moves, gate=gate,
                 gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']), command=None,
-                observation_stage=observation_stage, yard_scene=scene_for([observation_stage]) if observation_stage else None)
+                observation_stage=observation_stage, yard_scene=scene_for([observation_stage]) if observation_stage else None,
+                cell_plan_dispatches=cell_plan_dispatch.dispatch_views_for_order(plan.order),
+                spatial_observation=bool(plan.observation.payload.get('schema') == 'grid-placement-v1'),
+                harbor_cell_plan_ready=bool(plan.result.get('model') == 'grid-placement-v1'
+                                            and plan.result.get('status') == 'READY' and plan.result.get('moves')))
 
 
 @require_roles('viewer', 'operator', 'admin')

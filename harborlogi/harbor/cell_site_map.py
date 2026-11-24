@@ -10,7 +10,7 @@ from typing import Any
 from harbor.model import YARD_ARMS
 
 SCHEMA_ID = 'rosy.cell-site-map.v1'
-SUPPORTED_STATUSES = frozenset({'planned_unverified'})
+SUPPORTED_STATUSES = frozenset({'planned_unverified', 'verified'})
 MAX_DOCUMENT_BYTES = 1024 * 1024
 MAX_ROWS = 12
 MAX_COLUMNS = 12
