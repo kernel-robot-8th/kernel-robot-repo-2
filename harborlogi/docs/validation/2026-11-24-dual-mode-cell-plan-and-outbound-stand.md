@@ -32,3 +32,12 @@
 
 - `tools.integration.fleet_harness.RealFleet` 시뮬레이션 서버(`transport_only=True`)와 하네스 테스트 토큰 기반 결과이며, 실물 Pinky·OMX 팔·카메라 장치 및 현장 운영 수용 시험이 아니다.
 - `admit` 및 현장/콘솔 승인 단계는 하네스의 `operator`/`approver` 테스트 토큰으로 대행했으며, 운영 환경의 ROSY Account·R 서버 설정 검증(이슈 #112)을 대체하지 않는다.
+
+## `main` ↔ `main` 재검증
+
+| 항목 | 값 |
+|---|---|
+| Harbor `main` | `80dbb62aa96ef26c153a27fef489d1c957b4be43` |
+| ROSY `main` | `27314fc34ef560d6f00e054ddbdea37045862b14` |
+| 실행 (`ai`) | `python -m tools.integration.real_fleet_http --transport-only` |
+| 결과 | `Ran 7 tests in 7.074s` — `OK` |
