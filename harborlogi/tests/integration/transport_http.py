@@ -400,7 +400,7 @@ class TransportHttpTests(unittest.TestCase):
         # Dry-run typed preview (service caller redacts cargo_id / final_state) + goal mode preview.
         dry = service.preview_cell_plan_typed(rosy_req, expected_order_source='rosy_r')
         self.assertEqual(len(dry.moves), 3)
-        self.assertIsNone(dry.final_state)
+        self.assertEqual(dry.final_state, ())
         self.assertTrue(all(m.cargo_id is None for m in dry.moves))
         goal_req = build_rosy_directive_request(
             mode='goal',
