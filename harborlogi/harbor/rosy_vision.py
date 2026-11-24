@@ -24,11 +24,17 @@ _MAX_JSON_BYTES = 1024 * 1024
 FRAME_HEADERS = (
     'X-Frame-Seq', 'X-Frame-Age-Ms', 'X-Frame-Captured-At',
     'X-Frame-Width', 'X-Frame-Height', 'X-Frame-Rotation-Deg', 'X-Frame-Rectified',
+    'X-Frame-Plane', 'X-Frame-Calibration', 'X-Frame-Observed-Fraction',
 )
+MAP_RECTIFICATION = {'mode': 'map'}
 
 
 class StaleFrameError(Exception):
     """프레임이 오래됨 (404 + X-Frame-State: stale)."""
+
+
+class PlaneUnavailableError(Exception):
+    """버드뷰 지도 평면 보정 불가 (409 + X-Frame-State: plane-unavailable)."""
 
 
 class VisionClient(RosyClient):
@@ -113,14 +119,20 @@ class VisionClient(RosyClient):
                 'Authorization': 'Bearer ' + lease_response['lease'],
             }, max_bytes=_MAX_FRAME_BYTES)
         except HTTPError as error:
-            stale = error.code == 404 and error.headers.get('X-Frame-State') == 'stale'
+            frame_state = error.headers.get('X-Frame-State')
+            stale = error.code == 404 and frame_state == 'stale'
+            plane_unavailable = error.code == 409 and frame_state == 'plane-unavailable'
             error.close()
             if stale:
                 raise StaleFrameError('frame stale') from error
+            if plane_unavailable:
+                raise PlaneUnavailableError('map plane unavailable') from error
             raise
         headers = {key.lower(): value for key, value in headers.items()}
         if status == 404 and headers.get('x-frame-state') == 'stale':
             raise StaleFrameError('frame stale')
+        if status == 409 and headers.get('x-frame-state') == 'plane-unavailable':
+            raise PlaneUnavailableError('map plane unavailable')
         if status != 200:
             raise ValueError('Unexpected Vision frame status')
         if headers.get('content-type', '').split(';', 1)[0].strip().lower() != 'image/jpeg':

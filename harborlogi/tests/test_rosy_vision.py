@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
 
-from harbor.rosy_vision import VisionClient, StaleFrameError
+from harbor.rosy_vision import MAP_RECTIFICATION, PlaneUnavailableError, StaleFrameError, VisionClient
 
 
 # ── 가짜 Vision 서버 ──
@@ -80,6 +80,13 @@ class _VisionHandler(BaseHTTPRequestHandler):
             if "stale-cam" in self.path:
                 self.send_response(404)
                 self.send_header("X-Frame-State", "stale")
+                self.end_headers()
+                return
+
+            # plane-unavailable 시험용 source
+            if "uncalibrated-cam" in self.path:
+                self.send_response(409)
+                self.send_header("X-Frame-State", "plane-unavailable")
                 self.end_headers()
                 return
 
@@ -203,6 +210,15 @@ class VisionClientTests(unittest.TestCase):
             with self.assertRaises(StaleFrameError):
                 client.fetch_frame(lease)
 
+    def test_plane_unavailable_raises_plane_unavailable_error(self):
+        """409 + X-Frame-State: plane-unavailable → PlaneUnavailableError."""
+        with vision_server() as (origin, http):
+            client = VisionClient(origin, "fleet-token")
+            lease = client.lease("uncalibrated-cam", rectification=MAP_RECTIFICATION)
+            with self.assertRaises(PlaneUnavailableError):
+                client.fetch_frame(lease)
+            self.assertEqual(http.calls[0][2], {"source_id": "uncalibrated-cam", "rectification": {"mode": "map"}})
+
     def test_non_jpeg_content_type_rejected(self):
         """Content-Type이 image/jpeg가 아니면 ValueError."""
         with vision_server() as (origin, _):
@@ -274,17 +290,21 @@ class VisionClientTests(unittest.TestCase):
     def test_transport_status_and_case_insensitive_headers(self):
         for status, headers, expected in (
                 (404, {'x-frame-state': 'stale'}, StaleFrameError),
+                (409, {'x-frame-state': 'plane-unavailable'}, PlaneUnavailableError),
+                (409, {'x-frame-state': 'other'}, ValueError),
                 (302, {'content-type': 'image/jpeg'}, ValueError),
                 (500, {'content-type': 'image/jpeg'}, ValueError)):
             client = VisionClient(base_url='https://fleet.example', transport=lambda *args: (status, headers, b''))
-            with self.subTest(status=status), self.assertRaises(expected):
+            with self.subTest(status=status, headers=headers), self.assertRaises(expected):
                 client.fetch_frame({'source_id': 'test-cam', 'lease': 'test',
                                     'frame_path': '/api/vision/sources/test-cam/frame'})
         client = VisionClient(base_url='https://fleet.example', transport=lambda *args: (
-            200, {'content-type': 'image/jpeg; charset=binary', 'x-frame-seq': '8'}, _TINY_JPEG))
+            200, {'content-type': 'image/jpeg; charset=binary', 'x-frame-seq': '8',
+                  'x-frame-rectified': 'map', 'x-frame-plane': '-1.37,-0.76,1.37,0.76,400.0000'}, _TINY_JPEG))
         self.assertEqual(client.fetch_frame({'source_id': 'test-cam', 'lease': 'test',
                                              'frame_path': '/api/vision/sources/test-cam/frame'}),
-                         (_TINY_JPEG, {'X-Frame-Seq': '8'}))
+                         (_TINY_JPEG, {'X-Frame-Seq': '8', 'X-Frame-Rectified': 'map',
+                                       'X-Frame-Plane': '-1.37,-0.76,1.37,0.76,400.0000'}))
 
     def test_contract_paths_are_required_before_transport(self):
         calls = []
