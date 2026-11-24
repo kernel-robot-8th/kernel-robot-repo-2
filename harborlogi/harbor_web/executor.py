@@ -105,6 +105,11 @@ def tick(*, evidence=None, now=None, registry=None):
     except Exception:
         pass  # R not reachable or not yet serving port events; the next tick retries.
     try:
+        from harbor_web import cell_plan_dispatch
+        cell_plan_dispatch.tick(registry, now=now)
+    except Exception:
+        pass
+    try:
         from harbor_web import outbound_loop
         outbound_loop.tick(registry, now=now)
     except Exception:

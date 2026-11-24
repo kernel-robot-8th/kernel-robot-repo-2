@@ -70,7 +70,7 @@ def parse_event(value):
         raise ValueError("Unknown handling failure reason")
     if event["identity"] is not None and event["identity"] not in IDENTITIES:
         raise ValueError("Identity is observed or attested")
-    if event["slot_ref"] is not None and not re.fullmatch(r".+-r\d+-c\d+-l\d+", event["slot_ref"]):
+    if event["slot_ref"] is not None and SLOT_REF_RE.fullmatch(event["slot_ref"]) is None:
         raise ValueError("Slot reference must be a Harbor anchor address")
     text = event["observed_at"]
     try:
