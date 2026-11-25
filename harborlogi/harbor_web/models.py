@@ -150,6 +150,23 @@ class Order(Authored):
         ]
 
 
+class IntakeOccurrence(models.Model):
+    occurrence_id = models.CharField(max_length=128, primary_key=True)
+    object_ref = models.CharField(max_length=128)
+    receipt_event_id = models.CharField(max_length=64, unique=True)
+    received_at = models.DateTimeField()
+    order = models.OneToOneField(Order, null=True, on_delete=models.PROTECT, related_name='intake_occurrence')
+    result_dispatch = models.OneToOneField('CellPlanDispatch', null=True, on_delete=models.PROTECT)
+    stored_event_id = models.CharField(max_length=64, null=True, unique=True)
+    observed_slot = models.CharField(max_length=96, blank=True)
+    observed_at = models.DateTimeField(null=True)
+    status = models.CharField(max_length=64, default='RECEIVED', choices=[
+        ('RECEIVED', '수령'), ('CARGO_UNKNOWN', '화물 등록 대기'), ('AMBIGUOUS_ORDER', '입고 요청 대조 필요'),
+        ('WAITING_FOR_YARD', '야드 관측 대기'), ('PLANNING_CAPACITY', '계획 대기'), ('STALE_RECEIPT', '이전 회차 수령'),
+        ('PLANNING', '배치 진행'), ('YARD_CONFLICT', '야드 관측 대조 필요'), ('STORED', '배치 확인'),
+        ('SLOT_MISMATCH', '요청·관측 위치 불일치')])
+
+
 class RearrangeAuthorization(Authored):
     """Standing permission for automatic R2 rearrangement (design 32, ADR0017 decision 4).
 

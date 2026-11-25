@@ -50,7 +50,8 @@ def _ref(value, limit=128):
 
 def parse_event(value):
     """Validate one closed PortEvent; unknown fields, kinds or misplaced fields are refused."""
-    if not isinstance(value, dict) or not set(value) <= set(FIELDS):
+    correlation = {"intake_occurrence_id", "placement_attempt_id"}
+    if not isinstance(value, dict) or not set(value) <= set(FIELDS) | correlation:
         raise ValueError("Port event has unknown fields")
     event = {name: value.get(name) for name in FIELDS}
     if event["kind"] not in KINDS:
@@ -59,6 +60,14 @@ def parse_event(value):
         raise ValueError("Port event id must be 64 lowercase hex")
     _ref(event["observation_ref"])
     required, optional = KINDS[event["kind"]]
+    keys = {name for name in correlation if value.get(name) is not None}
+    if keys:
+        expected = {"intake_occurrence_id"} if event["kind"] == "container.received_at_intake" else correlation
+        if event["kind"] not in ("container.received_at_intake", "container.stored") or keys != expected:
+            raise ValueError("Invalid port event correlation")
+        for name in keys:
+            _ref(value[name])
+            event[name] = value[name]
     for name in ("object_ref", "intake_point", "slot_ref", "vehicle_id", "reason", "identity"):
         if event[name] is None:
             if name in required:
@@ -98,6 +107,8 @@ class IntakeLedger:
                     object_ref TEXT PRIMARY KEY, state TEXT NOT NULL, hold_reason TEXT, attention TEXT,
                     identity TEXT, attested_by TEXT, intake_point TEXT, slot_ref TEXT,
                     updated_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS intake_receipt_binding (
+                    object_ref TEXT PRIMARY KEY, occurrence_id TEXT NOT NULL UNIQUE);
                 {RELEASE_SCHEMA};
             """)
 
@@ -126,6 +137,12 @@ class IntakeLedger:
                 "SELECT payload FROM port_events WHERE kind='container.stored' AND outcome='APPLIED' ORDER BY rowid"
             ).fetchall()
         return [parse_event(json.loads(r["payload"])) for r in rows]
+
+    def occurrence_events(self):
+        """Replay the occurrence-scoped stream independently of the legacy per-cargo state."""
+        with closing(self._connect()) as c:
+            return [parse_event(json.loads(row["payload"])) for row in c.execute(
+                "SELECT payload FROM port_events WHERE outcome='OCCURRENCE' ORDER BY rowid")]
 
     def holds(self):
         """Intake rows waiting for human review (HOLD or UNREADABLE attention), oldest update first."""
@@ -197,6 +214,17 @@ class IntakeLedger:
 
     def _apply(self, c, event, now):
         kind, ref = event["kind"], event["object_ref"]
+        if event.get("intake_occurrence_id"):
+            if kind == "container.received_at_intake":
+                row = c.execute("SELECT * FROM intake WHERE object_ref=?", (ref,)).fetchone()
+                if (row and row["state"] in ("EXPECTED", "TRIP_ARRIVED")
+                        and datetime.fromisoformat(row["updated_at"]) <= event["observed_at"] <= now):
+                    c.execute("INSERT OR IGNORE INTO intake_receipt_binding VALUES(?,?)", (ref, event["intake_occurrence_id"]))
+                    bound = c.execute("SELECT occurrence_id FROM intake_receipt_binding WHERE object_ref=?", (ref,)).fetchone()
+                    if bound and bound[0] == event["intake_occurrence_id"]:
+                        self._advance(c, row, "RECEIVED_AT_INTAKE", now, identity=event["identity"],
+                                      intake_point=event["intake_point"], attention=None)
+            return "OCCURRENCE"
         if kind == "vehicle.release_permitted":
             record_release(c, event)
             return "RELEASE_PERMITTED"
@@ -220,6 +248,15 @@ class IntakeLedger:
             if done:
                 c.execute("UPDATE intake SET attention=?,version=version+1 WHERE object_ref=?", (event["reason"], ref))
         return "APPLIED" if done else "IGNORED"
+
+    def complete_bound_receipt(self, event):
+        """Advance an existing trip manifest only after Harbor verified this occurrence's observed result."""
+        with closing(self._connect()) as c, c:
+            c.execute("BEGIN IMMEDIATE")
+            row = c.execute("SELECT i.* FROM intake i JOIN intake_receipt_binding b USING(object_ref) "
+                            "WHERE i.object_ref=? AND b.occurrence_id=?", (event["object_ref"], event["intake_occurrence_id"])).fetchone()
+            if row:
+                self._advance(c, row, "COMPLETED", event["observed_at"], identity=event["identity"], slot_ref=event["slot_ref"])
 
     def outbound_loaded_events(self, *, object_ref=None, vehicle_id=None):
         """Return consumed `container.loaded_for_outbound` events filtered by optional cargo/vehicle."""

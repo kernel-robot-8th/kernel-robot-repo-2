@@ -172,4 +172,4 @@ class CargoColorMigrationTests(TransactionTestCase):
             self.assertFalse(hasattr(RevertedCargo, 'color'))
         finally:
             executor = MigrationExecutor(connection)
-            executor.migrate(new_target)
+            executor.migrate(executor.loader.graph.leaf_nodes())

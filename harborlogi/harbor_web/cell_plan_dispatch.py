@@ -24,7 +24,8 @@ from harbor_web.command_models import (ACTIVE_CELL_PLAN_DISPATCH_STATES, ACTIVE_
                                        Command)
 from harbor_web.coordination import serialized
 from harbor_web.fleet_connection import connection_settings, fleet_client
-from harbor_web.models import Audit, Observation, Order, Plan
+from harbor_web.models import Audit, IntakeOccurrence, Observation, Order, Plan
+from harbor_web.service_common import AUTO_DISPATCH_USERNAME, automatic_actor
 
 logger = logging.getLogger(__name__)
 
@@ -373,6 +374,16 @@ def _submit_harbor_plan(actor, *, plan_id: int, robot_id: str | None, client, pr
             raise services.Conflict(blocked)
     payload = _harbor_plan_payload(plan, robot_id, check_reservations=True)
     req_key = f'harbor-cell-plan:{plan.pk}:{uuid.uuid4().hex[:12]}'
+    receipt = getattr(plan.order, 'intake_occurrence', None)
+    if receipt is not None:
+        if receipt.stored_event_id:
+            raise services.Conflict('INTAKE_ALREADY_OBSERVED')
+        if IntakeOccurrence.objects.filter(object_ref=receipt.object_ref, received_at__gte=receipt.received_at).exclude(pk=receipt.pk).exists():
+            raise services.Conflict('INTAKE_OCCURRENCE_SUPERSEDED')
+        if Observation.objects.filter(condition_id=plan.condition_id, provenance='PORT_EVENT',
+                observed_at__gt=plan.observation.observed_at).exists():
+            raise services.Conflict('INTAKE_YARD_OBSERVATION_CHANGED')
+        payload.update(intake_occurrence_id=receipt.pk, placement_attempt_id=req_key)
     rosy_client = client if client is not None else _default_client()
     return _create_and_submit(
         actor,
@@ -406,6 +417,8 @@ def dispatch_rosy_directive(
     """Mode 2: send a high-level directive and let ROSY compute the move order and coords (order_source='rosy_r')."""
     services._role(actor, 'operator')
     order = Order.objects.select_related('cargo').get(pk=order_id)
+    if IntakeOccurrence.objects.filter(order=order).exists():
+        raise services.Conflict('INTAKE_REQUIRES_BOUND_PLACEMENT')
     observation = Observation.objects.get(pk=observation_id)
     plan = Plan.objects.filter(pk=plan_id, order=order).first() if plan_id is not None else None
     _reject_blocked_order(order, production=client is None, observation=observation)
@@ -561,18 +574,7 @@ def cancel_cell_plan_dispatch(actor, *, dispatch_id: int, reason: str, client=No
     return row
 
 
-AUTO_DISPATCH_USERNAME = 'harbor-automatic'
 _auto_hold_reason: dict[int, str] = {}
-
-
-def _automatic_actor():
-    """A system user that never logs in, so automatic proposals stay apart from named people (ADR 0034 point 6)."""
-    from django.contrib.auth import get_user_model
-    user, created = get_user_model().objects.get_or_create(username=AUTO_DISPATCH_USERNAME, defaults={'is_active': False})
-    if created:
-        user.set_unusable_password()
-        user.save(update_fields=['password'])
-    return user
 
 
 @serialized
@@ -595,7 +597,7 @@ def auto_dispatch_next(*, client=None, production: bool = True) -> CellPlanDispa
                 or plan.order_version != order.version):
             continue
         try:
-            row = _submit_harbor_plan(_automatic_actor(), plan_id=plan.pk, robot_id=None, client=client, production=production)
+            row = _submit_harbor_plan(automatic_actor(), plan_id=plan.pk, robot_id=None, client=client, production=production)
         except (services.Conflict, ValidationError) as error:
             reason = str(getattr(error, 'message', '') or error)
             if _auto_hold_reason.get(plan.pk) != reason:  # record each reason once, not every tick
@@ -613,7 +615,7 @@ def auto_dispatch_next(*, client=None, production: bool = True) -> CellPlanDispa
 @serialized
 def propose_automatically(plan: Plan, *, client=None) -> CellPlanDispatch:
     """Send one Harbor-made plan (e.g. an authorized rearrangement) as the automatic user, behind every cell-plan gate."""
-    return _submit_harbor_plan(_automatic_actor(), plan_id=plan.pk, robot_id=None, client=client, production=client is None)
+    return _submit_harbor_plan(automatic_actor(), plan_id=plan.pk, robot_id=None, client=client, production=client is None)
 
 
 def tick(registry, *, now=None) -> dict[int, str]:

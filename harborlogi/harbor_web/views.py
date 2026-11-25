@@ -483,7 +483,9 @@ def inventory(request):
     from harbor_web.site_places_view import site_places_context
     from harbor_web.site_recognition_view import site_recognition_context
     from harbor_web.yard_pages import yard_page_context
+    from harbor_web.intake_occurrences import inventory_occurrences
     return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices, topview=topview_context(request),
+                intake_occurrences=inventory_occurrences(),
                 site_recognition=site_recognition_context(
                     request,
                     observation=selected,

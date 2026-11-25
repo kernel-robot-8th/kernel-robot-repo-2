@@ -9,17 +9,17 @@ from harbor_web.command_models import ACTIVE_CELL_PLAN_DISPATCH_STATES, ACTIVE_C
 from harbor_web.models import Command, CargoFootprint, Observation, Order, Plan
 from harbor_web.order_queue import queue_digest
 from harbor_web.plan_service import _calculate_plan, placement_decision
-from harbor_web.site_config import constraints, map_areas
+from harbor_web.site_config import constraints, covers_spatial_yard
 
 
 def unreconciled_cell_dispatches(observation):
     """Cell work can still own space until its outcome and the affected yard are observed."""
     terminal = ('COMPLETED', 'CANCELLED', 'ABORTED')
     outstanding = CellPlanDispatch.objects.filter(state__in=(*ACTIVE_CELL_PLAN_DISPATCH_STATES, *terminal))
-    payload = observation.payload
+    outstanding = outstanding.exclude(state__in=terminal, intakeoccurrence__status='STORED',
+        intakeoccurrence__observed_at__lte=observation.observed_at, observation__condition_id=observation.condition_id)
     if (observation.provenance in ('DECLARED', 'SYNTHETIC') and observation.observed_at <= timezone.now()
-            and payload.get('schema') == 'grid-placement-v1'
-            and {a.area_id for a in map_areas(observation.condition.payload)} <= set(payload['observed_areas'])):
+            and covers_spatial_yard(observation)):
         same_source = Q(observation__provenance=observation.provenance, observation__source_id=observation.source_id)
         if observation.provenance == 'DECLARED':
             same_source |= Q(observation__provenance='PORT_EVENT')
@@ -108,14 +108,20 @@ def planning_digest(order, observation, *, now=None):
 
 def replan_enabled(actor, trigger, *, source_id=None):
     # Called inside each event's serialized atomic transaction; never calls a public mutator.
-    for order in Order.objects.filter(auto_replan=True).select_related('cargo', 'planning_observation').order_by('pk'):
+    for order in Order.objects.filter(auto_replan=True).select_related('cargo', 'planning_observation', 'intake_occurrence').order_by('pk'):
         binding = order.planning_observation
         if binding is None or (source_id is not None and binding.source_id != source_id):
             continue
         if (Command.objects.filter(order=order, state__in=ACTIVE_COMMAND_STATES).exists()
                 or CellPlanDispatch.objects.filter(order=order, state='COMPLETED').exists()):
             continue
-        observation = Observation.objects.filter(source_id=binding.source_id).select_related('condition').latest('pk')
+        observations = Observation.objects.filter(source_id=binding.source_id).select_related('condition')
+        if getattr(order, 'intake_occurrence', None):
+            observation = observations.filter(provenance__in=('DECLARED', 'PORT_EVENT')).order_by('-observed_at', '-pk').first()
+            if observation is None or not covers_spatial_yard(observation):
+                continue
+        else:
+            observation = observations.latest('pk')
         if unreconciled_cell_dispatches(observation).filter(order=order).exists():
             continue
         current = timezone.now()
