@@ -31,7 +31,11 @@ CONDITIONS = [
      '표시 전용입니다. 웹 실행기는 ARM만 쓰므로 이송 단계가 생길 때 관문에 넣습니다.'),
     ('port_events', 'R 항만 이벤트 조회 경로 설치', False, 'READINESS_PORT_EVENTS_UNMET', 'ROSY',
      '표시 전용입니다. 이 경로가 없는 R에서는 입고 도착·하역 기록이 자동으로 들어오지 않습니다.'),
+    ('cell_plans', 'R 셀 계획 경로 응답', False, 'READINESS_CELL_PLAN_ROUTE_UNMET', 'ROSY',
+     '셀 계획 자동 제안 관문입니다(ADR 0034). R에 cell-plans 경로가 설치됐는지 확인하세요.'),
 ]
+# Cell plans (ADR 0034): ROSY approves and admits every step itself, so the legacy ARM-route rows do not gate them.
+CELL_PLAN_GATES = ('session', 'arm_clear', 'producer', 'observation', 'cell_plans')
 REASONS = {code for _, _, _, code, _, _ in CONDITIONS if code} | {'READINESS_CHECK_REQUIRED', 'READINESS_CHECK_STALE'}
 
 
@@ -79,7 +83,7 @@ def states(plan, check):
         observation='UNKNOWN' if plan is None else _observation_state(
             plan.observation.provenance, port_events_met=port_events_met))
     value['producer'] = 'MET' if found.get('auto_producer') == 'MET' or human_confirmation_ready() else 'UNMET'
-    for key in ('arm', 'arm_live', 'arm_clear', 'proposal', 'port_events'):
+    for key in ('arm', 'arm_live', 'arm_clear', 'proposal', 'port_events', 'cell_plans'):
         value[key] = found.get(key) if found.get(key) in {'MET', 'UNMET'} else 'UNKNOWN'
     return value
 
@@ -91,13 +95,36 @@ def first_unmet(plan):
     value = states(plan, check)
     if value['binding'] != 'MET':
         return 'READINESS_BINDING_REQUIRED'
+    stored = _stored_check_unmet(check)
+    if stored:
+        return stored
+    for key, _, gating, code, _, _ in CONDITIONS:
+        if gating and value[key] != 'MET':
+            return code
+    return ''
+
+
+def first_unmet_cell_plan(observation):
+    """The first unmet cell-plan gate for proposing from this observation, or '' when it may be sent."""
+    from harbor_web.fleet_connection import last_check
+    check = last_check()
+    stored = _stored_check_unmet(check)
+    if stored:
+        return stored
+    value = states(None, check)
+    value['observation'] = _observation_state(
+        observation.provenance, port_events_met=(check.detail.get('conditions') or {}).get('port_events') == 'MET')
+    for key, _, _, code, _, _ in CONDITIONS:
+        if key in CELL_PLAN_GATES and value[key] != 'MET':
+            return code
+    return ''
+
+
+def _stored_check_unmet(check):
     if check is None:
         return 'READINESS_CHECK_REQUIRED'
     if not timedelta(0) <= timezone.now() - check.created_at <= MAX_AGE:
         return 'READINESS_CHECK_STALE'
-    for key, _, gating, code, _, _ in CONDITIONS:
-        if gating and value[key] != 'MET':
-            return code
     return ''
 
 

@@ -4,6 +4,7 @@ import {
   frameStatus,
   mountTopview,
   resolveRotationDeg,
+  displayRotationDeg,
   projectPoint,
   projectRoi,
   shouldShowOverlay,
@@ -133,6 +134,28 @@ try {
   window.dispatchEvent(new Event('pagehide'));
   assert.equal(timers.size, 0);
   assert.equal(image.hidden, true);
+
+  const autoSelect = new EventTarget();
+  autoSelect.options = ['offline', 'live', 'manual'].map(id => ({value: `/topview/${id}/frame/`}));
+  autoSelect.selectedIndex = 0;
+  Object.defineProperty(autoSelect, 'value', {get: () => autoSelect.options[autoSelect.selectedIndex].value});
+  const autoNodes = {...nodes, '[data-topview-source]': autoSelect};
+  respond = () => Promise.resolve(calls.at(-1).url.includes('/live/')
+    ? new Response('jpeg', {headers: {'Content-Type': 'image/jpeg'}})
+    : new Response('frame unavailable', {status: 404}));
+  const cleanAuto = mountTopview({querySelector: selector => autoNodes[selector], dataset: {}});
+  await settle();
+  assert.equal(autoSelect.selectedIndex, 0, 'a cold stream gets another request');
+  tick(); await settle();
+  assert.equal(autoSelect.selectedIndex, 1, 'the next camera is shown if the default has no fresh frame');
+  assert.equal(image.hidden, false);
+  autoSelect.selectedIndex = 0;
+  autoSelect.dispatchEvent(new Event('change'));
+  await settle();
+  tick(); await settle();
+  assert.equal(autoSelect.selectedIndex, 0, 'an explicit choice stays selected while unavailable');
+  assert.equal(image.hidden, true);
+  cleanAuto();
 
   // Offscreen Image.decode() atomic frame swap, mid-decode abort, corrupt JPEG rejection, and full cleanup.
   let hiddenState = true;
@@ -396,3 +419,10 @@ try {
   URL.revokeObjectURL = revoke;
 }
 console.log('Topview lifecycle and overlay projection tests passed');
+
+// Deployed omx_overhead sends X-Frame-Rotation-Deg: 0; Harbor still shows the yard turned 180° (conveyor at the bottom).
+assert.equal(displayRotationDeg('0', 'omx_overhead'), 180);
+assert.equal(displayRotationDeg('0', 'top'), 180);
+assert.equal(displayRotationDeg('90', 'top'), 270);
+assert.equal(displayRotationDeg('0', 'ceiling_north'), 0);
+assert.equal(displayRotationDeg(null, 'omx_overhead'), 180);

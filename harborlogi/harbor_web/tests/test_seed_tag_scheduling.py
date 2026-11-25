@@ -27,19 +27,19 @@ class SeedTagSchedulingTests(TestCase):
 
     def test_seed_site_dataset_declared_is_idempotent_and_live_forbids_synthetic(self):
         call_command('seed_site_dataset', provenance='DECLARED', verbosity=0)
-        self.assertEqual(Cargo.objects.filter(code__startswith='C-').count(), 8)
-        self.assertEqual(CargoTag.objects.count(), 8)
-        self.assertEqual(ArrivalEvent.objects.filter(match_status='MATCHED').count(), 4)
+        self.assertEqual(Cargo.objects.filter(code__startswith='C-').count(), 20)
+        self.assertEqual(CargoTag.objects.count(), 20)
+        self.assertEqual(ArrivalEvent.objects.filter(match_status='MATCHED').count(), 12)
         self.assertEqual(Observation.objects.filter(provenance='DECLARED').count(), 1)
-        self.assertEqual(Order.objects.filter(kind='OUTBOUND').count(), 4)
-        self.assertEqual(Order.objects.filter(kind='INBOUND').count(), 4)
+        self.assertEqual(Order.objects.filter(kind='OUTBOUND').count(), 12)
+        self.assertEqual(Order.objects.filter(kind='INBOUND').count(), 8)
 
         # Second invocation stays idempotent without duplicating cargos, tags, arrivals, or orders.
         call_command('seed_site_dataset', provenance='DECLARED', verbosity=0)
-        self.assertEqual(Cargo.objects.filter(code__startswith='C-').count(), 8)
-        self.assertEqual(CargoTag.objects.count(), 8)
-        self.assertEqual(ArrivalEvent.objects.count(), 4)
-        self.assertEqual(Order.objects.filter(kind='OUTBOUND').count(), 4)
+        self.assertEqual(Cargo.objects.filter(code__startswith='C-').count(), 20)
+        self.assertEqual(CargoTag.objects.count(), 20)
+        self.assertEqual(ArrivalEvent.objects.count(), 12)
+        self.assertEqual(Order.objects.filter(kind='OUTBOUND').count(), 12)
 
         with override_settings(MODE='live'), self.assertRaises(CommandError):
             call_command('seed_site_dataset', provenance='SYNTHETIC', verbosity=0)
@@ -90,9 +90,9 @@ class SeedTagSchedulingTests(TestCase):
 
         proposal = scheduling.propose_outbound_schedule()
         codes = [row['order'].cargo.code for row in proposal['preview_rows']]
-        # Urgent Busan (C-1, C-3, +2h) precede Tokyo (C-4, +7h), followed by LA (C-2, +18h).
+        # Urgent Busan (C-1, C-3, +2h) first, then by voyage cutoff: C-14 +4h, C-4 +7h, ... LA C-15 +28h.
         self.assertEqual(set(codes[:2]), {'C-1', 'C-3'})
-        self.assertEqual(codes[2:], ['C-4', 'C-2'])
+        self.assertEqual(codes[2:], ['C-14', 'C-4', 'C-10', 'C-12', 'C-16', 'C-2', 'C-9', 'C-11', 'C-13', 'C-15'])
 
         self.client.force_login(self.op)
         resp = self.client.post('/outbound/schedule/apply/')
@@ -103,4 +103,4 @@ class SeedTagSchedulingTests(TestCase):
             for o in Order.objects.filter(kind='OUTBOUND').select_related('cargo').order_by('priority_group', 'sequence')
         ]
         self.assertEqual(set(saved_codes[:2]), {'C-1', 'C-3'})
-        self.assertEqual(saved_codes[2:], ['C-4', 'C-2'])
+        self.assertEqual(saved_codes[2:], ['C-14', 'C-4', 'C-10', 'C-12', 'C-16', 'C-2', 'C-9', 'C-11', 'C-13', 'C-15'])
