@@ -11,6 +11,7 @@ Bearer로 받는다(rosy-platform site_auth.authorize → account_receiver). 로
 HARBOR_FLEET_TOKEN(서비스 신원)을 쓴다.
 """
 import hashlib
+import json
 import os
 import threading
 import time
@@ -30,11 +31,15 @@ from harbor.rosy_vision import (
     StaleFrameError,
     VisionClient,
 )
+from harbor.topview_site_pixels import load_topview_site_pixels
 from harbor_web.access import EVERYONE
 from harbor_web.fleet_connection import connection_settings
 
 from harbor_web.auth import require_roles
 from harbor_web.rosy_account import access_token
+
+ALLOWED_CAMERA_SOURCES = ('omx_overhead', 'ceiling_north')
+DEFAULT_RAW_CAMERA_SOURCE = 'omx_overhead'
 
 _CACHE_MAX_ENTRIES = 64
 _SOURCES_TTL_S = 15.0
@@ -95,24 +100,47 @@ def _camera_sources(origin, token, ca_file, *, timeout):
     if not isinstance(sources, list):
         raise ValueError('Invalid vision sources')
     # 출처 없는 다른 카메라가 정상 카메라까지 막거나 URL 경로를 바꾸지 않게 한다.
-    return list(dict.fromkeys(source for source in sources
+    valid = list(dict.fromkeys(source for source in sources
         if isinstance(source, str) and source and '/' not in source and source not in ('.', '..')
         and not any(ord(char) < 32 or ord(char) == 127 for char in source)))
+    allowed = [source for source in ALLOWED_CAMERA_SOURCES if source in valid]
+    return allowed if allowed else valid
 
 
 def topview_context(request):
     """연결 실패는 탑뷰 칸 안에만 표시하고 야드 화면을 계속 연다."""
     origin, token, ca_file = _fleet_settings(request)
     if not origin:
-        return dict(sources=[], status='ROSY 연동 전')
+        return dict(sources=[], status='ROSY 연동 전', default_source_id='', default_view_mode='auto',
+                    site_pixels=None, site_pixels_json='', pending_points=[])
     if not token:
-        return dict(sources=[], status='ROSY 로그인 필요')
+        return dict(sources=[], status='ROSY 로그인 필요', default_source_id='', default_view_mode='auto',
+                    site_pixels=None, site_pixels_json='', pending_points=[])
     try:
         sources = _camera_sources(origin, token, ca_file, timeout=2)
-        return dict(sources=[dict(source_id=source, url=reverse('topview_frame', args=[source]))
-                             for source in sources], status='' if sources else 'ROSY 연결 안 됨')
+        default_source_id = sources[0] if sources else ''
+        default_view_mode = 'raw' if default_source_id == DEFAULT_RAW_CAMERA_SOURCE else 'auto'
+        site_pixels = load_topview_site_pixels() if sources else None
+        site_pixels_json = (
+            json.dumps(site_pixels, ensure_ascii=False, separators=(',', ':'))
+            if site_pixels is not None else ''
+        )
+        pending_points = [
+            pt for pt in (site_pixels or {}).get('points', ())
+            if pt.get('kind') == 'slot' and pt.get('roi') is None
+        ]
+        return dict(
+            sources=[dict(source_id=source, url=reverse('topview_frame', args=[source])) for source in sources],
+            status='' if sources else 'ROSY 연결 안 됨',
+            default_source_id=default_source_id,
+            default_view_mode=default_view_mode,
+            site_pixels=site_pixels,
+            site_pixels_json=site_pixels_json,
+            pending_points=pending_points,
+        )
     except (ValueError, OSError):
-        return dict(sources=[], status='ROSY 연결 안 됨')
+        return dict(sources=[], status='ROSY 연결 안 됨', default_source_id='', default_view_mode='auto',
+                    site_pixels=None, site_pixels_json='', pending_points=[])
 
 
 def _request_topview_lease(client, origin, source_id, *, view_mode):
