@@ -155,6 +155,26 @@ class TopviewProxyTests(TestCase):
         self.assertIsNotNone(ctx['site_pixels'])
         self.assertEqual(ctx['site_pixels']['source_id'], 'omx_overhead')
 
+    def test_arm_s_top_is_selectable_without_using_yard_points(self):
+        from django.test import RequestFactory
+        from harbor_web.topview_proxy import topview_context
+
+        self.camera.sources.return_value = {
+            'sources': ['omx_arm_s_wrist', 'omx_arm_s_top', 'ceiling_north', 'omx_overhead'],
+        }
+        request = RequestFactory().get('/')
+        request.user = self.user
+        request.session = {}
+        ctx = topview_context(request)
+        self.assertEqual([s['source_id'] for s in ctx['sources']],
+                         ['omx_overhead', 'ceiling_north', 'omx_arm_s_top'])
+        self.assertEqual(ctx['site_pixels']['source_id'], 'omx_overhead')
+
+        url = reverse('topview_frame', args=['omx_arm_s_top'])
+        response = self.client.get(url, {'view': 'raw'})
+        self.assertEqual((response.status_code, response.content), (200, b'jpeg-test'))
+        self.camera.lease.assert_called_once_with('omx_arm_s_top')
+
     def test_camera_allowlist_falls_back_to_all_valid_sources_when_none_match(self):
         from django.test import RequestFactory
         from harbor_web.topview_proxy import _camera_sources, topview_context

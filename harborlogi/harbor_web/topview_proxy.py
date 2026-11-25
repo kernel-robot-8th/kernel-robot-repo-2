@@ -40,7 +40,7 @@ from harbor_web.rosy_account import access_token
 
 # The live site lists the cell top camera as 'top' (D-1065 role name); older setups use 'omx_overhead'.
 YARD_CAMERA_SOURCES = ('top', 'omx_overhead')
-ALLOWED_CAMERA_SOURCES = YARD_CAMERA_SOURCES + ('ceiling_north',)
+ALLOWED_CAMERA_SOURCES = YARD_CAMERA_SOURCES + ('ceiling_north', 'omx_arm_s_top')
 
 _CACHE_MAX_ENTRIES = 64
 _SOURCES_TTL_S = 15.0
