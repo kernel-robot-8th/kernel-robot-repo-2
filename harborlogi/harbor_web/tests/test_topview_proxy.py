@@ -1,4 +1,5 @@
 """탑뷰 프록시의 역할·출처 확인과 자격 비노출 시험."""
+import json
 import os
 from unittest.mock import patch
 
@@ -151,7 +152,103 @@ class TopviewProxyTests(TestCase):
         self.assertIsNotNone(ctx['site_pixels'])
         self.assertEqual(ctx['site_pixels']['source_id'], 'omx_overhead')
 
+    def test_side_camera_is_allowed_after_yard_and_before_ceiling_and_gets_its_own_overlay(self):
+        from django.test import RequestFactory
+        from harbor_web.topview_proxy import _camera_sources, topview_context
+
+        def context():
+            request = RequestFactory().get('/')
+            request.user = self.user
+            request.session = {}
+            return topview_context(request)
+
+        self.camera.sources.return_value = {'sources': ['ceiling_north', 'omx_side', 'arm_a_wrist', 'top']}
+        self.assertEqual(_camera_sources('https://fleet.example', 'test-fleet-secret', None, timeout=2),
+                         ['top', 'omx_side', 'ceiling_north', 'arm_a_wrist'])
+        ctx = context()
+        self.assertEqual(ctx['default_source_id'], 'top')
+        self.assertEqual((ctx['site_pixels']['source_id'], ctx['side_pixels']['source_id']), ('top', 'omx_side'))
+        self.assertEqual(ctx['side_pixels']['points'][0]['kind'], 'tier')
+        self.assertEqual([doc['source_id'] for doc in json.loads(ctx['site_pixels_json'])], ['top', 'omx_side'])
+
+        # The site may list the role name 'side': the overlay follows whichever id is offered.
+        self.camera.sources.return_value = {'sources': ['side', 'ceiling_north']}
+        ctx = context()
+        self.assertEqual(ctx['default_source_id'], 'side')
+        self.assertEqual(ctx['default_view_mode'], 'auto')
+        self.assertIsNone(ctx['site_pixels'])
+        self.assertEqual(ctx['side_pixels']['source_id'], 'side')
+        self.assertTrue(ctx['default_has_points'])
+
+        # No side camera: no side overlay, yard unchanged.
+        self.camera.sources.return_value = {'sources': ['omx_overhead', 'ceiling_north']}
+        ctx = context()
+        self.assertIsNone(ctx['side_pixels'])
+        self.assertEqual([doc['source_id'] for doc in json.loads(ctx['site_pixels_json'])], ['omx_overhead'])
+
+    def test_arm_s_camera_order_overlay_and_pending_places(self):
+        from django.test import RequestFactory
+        from harbor_web.topview_proxy import _camera_sources, topview_context
+
+        self.camera.sources.return_value = {
+            'sources': ['ceiling_north', 'omx_arm_s_top', 'omx_side', 'top']}
+        self.assertEqual(_camera_sources('https://fleet.example', 'test-fleet-secret', None, timeout=2),
+                         ['top', 'omx_side', 'omx_arm_s_top', 'ceiling_north'])
+        request = RequestFactory().get('/')
+        request.user = self.user
+        request.session = {}
+        ctx = topview_context(request)
+        self.assertEqual(ctx['arm_s_pixels']['source_id'], 'omx_arm_s_top')
+        self.assertEqual([(g['source_id'], [p['site'] for p in g['points']]) for g in ctx['pending_groups']],
+                         [('omx_arm_s_top', ['not_places:vehicle_tray', 'belt-in'])])
+        self.assertEqual(ctx['pending_points'], [])
+
+        self.camera.sources.return_value = {'sources': ['arm_s_top', 'top']}
+        request.session = {}
+        ctx = topview_context(request)
+        self.assertEqual(ctx['arm_s_pixels']['source_id'], 'arm_s_top')
+
+    def test_default_camera_matches_running_order_kind_without_extra_queries(self):
+        from django.test import RequestFactory
+        from harbor_web.topview_proxy import topview_context
+
+        self.camera.sources.return_value = {
+            'sources': ['ceiling_north', 'omx_arm_s_top', 'omx_side', 'top'],
+        }
+        request = RequestFactory().get('/')
+        request.user = self.user
+        request.session = {}
+
+        # Passing active_order_kind adds zero DB queries.
+        for kind, expected_source in (
+            (None, 'top'),
+            ('OUTBOUND', 'top'),
+            ('REARRANGE', 'top'),
+            ('INBOUND', 'omx_arm_s_top'),
+        ):
+            with self.subTest(kind=kind), self.assertNumQueries(0):
+                ctx = topview_context(request, active_order_kind=kind)
+            self.assertEqual(ctx['default_source_id'], expected_source)
+            self.assertEqual(ctx['default_source_url'], reverse('topview_frame', args=[expected_source]))
+            self.assertEqual(ctx['default_view_mode'], 'raw')
+            self.assertTrue(ctx['default_has_points'])
+
+        # Role name 'arm_s_top' is also picked for INBOUND.
+        self.camera.sources.return_value = {'sources': ['arm_s_top', 'omx_overhead']}
+        with self.assertNumQueries(0):
+            ctx = topview_context(request, active_order_kind='INBOUND')
+        self.assertEqual(ctx['default_source_id'], 'arm_s_top')
+        self.assertEqual(ctx['default_view_mode'], 'raw')
+
+        # When arm_s_top is absent from ROSY sources, INBOUND falls back to yard camera.
+        self.camera.sources.return_value = {'sources': ['omx_overhead', 'omx_side', 'ceiling_north']}
+        with self.assertNumQueries(0):
+            ctx = topview_context(request, active_order_kind='INBOUND')
+        self.assertEqual(ctx['default_source_id'], 'omx_overhead')
+        self.assertEqual(ctx['default_view_mode'], 'raw')
+
     def test_arm_s_top_is_selectable_without_using_yard_points(self):
+        # From #141: every registered camera is listed (preferred ones first) and S-arm frames are served raw.
         from django.test import RequestFactory
         from harbor_web.topview_proxy import topview_context
 
@@ -163,7 +260,7 @@ class TopviewProxyTests(TestCase):
         request.session = {}
         ctx = topview_context(request)
         self.assertEqual([s['source_id'] for s in ctx['sources']],
-                         ['omx_overhead', 'ceiling_north', 'omx_arm_s_top', 'omx_arm_s_wrist'])
+                         ['omx_overhead', 'omx_arm_s_top', 'ceiling_north', 'omx_arm_s_wrist'])
         self.assertEqual(ctx['site_pixels']['source_id'], 'omx_overhead')
 
         url = reverse('topview_frame', args=['omx_arm_s_top'])
@@ -201,7 +298,7 @@ class TopviewProxyTests(TestCase):
         request.user = self.user
         request.session = {}
         ctx = topview_context(request)
-        self.assertEqual([s['source_id'] for s in ctx['sources']], ['top', 'ceiling_north', 'side'])
+        self.assertEqual([s['source_id'] for s in ctx['sources']], ['top', 'side', 'ceiling_north'])
         self.assertEqual((ctx['default_source_id'], ctx['default_view_mode']), ('top', 'raw'))
         self.assertEqual(ctx['site_pixels']['source_id'], 'top')
 
@@ -247,10 +344,13 @@ class TopviewProxyTests(TestCase):
         self.assertNotIn('raw-lease-secret', str(dict(response.headers)))
 
     def test_stale_and_network_errors_do_not_expose_credentials(self):
+        from urllib.error import HTTPError
         for error, status in ((StaleFrameError('test-lease-secret'), 404),
+                              (HTTPError('https://fleet.example/frame', 404, 'no camera connected test-lease-secret', {}, None), 404),
+                              (HTTPError('https://fleet.example/frame', 500, 'test-lease-secret', {}, None), 502),
                               (OSError('test-lease-secret'), 502),
                               (ValueError('test-lease-secret'), 502)):
-            with self.subTest(error=type(error).__name__):
+            with self.subTest(error=type(error).__name__, status=status):
                 self.camera.fetch_frame.side_effect = error
                 response = self.client.get(self.url)
                 self.assertEqual(response.status_code, status)

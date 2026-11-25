@@ -1,0 +1,29 @@
+{
+  "schema": "harbor.topview-site-pixels.v1",
+  "source_id": "omx_arm_s_top",
+  "image": [
+    640,
+    480
+  ],
+  "status": "planned_unverified",
+  "assumptions": {
+    "pixels": "Rosy에 arm_s_top 픽셀 값이 없다(site_points_catalog: \"arm_s_top homography required for vehicle_tray\"). 실측 전이라 두 점 모두 null이고 화면에는 「위치 미정」 목록만 나온다.",
+    "flow": "S3 정차 Pinky → 공급암 S → 컨베이어 belt-in. belt-in(ROSY 이름 belt_in)은 공급암 S가 놓는 끝."
+  },
+  "points": [
+    {
+      "site": "not_places:vehicle_tray",
+      "label": "Pinky 짐칸",
+      "short_label": "Pinky 짐칸",
+      "kind": "pick",
+      "point": null
+    },
+    {
+      "site": "belt-in",
+      "label": "컨베이어 투입",
+      "short_label": "컨베이어 투입",
+      "kind": "pick",
+      "point": null
+    }
+  ]
+}

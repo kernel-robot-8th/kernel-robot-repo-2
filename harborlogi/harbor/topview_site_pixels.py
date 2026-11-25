@@ -19,6 +19,12 @@ logger = logging.getLogger(__name__)
 
 SCHEMA_ID = 'harbor.topview-site-pixels.v1'
 DEFAULT_SITE_PIXELS_PATH = Path(__file__).resolve().parents[1] / 'config' / 'topview-site-pixels.json'
+DEFAULT_SIDE_PIXELS_PATH = Path(__file__).resolve().parents[1] / 'config' / 'sideview-site-pixels.json'
+DEFAULT_ARM_S_PIXELS_PATH = Path(__file__).resolve().parents[1] / 'config' / 'arm-s-site-pixels.json'
+# Canonical non-slot places the supply-arm-S camera shows (not_places id, belt-in end); anything else is rejected.
+_ARM_S_PICK_SITES = frozenset({'not_places:vehicle_tray', 'belt-in'})
+# Side camera: one box per stack tier. 'side:yard-r2-t3', 'side:temp_a-t1' (temp has one stack, no row).
+_TIER_SITE_RE = re.compile(r'^side:(?P<zone>[a-z][a-z0-9_]*?)(?:-r(?P<row>[1-9]\d*))?-t(?P<tier>[1-9]\d*)$')
 _SLOT_SITE_RE = re.compile(r'^(?P<zone>[a-z][a-z0-9_]*):r(?P<row>[1-9]\d*)-s(?P<slot>[1-9]\d*)$')
 
 
@@ -38,6 +44,30 @@ def _expected_slot_wire_refs(site: str) -> tuple[str, ...]:
         return ()
     col = spec['valid_cols'][slot_idx - 1]
     return tuple(f'{zone}-r{row}-c{col}-l{tier}' for tier in range(1, spec['tiers'] + 1))
+
+
+def _expected_tier_wire_refs(site: str) -> tuple[str, ...]:
+    """All wire refs one side-camera tier box covers: the camera looks along the slot axis, so every
+    column of the row is stacked in view (yard), and temp's three lanes overlap end-on."""
+    match = _TIER_SITE_RE.fullmatch(site)
+    if match is None:
+        return ()
+    spec = CANONICAL_ZONE_SPECS.get(match.group('zone'))
+    if spec is None:
+        return ()
+    zone, tier = match.group('zone'), int(match.group('tier'))
+    row = match.group('row')
+    if not (1 <= tier <= spec['tiers']):
+        return ()
+    if zone == 'yard':
+        if row is None or not (1 <= int(row) <= spec['rows']):
+            return ()
+        rows = [int(row)]
+    else:
+        if row is not None:
+            return ()
+        rows = list(range(1, spec['rows'] + 1))
+    return tuple(f'{zone}-r{r}-c{col}-l{tier}' for r in rows for col in spec['valid_cols'])
 
 
 def _default_short_label(site: str, label: str) -> str:
@@ -143,33 +173,34 @@ def validate_topview_site_pixels(document: Any) -> dict[str, Any] | None:
         raw_short = entry.get('short_label')
         short_label = raw_short.strip() if isinstance(raw_short, str) and raw_short.strip() else _default_short_label(site, label)
 
-        if site == 'belt':
+        if site == 'belt' or site in _ARM_S_PICK_SITES:
             kind = entry.get('kind') or 'pick'
             if kind != 'pick':
-                logger.warning('topview site-pixels: skipping belt point with unsupported kind %r', kind)
+                logger.warning('topview site-pixels: skipping %s point with unsupported kind %r', site, kind)
                 continue
             try:
                 point_xy = _validate_point(entry.get('point'), width, height)
             except ValueError as exc:
-                logger.warning('topview site-pixels: skipping belt (%s)', exc)
+                logger.warning('topview site-pixels: skipping %s (%s)', site, exc)
                 continue
             seen_sites.add(site)
             validated_points.append({
-                'site': 'belt',
+                'site': site,
                 'label': label,
                 'short_label': short_label,
-                'zone': 'belt',
+                'zone': 'belt' if site == 'belt' else site.split(':', 1)[0],
                 'kind': 'pick',
                 'point': point_xy,
             })
             continue
 
-        if site not in canonical_slots:
+        is_tier = _TIER_SITE_RE.fullmatch(site) is not None
+        if not is_tier and site not in canonical_slots:
             logger.warning('topview site-pixels: skipping non-canonical site %r', site)
             continue
 
         raw_refs = entry.get('wire_refs')
-        expected_refs = _expected_slot_wire_refs(site)
+        expected_refs = _expected_tier_wire_refs(site) if is_tier else _expected_slot_wire_refs(site)
         if (
             not isinstance(raw_refs, list)
             or not raw_refs
@@ -192,12 +223,14 @@ def validate_topview_site_pixels(document: Any) -> dict[str, Any] | None:
 
         seen_sites.add(site)
         zone = site.split(':', 1)[0]
+        if is_tier:
+            zone = _TIER_SITE_RE.fullmatch(site).group('zone')
         validated_points.append({
             'site': site,
             'label': label,
             'short_label': short_label,
             'zone': zone,
-            'kind': 'slot',
+            'kind': 'tier' if is_tier else 'slot',
             'wire_refs': list(raw_refs),
             'roi': roi,
         })
@@ -209,6 +242,7 @@ def validate_topview_site_pixels(document: Any) -> dict[str, Any] | None:
         'image': [width, height],
         'status': status,
         'rosy_commit': rosy_commit.strip() if isinstance(rosy_commit, str) and rosy_commit.strip() else '',
+        'reference_frame': document['reference_frame'].strip() if isinstance(document.get('reference_frame'), str) else '',
         'frame_source': document['frame_source'].strip() if isinstance(document.get('frame_source'), str) else '',
         'points': validated_points,
     }
@@ -223,3 +257,13 @@ def load_topview_site_pixels(path: Path | str | None = None) -> dict[str, Any] |
         logger.warning('topview site-pixels load failed (%s): %s', target, exc)
         return None
     return validate_topview_site_pixels(raw)
+
+
+def load_arm_s_site_pixels(path: Path | str | None = None) -> dict[str, Any] | None:
+    """Supply-arm-S camera places (vehicle tray, belt-in): same schema; pixels stay null until measured."""
+    return load_topview_site_pixels(path if path is not None else DEFAULT_ARM_S_PIXELS_PATH)
+
+
+def load_sideview_site_pixels(path: Path | str | None = None) -> dict[str, Any] | None:
+    """Side-camera tier boxes: same schema and validator, separate file."""
+    return load_topview_site_pixels(path if path is not None else DEFAULT_SIDE_PIXELS_PATH)

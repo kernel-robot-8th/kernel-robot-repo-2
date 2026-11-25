@@ -31,7 +31,9 @@ from harbor.rosy_vision import (
     StaleFrameError,
     VisionClient,
 )
-from harbor.topview_site_pixels import load_topview_site_pixels
+from harbor.topview_site_pixels import (
+    load_arm_s_site_pixels, load_sideview_site_pixels, load_topview_site_pixels,
+)
 from harbor_web.access import EVERYONE
 from harbor_web.fleet_connection import connection_settings
 
@@ -40,7 +42,12 @@ from harbor_web.rosy_account import access_token
 
 # The live site lists the cell top camera as 'top' (D-1065 role name); older setups use 'omx_overhead'.
 YARD_CAMERA_SOURCES = ('top', 'omx_overhead')
-PREFERRED_CAMERA_SOURCES = YARD_CAMERA_SOURCES + ('ceiling_north', 'omx_arm_s_top')
+# The side camera watches containers being stacked ('side' is Rosy's role name, 'omx_side' the live source id).
+SIDE_CAMERA_SOURCES = ('side', 'omx_side')
+# Supply arm S camera (inbound: Pinky at S3 -> arm S -> belt-in); 'arm_s_top' is Rosy's role name.
+ARM_S_CAMERA_SOURCES = ('arm_s_top', 'omx_arm_s_top')
+# Listed first in this order; every other registered camera follows (#141: show all, find a live preview).
+PREFERRED_CAMERA_SOURCES = YARD_CAMERA_SOURCES + SIDE_CAMERA_SOURCES + ARM_S_CAMERA_SOURCES + ('ceiling_north',)
 
 _CACHE_MAX_ENTRIES = 64
 _SOURCES_TTL_S = 15.0
@@ -108,43 +115,86 @@ def _camera_sources(origin, token, ca_file, *, timeout):
     return preferred + [source for source in valid if source not in preferred]
 
 
-def topview_context(request):
+def _overlay_for(sources, camera_ids, loader):
+    """Overlay config rebound to whichever id of this camera group the site offers, or None."""
+    camera = next((source for source in sources if source in camera_ids), None)
+    pixels = loader() if camera else None
+    if pixels is not None and pixels['source_id'] in camera_ids:
+        pixels['source_id'] = camera
+    return pixels
+
+
+def _default_source_id(sources, active_order_kind=None):
+    """Pick default camera for the running job (INBOUND -> arm S; otherwise yard)."""
+    if not sources:
+        return ''
+    if active_order_kind == 'INBOUND':
+        arm_s = next((source for source in sources if source in ARM_S_CAMERA_SOURCES), None)
+        if arm_s is not None:
+            return arm_s
+    yard = next((source for source in sources if source in YARD_CAMERA_SOURCES), None)
+    return yard if yard is not None else sources[0]
+
+
+def topview_context(request, *, active_order_kind=None):
     """연결 실패는 탑뷰 칸 안에만 표시하고 야드 화면을 계속 연다."""
     origin, token, ca_file = _fleet_settings(request)
     if not origin:
-        return dict(sources=[], status='ROSY 연동 전', default_source_id='', default_view_mode='auto',
-                    site_pixels=None, site_pixels_json='', pending_points=[])
+        return dict(sources=[], status='ROSY 연동 전', default_source_id='', default_source_url='', default_view_mode='auto',
+                    site_pixels=None, side_pixels=None, arm_s_pixels=None, pending_groups=[], site_pixels_json='', pending_points=[],
+                    default_has_points=False, points_unverified=False)
     if not token:
-        return dict(sources=[], status='ROSY 로그인 필요', default_source_id='', default_view_mode='auto',
-                    site_pixels=None, site_pixels_json='', pending_points=[])
+        return dict(sources=[], status='ROSY 로그인 필요', default_source_id='', default_source_url='', default_view_mode='auto',
+                    site_pixels=None, side_pixels=None, arm_s_pixels=None, pending_groups=[], site_pixels_json='', pending_points=[],
+                    default_has_points=False, points_unverified=False)
     try:
         sources = _camera_sources(origin, token, ca_file, timeout=2)
-        default_source_id = sources[0] if sources else ''
-        default_view_mode = 'raw' if default_source_id in YARD_CAMERA_SOURCES else 'auto'
-        site_pixels = load_topview_site_pixels() if sources else None
-        yard_source = next((source for source in sources if source in YARD_CAMERA_SOURCES), None)
-        if site_pixels is not None and yard_source and site_pixels['source_id'] in YARD_CAMERA_SOURCES:
-            site_pixels['source_id'] = yard_source  # draw the points on whichever yard camera id the site offers
-        site_pixels_json = (
-            json.dumps(site_pixels, ensure_ascii=False, separators=(',', ':'))
-            if site_pixels is not None else ''
+        default_source_id = _default_source_id(sources, active_order_kind=active_order_kind)
+        default_view_mode = (
+            'raw'
+            if default_source_id in YARD_CAMERA_SOURCES or default_source_id in ARM_S_CAMERA_SOURCES
+            else 'auto'
         )
-        pending_points = [
-            pt for pt in (site_pixels or {}).get('points', ())
-            if pt.get('kind') == 'slot' and pt.get('roi') is None
-        ]
+        # Draw each overlay on whichever camera id of its group the site offers.
+        site_pixels = _overlay_for(sources, YARD_CAMERA_SOURCES, load_topview_site_pixels)
+        side_pixels = _overlay_for(sources, SIDE_CAMERA_SOURCES, load_sideview_site_pixels)
+        arm_s_pixels = _overlay_for(sources, ARM_S_CAMERA_SOURCES, load_arm_s_site_pixels)
+        overlays = [doc for doc in (site_pixels, side_pixels, arm_s_pixels) if doc is not None]
+        site_pixels_json = (
+            json.dumps(overlays, ensure_ascii=False, separators=(',', ':')) if overlays else ''
+        )
+        def _pending(doc):
+            return [pt for pt in doc.get('points', ())
+                    if (pt.get('kind') == 'slot' and pt.get('roi') is None)
+                    or (pt.get('kind') == 'pick' and pt.get('point') is None)]
+        pending_points = _pending(site_pixels or {})
+        pending_groups = [dict(source_id=doc['source_id'], points=_pending(doc)) for doc in overlays if _pending(doc)]
+        source_items = [dict(source_id=source, url=reverse('topview_frame', args=[source])) for source in sources]
+        default_source_url = next(
+            (item['url'] for item in source_items if item['source_id'] == default_source_id),
+            source_items[0]['url'] if source_items else '',
+        )
         return dict(
-            sources=[dict(source_id=source, url=reverse('topview_frame', args=[source])) for source in sources],
+            sources=source_items,
             status='' if sources else 'ROSY 연결 안 됨',
             default_source_id=default_source_id,
+            # A running job chose this camera: the page must not hop to another camera when frames are missing.
+            job_camera=bool(active_order_kind) and default_source_id != _default_source_id(sources),
+            default_source_url=default_source_url,
             default_view_mode=default_view_mode,
             site_pixels=site_pixels,
+            side_pixels=side_pixels,
+            arm_s_pixels=arm_s_pixels,
+            pending_groups=pending_groups,
             site_pixels_json=site_pixels_json,
             pending_points=pending_points,
+            default_has_points=any(doc['source_id'] == default_source_id for doc in overlays),
+            points_unverified=any(doc['status'] == 'planned_unverified' for doc in overlays),
         )
     except (ValueError, OSError):
-        return dict(sources=[], status='ROSY 연결 안 됨', default_source_id='', default_view_mode='auto',
-                    site_pixels=None, site_pixels_json='', pending_points=[])
+        return dict(sources=[], status='ROSY 연결 안 됨', default_source_id='', default_source_url='', default_view_mode='auto',
+                    site_pixels=None, side_pixels=None, arm_s_pixels=None, pending_groups=[], site_pixels_json='', pending_points=[],
+                    default_has_points=False, points_unverified=False)
 
 
 def _request_topview_lease(client, origin, source_id, *, view_mode):
@@ -232,6 +282,10 @@ def topview_frame(request, source_id):
         return response
     except StaleFrameError:
         return HttpResponse("frame stale", status=404, content_type="text/plain; charset=utf-8")
+    except HTTPError as error:
+        if error.code == 404:
+            return HttpResponse("frame unavailable", status=404, content_type="text/plain; charset=utf-8")
+        return HttpResponse("frame unavailable", status=502, content_type="text/plain; charset=utf-8")
     except (ValueError, OSError):
         return HttpResponse("frame unavailable", status=502, content_type="text/plain; charset=utf-8")
 
