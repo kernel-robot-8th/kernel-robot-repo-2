@@ -1,6 +1,15 @@
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const FRAME_ROTATIONS = [0, 90, 180, 270];
 const DEFAULT_ROTATION_DEG = 180;
+// Yard cameras look at the cell from the conveyor side; Harbor shows the yard plan turned 180° from that.
+const YARD_CAMERA_SOURCES = ['top', 'omx_overhead'];
+
+export function displayRotationDeg(header, cameraId) {
+  const trimmed = typeof header === 'string' ? header.trim() : '';
+  const deg = trimmed !== '' ? Number(trimmed) : NaN;
+  if (!(trimmed && FRAME_ROTATIONS.includes(deg))) return DEFAULT_ROTATION_DEG;
+  return YARD_CAMERA_SOURCES.includes(cameraId) ? (deg + 180) % 360 : deg;
+}
 
 function parseCapturedAt(capturedAt) {
   if (!capturedAt) return null;
@@ -50,12 +59,11 @@ export function resolveRotationDeg(header) {
   return trimmed && FRAME_ROTATIONS.includes(deg) ? deg : DEFAULT_ROTATION_DEG;
 }
 
-function applyRotation(image, header) {
-  // An absent or invalid header resets to the CSS default (rotate(180deg)).
-  const trimmed = typeof header === 'string' ? header.trim() : '';
-  const deg = trimmed !== '' ? Number(trimmed) : NaN;
-  image.style.transform = trimmed && FRAME_ROTATIONS.includes(deg) ? `rotate(${deg}deg)` : '';
-  return trimmed && FRAME_ROTATIONS.includes(deg) ? deg : DEFAULT_ROTATION_DEG;
+function applyRotation(image, header, cameraId) {
+  // An absent or invalid header keeps the CSS default (rotate(180deg)).
+  const deg = displayRotationDeg(header, cameraId);
+  image.style.transform = deg === DEFAULT_ROTATION_DEG ? '' : `rotate(${deg}deg)`;
+  return deg;
 }
 
 export function rotatedImageSize(sourceSize, rotationDeg = DEFAULT_ROTATION_DEG) {
@@ -381,7 +389,7 @@ export function mountTopview(panel) {
           imageUrl = nextUrl;
           image.src = nextUrl;
           if (image.hidden) image.hidden = false;
-          currentRotationDeg = applyRotation(image, response.headers.get('X-Frame-Rotation-Deg'));
+          currentRotationDeg = applyRotation(image, response.headers.get('X-Frame-Rotation-Deg'), currentCameraId());
           if (previousUrl) URL.revokeObjectURL(previousUrl);
           renderOverlay();
         }
