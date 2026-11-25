@@ -78,7 +78,7 @@ class TopviewPagesTests(TestCase):
             self.assertContains(response, 'data-topview-url="/topview/omx_overhead/frame/"')
             self.assertContains(response, 'value="/topview/omx_overhead/frame/" selected')
             self.assertContains(response, 'value="/topview/ceiling_north/frame/"')
-            self.assertNotContains(response, 'arm_a_wrist')
+            self.assertContains(response, 'value="/topview/arm_a_wrist/frame/"')
             self.assertLess(html.index('omx_overhead'), html.index('ceiling_north'))
             self.assertContains(response, '<option value="raw" selected>카메라 화면</option>')
             self.assertContains(response, 'data-topview-points-toggle checked')

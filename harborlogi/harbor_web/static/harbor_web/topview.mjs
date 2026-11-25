@@ -242,6 +242,8 @@ export function mountTopview(panel) {
   let timer, request, imageUrl;
   let currentRotationDeg = DEFAULT_ROTATION_DEG;
   let currentRectified = null;
+  let findLiveCamera = Boolean(select?.options?.length > 1);
+  let missingFrames = 0;
 
   function currentCameraId() {
     if (select) {
@@ -414,8 +416,16 @@ export function mountTopview(panel) {
     } finally {
       if (request === current) {
         request = null;
-        const delay = pollDelay(status, document.hidden);
-        if (delay !== null) timer = setTimeout(refresh, delay);
+        if (status === 200) findLiveCamera = false;
+        missingFrames = status === 404 ? missingFrames + 1 : 0;
+        if (findLiveCamera && missingFrames >= 2 && select.selectedIndex < select.options.length - 1) {
+          select.selectedIndex += 1;
+          missingFrames = 0;
+          changeSource();
+        } else {
+          const delay = pollDelay(status, document.hidden);
+          if (delay !== null) timer = setTimeout(refresh, delay);
+        }
       }
     }
   }
@@ -425,7 +435,7 @@ export function mountTopview(panel) {
     refresh();
   }
 
-  function onSourceChange() {
+  function changeSource() {
     if (modeSelect && sitePixels?.source_id) {
       modeSelect.value = currentCameraId() === sitePixels.source_id ? 'raw' : 'auto';
     }
@@ -435,7 +445,13 @@ export function mountTopview(panel) {
     restart();
   }
 
+  function onSourceChange() {
+    findLiveCamera = false;
+    changeSource();
+  }
+
   function onModeChange() {
+    findLiveCamera = false;
     currentRectified = null;
     clearImage();
     restart();
