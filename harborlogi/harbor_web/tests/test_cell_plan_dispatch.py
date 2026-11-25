@@ -574,3 +574,39 @@ class CellPlanDispatchTests(TestCase):
                 )
         self.assertEqual(str(readiness_blocked.exception), 'READINESS_ARM_INCIDENT_UNMET')
         self.assertEqual(CellPlanDispatch.objects.count(), 0)
+
+
+class AutomaticCellPlanProposalTests(CellPlanDispatchTests):
+    """ADR 0034: in automatic operation the executor proposes ready plans by site points, one cell job at a time."""
+
+    def test_proposes_ready_plan_once_as_the_automatic_user(self):
+        client = _FakeCellPlanClient()
+        row = cell_plan_dispatch.auto_dispatch_next(client=client, production=False)
+        self.assertIsNotNone(row)
+        self.assertEqual((row.plan_id, row.dispatch_mode, row.state), (self.plan.pk, 'HARBOR_PLAN', 'PROPOSED'))
+        self.assertEqual(row.created_by.username, cell_plan_dispatch.AUTO_DISPATCH_USERNAME)
+        self.assertFalse(row.created_by.is_active)
+        self.assertTrue(all('src_site' in step and 'dst_site' in step for step in row.request_payload['steps']))
+        self.assertTrue(Audit.objects.filter(action='cell_plan.auto_proposed', object_id=str(row.pk)).exists())
+        # One cell job at a time, and a plan already sent is never resent automatically.
+        self.assertIsNone(cell_plan_dispatch.auto_dispatch_next(client=client, production=False))
+        CellPlanDispatch.objects.filter(pk=row.pk).update(state='COMPLETED')
+        self.assertIsNone(cell_plan_dispatch.auto_dispatch_next(client=client, production=False))
+        self.assertEqual(len(client.calls), 1)
+
+    def test_stale_plan_is_not_proposed(self):
+        type(self.order).objects.filter(pk=self.order.pk).update(version=self.order.version + 1)
+        self.assertIsNone(cell_plan_dispatch.auto_dispatch_next(client=_FakeCellPlanClient(), production=False))
+
+    def test_executor_tick_proposes_when_nothing_is_active(self):
+        client = _FakeCellPlanClient()
+
+        class _Reg:
+            production = False
+
+            def __init__(self, c):
+                self.client = c
+
+        with patch('harbor_web.runtime.execution_block_reason', return_value=''):
+            cell_plan_dispatch.tick(_Reg(client))
+        self.assertEqual(CellPlanDispatch.objects.filter(plan=self.plan, state='PROPOSED').count(), 1)

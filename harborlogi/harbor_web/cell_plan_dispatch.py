@@ -329,8 +329,12 @@ def preview_rosy_directive(
 def dispatch_harbor_plan(actor, *, plan_id: int, robot_id: str | None = None, client=None) -> CellPlanDispatch:
     """Mode 1: send Harbor plan's explicit move sequence and slot coordinates to ROSY (order_source='harbor')."""
     services._role(actor, 'operator')
+    return _submit_harbor_plan(actor, plan_id=plan_id, robot_id=robot_id, client=client, production=client is None)
+
+
+def _submit_harbor_plan(actor, *, plan_id: int, robot_id: str | None, client, production: bool) -> CellPlanDispatch:
     plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
-    _reject_blocked_order(plan.order, production=client is None, plan=plan)
+    _reject_blocked_order(plan.order, production=production, plan=plan)
     try:
         payload = build_harbor_plan_request(
             plan.result,
@@ -528,6 +532,54 @@ def cancel_cell_plan_dispatch(actor, *, dispatch_id: int, reason: str, client=No
     return row
 
 
+AUTO_DISPATCH_USERNAME = 'harbor-automatic'
+_auto_hold_reason: dict[int, str] = {}
+
+
+def _automatic_actor():
+    """A system user that never logs in, so automatic proposals stay apart from named people (ADR 0034 point 6)."""
+    from django.contrib.auth import get_user_model
+    user, created = get_user_model().objects.get_or_create(username=AUTO_DISPATCH_USERNAME, defaults={'is_active': False})
+    if created:
+        user.set_unusable_password()
+        user.save(update_fields=['password'])
+    return user
+
+
+def auto_dispatch_next(*, client=None, production: bool = True) -> CellPlanDispatch | None:
+    """ADR 0034 automatic operation: propose the next current READY plan to ROSY by site points (cell-plans).
+
+    One cell job at a time; a plan that was already sent is never resent automatically (ADR 0034 point 3).
+    ROSY still approves and admits every step. Returns the new dispatch or None.
+    """
+    from harbor_web.order_queue import completed_order_ids
+    if (Command.objects.filter(state__in=ACTIVE_COMMAND_STATES).exists()
+            or CellPlanDispatch.objects.filter(state__in=ACTIVE_CELL_PLAN_DISPATCH_STATES).exists()):
+        return None
+    sent = set(CellPlanDispatch.objects.exclude(plan__isnull=True).values_list('plan_id', flat=True))
+    orders = (Order.objects.filter(kind__in=('INBOUND', 'OUTBOUND')).exclude(pk__in=completed_order_ids())
+              .select_related('cargo').order_by('priority_group', 'sequence', 'pk'))
+    for order in orders:
+        plan = Plan.objects.filter(order=order).order_by('-pk').first()
+        if (plan is None or plan.pk in sent or plan.result.get('status') != 'READY'
+                or plan.order_version != order.version):
+            continue
+        try:
+            row = _submit_harbor_plan(_automatic_actor(), plan_id=plan.pk, robot_id=None, client=client, production=production)
+        except (services.Conflict, ValidationError) as error:
+            reason = str(getattr(error, 'message', '') or error)
+            if _auto_hold_reason.get(plan.pk) != reason:  # record each reason once, not every tick
+                _auto_hold_reason[plan.pk] = reason
+                Audit.objects.create(actor=None, action='cell_plan.auto_hold', object_type='Plan', object_id=str(plan.pk),
+                                     detail=dict(reason=reason, automatic=True))
+            return None
+        _auto_hold_reason.pop(plan.pk, None)
+        Audit.objects.create(actor=None, action='cell_plan.auto_proposed', object_type='CellPlanDispatch',
+                             object_id=str(row.pk), detail=dict(plan_id=plan.pk, automatic=True))
+        return row
+    return None
+
+
 def tick(registry, *, now=None) -> dict[int, str]:
     """Bounded executor pass: reconcile uncertain dispatches, sync status, and auto-trigger Pinky S_OUT when completed."""
     del now
@@ -548,7 +600,23 @@ def tick(registry, *, now=None) -> dict[int, str]:
         except Exception as exc:
             logger.exception('CellPlanDispatch #%s sync failed; will retry on next tick', row.pk)
             results[row.pk] = f'ERROR: {type(exc).__name__}'
+    if not active:
+        # The executor only ticks in automatic operation (HARBOR_EXECUTOR_ENABLED=1); a fake test client skips site readiness.
+        try:
+            proposed = auto_dispatch_next(client=None if production_client(registry) else client,
+                                          production=production_client(registry))
+        except Exception as exc:
+            logger.exception('Automatic cell-plan proposal failed; will retry on next tick')
+            results['auto'] = f'ERROR: {type(exc).__name__}'
+        else:
+            if proposed is not None:
+                results[proposed.pk] = proposed.state
     return results
+
+
+def production_client(registry) -> bool:
+    """Real deployments build their own ROSY client; tests hand the executor a fake one."""
+    return bool(getattr(registry, 'production', True))
 
 
 def dispatch_views_for_order(order: Order) -> list[dict]:
