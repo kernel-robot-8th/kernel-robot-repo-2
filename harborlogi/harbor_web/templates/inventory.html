@@ -125,9 +125,10 @@
 {% if intake_occurrences %}
 <section class="panel" aria-labelledby="intake-placement-title">
   <div class="panel-h"><h2 id="intake-placement-title">최근 입고 회차와 배치 결과</h2></div>
-  <table><thead><tr><th>화물</th><th>입고 회차</th><th>요청한 자리</th><th>관측된 자리</th><th>상태</th></tr></thead>
+  <table><thead><tr><th>화물</th><th>입고 회차</th><th>요청한 자리</th><th>관측된 자리</th><th>확인 근거</th><th>상태</th></tr></thead>
   <tbody>{% for receipt, requested in intake_occurrences %}<tr><td>{{ receipt.object_ref }}</td><td>{{ receipt.pk }}</td>
-    <td>{{ requested|default:"미제출" }}</td><td>{{ receipt.observed_slot|default:"관측 대기" }}</td><td>{{ receipt.get_status_display }}</td>
+    <td>{{ requested|default:"미제출" }}</td><td>{{ receipt.observed_slot|default:"관측 대기" }}</td>
+    <td>{{ receipt.get_result_identity_display|default:"—" }}</td><td>{{ receipt.get_status_display }}</td>
   </tr>{% endfor %}</tbody></table>
 </section>
 {% endif %}

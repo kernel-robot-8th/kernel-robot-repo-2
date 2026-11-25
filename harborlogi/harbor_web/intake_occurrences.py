@@ -106,6 +106,9 @@ def _stored(event):
         return  # Replay after the receipt/registration arrives.
     retry = receipt.stored_event_id == event['event_id'] and receipt.status == 'YARD_CONFLICT'
     if receipt.stored_event_id == event['event_id'] and not retry:
+        if not receipt.result_identity:
+            receipt.result_identity = event['identity']
+            receipt.save(update_fields=['result_identity'])
         return receipt.status in ('STORED', 'SLOT_MISMATCH')
     dispatch = CellPlanDispatch.objects.filter(order_id=receipt.order_id).select_related('plan', 'observation__condition', 'order__cargo').order_by('-pk').first()
     if (receipt.object_ref != event['object_ref'] or (receipt.stored_event_id and not retry) or dispatch is None
@@ -123,6 +126,7 @@ def _stored(event):
     else:
         receipt.status = 'STORED' if requested_slot(dispatch) == event['slot_ref'] else 'SLOT_MISMATCH'
     receipt.result_dispatch = dispatch
+    receipt.result_identity = event['identity']
     receipt.stored_event_id, receipt.observed_slot, receipt.observed_at = event['event_id'], event['slot_ref'], event['observed_at']
     receipt.save()
     Order.objects.filter(pk=receipt.order_id).update(auto_replan=False)

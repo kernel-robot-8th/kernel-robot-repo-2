@@ -159,6 +159,8 @@ class IntakeOccurrence(models.Model):
     result_dispatch = models.OneToOneField('CellPlanDispatch', null=True, on_delete=models.PROTECT)
     stored_event_id = models.CharField(max_length=64, null=True, unique=True)
     observed_slot = models.CharField(max_length=96, blank=True)
+    result_identity = models.CharField(max_length=8, blank=True, choices=[
+        ('observed', '화물과 위치 직접 관측'), ('attested', 'RFID 작업 추적 · 놓기 위치 검증')])
     observed_at = models.DateTimeField(null=True)
     status = models.CharField(max_length=64, default='RECEIVED', choices=[
         ('RECEIVED', '수령'), ('CARGO_UNKNOWN', '화물 등록 대기'), ('AMBIGUOUS_ORDER', '입고 요청 대조 필요'),

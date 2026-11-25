@@ -82,9 +82,9 @@ class PortEventProjectionTests(TestCase):
                     holdings=[], placements=[])
         legacy = IntakeLedger(self.path)
         legacy.expect('C1', now=self.now)
-        def event(kind, char, occurrence, **fields):
+        def event(kind, char, occurrence, *, identity='observed', **fields):
             self.fleet.events.append(dict(event_id=char * 64, kind='container.' + kind,
-                observation_ref='observation-' + char, object_ref='C1', identity='observed',
+                observation_ref='observation-' + char, object_ref='C1', identity=identity,
                 observed_at=timezone.now().isoformat(), intake_occurrence_id=occurrence, **fields))
             intake_loop.tick(self.registry, now=timezone.now())
         event('received_at_intake', 'a', 'first', intake_point='belt')
@@ -142,9 +142,11 @@ class PortEventProjectionTests(TestCase):
         event('stored', 'e', 'first', slot_ref=slot, placement_attempt_id=dispatch.request_key)
         self.assertEqual(Observation.objects.filter(provenance='PORT_EVENT').count(), 1)
         event('stored', 'f', 'second', slot_ref=second_dispatch.request_payload['steps'][0]['dst_site'],
-            placement_attempt_id=second_dispatch.request_key)
+            placement_attempt_id=second_dispatch.request_key, identity='attested')
         second.refresh_from_db()
         self.assertEqual(second.status, 'STORED')
+        self.assertEqual(second.result_identity, 'attested')
+        self.assertContains(self.client.get('/inventory/'), 'RFID 작업 추적 · 놓기 위치 검증')
         self.assertEqual(Observation.objects.filter(provenance='PORT_EVENT').count(), 2)
 
     def test_receipt_binds_unique_scheduled_order_and_retries_unknown_cargo(self):
