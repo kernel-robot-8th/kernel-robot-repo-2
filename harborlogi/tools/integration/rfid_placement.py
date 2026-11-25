@@ -19,7 +19,7 @@ from tools.integration.real_fleet_http import verify_checkout
 from tools.integration.rfid_intake import WORKCELL, sample_epc
 
 
-def _complete_at_measured_slot(upstream, task, plan, evidence, *, named_camera):
+def _run_placement(upstream, task, plan, evidence, *, named_camera, uncalibrated):
     """Drive normal Fleet admission/claim/release routes with a synthetic owner."""
     base = "/api/fleet/pipeline"
     owner = {"Authorization": "Bearer owner-test"}
@@ -36,6 +36,18 @@ def _complete_at_measured_slot(upstream, task, plan, evidence, *, named_camera):
     assert claimed["claimed"], claimed
     h = claimed["handoff"]
     lease = h["handoff_lease_id"]
+    if uncalibrated:
+        from cell_result_outbox import abort_reason, result_bodies
+        from cell_site_target import calibration_refusal
+        failure = calibration_refusal({}, h["src_site"], h["dst_site"], h["tier"])
+        assert failure == "SITE_NOT_CALIBRATED"
+        hardware = {"error": failure, "stop_event": {"ok": False, "folded": False}}
+        receipt = dict(handoff_lease_id=lease, cell_id="cell_ab", stage_id=task["task_id"], phase="ABORTED",
+                       goal_evidence_digest=None, physical_completion=False, simulated_success=False,
+                       reason=abort_reason(hardware))
+        _, body = result_bodies(h, "ABORTED", None, receipt, {}, hardware)
+        post(f"/cell-tasks/{task['task_id']}/complete", owner, body)
+        return
     place = dict(site=h["dst_site"], area=h["dst_area"], site_id=h["dst_site_id"], **h["dst_slot"])
     measured = max(task["claimed_at"], datetime.now(timezone.utc).timestamp())
     zone = dict(target=place, measured_at=measured, place_slot={"present": True}, z_gate={"verdict": "PASS"},
@@ -53,7 +65,7 @@ def _complete_at_measured_slot(upstream, task, plan, evidence, *, named_camera):
     post(f"/cell-tasks/{task['task_id']}/complete", owner, dict(phase="RELEASED", goal_evidence_digest=digest, **proof))
 
 
-def run(platform, temp, *, named_camera=False):
+def run(platform, temp, *, named_camera=False, uncalibrated=False):
     enable(platform)
     import tools
     tools.__path__.append(str(platform / "tools"))
@@ -76,7 +88,7 @@ def run(platform, temp, *, named_camera=False):
     from django.contrib.auth.models import Group, User
     from django.test import Client
     from harbor_web import services
-    from harbor_web.cell_plan_dispatch import dispatch_harbor_plan
+    from harbor_web.cell_plan_dispatch import dispatch_harbor_plan, sync_cell_plan_dispatch
     from harbor_web.intake_occurrences import project_occurrences
     from harbor_web.models import IntakeOccurrence, Observation, Plan
     from harbor_web.runtime_models import DeploymentState
@@ -201,7 +213,21 @@ def run(platform, temp, *, named_camera=False):
         assert task["intake_occurrence_id"] == occurrence and task["placement_attempt_id"] == dispatch.request_key
         requested = dispatch.request_payload["steps"][0]["dst_site"]
         with patch.dict(os.environ, {"ROSY_FLEET_CELL_OWNERS": "cell_ab=omx-owner;cell_s=omx-owner"}):
-            _complete_at_measured_slot(upstream, task, plan, evidence, named_camera=named_camera)
+            _run_placement(upstream, task, plan, evidence, named_camera=named_camera, uncalibrated=uncalibrated)
+        browser = Client(HTTP_HOST="localhost")
+        browser.force_login(actor)
+        if uncalibrated:
+            synced = sync_cell_plan_dispatch(dispatch.pk, client=harbor)
+            assert (synced.state, synced.reason) == ("ABORTED", "SITE_NOT_CALIBRATED"), (synced.state, synced.reason)
+            project()
+            receipt.refresh_from_db()
+            assert not receipt.stored_event_id and not receipt.observed_slot
+            assert len(ledger.occurrence_events()) == 1
+            reply = browser.get("/inventory/")
+            assert reply.status_code == 200
+            assert all(text in reply.content.decode() for text in (occurrence, requested, "SITE_NOT_CALIBRATED"))
+            print(f"PASS: {cargo}, proposed {requested}, ROSY refused SITE_NOT_CALIBRATED; actual slot stays empty")
+            return
         actual = requested
         if named_camera:
             project()
@@ -220,8 +246,6 @@ def run(platform, temp, *, named_camera=False):
         assert (receipt.status, receipt.observed_slot) == ("SLOT_MISMATCH" if named_camera else "STORED", actual)
         assert Observation.objects.filter(provenance="PORT_EVENT").count() == 1
         assert len(ledger.occurrence_events()) == 2
-        browser = Client(HTTP_HOST="localhost")
-        browser.force_login(actor)
         inventory = browser.get("/inventory/")
         assert inventory.status_code == 200
         html = inventory.content.decode()
@@ -234,7 +258,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform-root", type=Path, required=True)
     parser.add_argument("--platform-sha", required=True)
-    parser.add_argument("--named-camera", action="store_true", help="Test a separate camera identifying an alternative slot")
+    scenario = parser.add_mutually_exclusive_group()
+    scenario.add_argument("--named-camera", action="store_true", help="Test a separate camera identifying an alternative slot")
+    scenario.add_argument("--uncalibrated", action="store_true", help="Test the device refusal and Harbor's retained instruction")
     args = parser.parse_args()
     if not __debug__:
         parser.error("assertions must be enabled")
@@ -248,7 +274,7 @@ if __name__ == "__main__":
             "ROSY_INTAKE_RFID_MANIFEST": "", "ROSY_INTAKE_RFID_ENCODED_WORKCELL": "", "ROSY_INTAKE_RFID_WORKCELL": "",
         }):
             try:
-                run(platform, Path(directory), named_camera=args.named_camera)
+                run(platform, Path(directory), named_camera=args.named_camera, uncalibrated=args.uncalibrated)
             finally:
                 from django.db import connections
                 connections.close_all()
