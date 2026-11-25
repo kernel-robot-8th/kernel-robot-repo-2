@@ -248,6 +248,15 @@ def _mini_yard(yard, *, origin_key=None, dest_key=None, ghost_cargo=None):
     return mini
 
 
+def running_order_kind(commands, cell_plans=()):
+    """Return order.kind for the currently running Command or CellPlanDispatch, else None."""
+    running = next((c for c in commands if work_state(c) == '진행 중'), None)
+    if running is not None:
+        return running.order.kind
+    running_cp = next((cp for cp in cell_plans if work_state(cell_plan_dispatch=cp) == '진행 중'), None)
+    return running_cp.order.kind if running_cp is not None else None
+
+
 def board_context(request, *, observation, operations, now=None):
     """Build v4.8 situation board context for `/` without mutating database or operations."""
     now = timezone.now() if now is None else now
@@ -491,6 +500,7 @@ def board_context(request, *, observation, operations, now=None):
         alerts=alerts,
         alert_total=alert_total,
         current_job=current_job,
+        running_order_kind=running_order_kind(commands, cell_plans),
         next_jobs=next_jobs,
         mini_yard=mini_yard,
     )

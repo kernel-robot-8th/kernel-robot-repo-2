@@ -78,7 +78,8 @@
 .yard-topview .linked-flat {order:-1}
 .topview-stage {position:relative;line-height:0}
 .topview-panel img {display:block;width:100%;height:auto;border-radius:var(--primitive-radius-control);transform:rotate(180deg)} /* camera looks from the far side: turn it to the yard plan's direction */
-.topview-panel img[hidden] {display:none}
+.topview-panel img[hidden],.topview-empty[hidden] {display:none}
+.topview-empty {display:flex;align-items:center;justify-content:center;aspect-ratio:4/3;padding:var(--primitive-space-4);border:1px solid var(--semantic-border-divider);border-radius:var(--primitive-radius-control);background:var(--semantic-surface-disabled);color:var(--semantic-text-secondary);font-size:var(--primitive-font-label);line-height:var(--primitive-font-body-line);text-align:center}
 .topview-overlay {position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
 .topview-overlay[hidden],.topview-points-toggle[hidden],.topview-points-meta[hidden] {display:none}
 .topview-slot rect:first-child {fill:rgba(44,187,183,.16);stroke:var(--primitive-color-teal);stroke-width:2}

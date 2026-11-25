@@ -3,11 +3,16 @@ const FRAME_ROTATIONS = [0, 90, 180, 270];
 const DEFAULT_ROTATION_DEG = 180;
 // Yard cameras look at the cell from the conveyor side; Harbor shows the yard plan turned 180° from that.
 const YARD_CAMERA_SOURCES = ['top', 'omx_overhead'];
+// The side and arm S cameras show the scene as captured: never turned (an absent header means 0°, not the yard default).
+const SIDE_CAMERA_SOURCES = ['side', 'omx_side'];
+const ARM_S_CAMERA_SOURCES = ['arm_s_top', 'omx_arm_s_top'];
 
 export function displayRotationDeg(header, cameraId) {
   const trimmed = typeof header === 'string' ? header.trim() : '';
   const deg = trimmed !== '' ? Number(trimmed) : NaN;
-  if (!(trimmed && FRAME_ROTATIONS.includes(deg))) return DEFAULT_ROTATION_DEG;
+  const valid = Boolean(trimmed) && FRAME_ROTATIONS.includes(deg);
+  if (SIDE_CAMERA_SOURCES.includes(cameraId) || ARM_S_CAMERA_SOURCES.includes(cameraId)) return valid ? deg : 0;
+  if (!valid) return DEFAULT_ROTATION_DEG;
   return YARD_CAMERA_SOURCES.includes(cameraId) ? (deg + 180) % 360 : deg;
 }
 
@@ -51,6 +56,18 @@ export function frameStatus(status, capturedAt, rectified = null) {
   const time = [captured.getHours(), captured.getMinutes(), captured.getSeconds()]
     .map(value => String(value).padStart(2, '0')).join(':');
   return modePrefix ? `${modePrefix} · 찍은 시각 ${time}` : '찍은 시각 ' + time;
+}
+
+export function emptyFrameMessage(status, cameraId = '') {
+  if (status !== 404) return '';
+  const name = ARM_S_CAMERA_SOURCES.includes(cameraId)
+    ? 'S암 카메라'
+    : YARD_CAMERA_SOURCES.includes(cameraId)
+      ? '야드 카메라'
+      : SIDE_CAMERA_SOURCES.includes(cameraId)
+        ? '사이드 카메라'
+        : '카메라';
+  return `${name} 영상 없음 (ROSY 송출 확인)`;
 }
 
 export function resolveRotationDeg(header) {
@@ -153,6 +170,8 @@ export function buildOverlayItems(sitePixels, displaySize, rotationDeg = DEFAULT
     if (entry.kind === 'pick') {
       if (Array.isArray(entry.point) && entry.point.length === 2) {
         picks.push({...base, point: projectPoint(entry.point, sourceSize, displaySize, rotationDeg)});
+      } else {
+        pending.push(base);
       }
       continue;
     }
@@ -165,13 +184,15 @@ export function buildOverlayItems(sitePixels, displaySize, rotationDeg = DEFAULT
   return {slots, picks, pending};
 }
 
+// data-topview-points is a list of overlay documents (one per camera); a single object is accepted too.
 function parseSitePixels(raw) {
-  if (!raw) return null;
+  if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    return list.filter(doc => doc && typeof doc === 'object' && doc.source_id);
   } catch (_) {
-    return null;
+    return [];
   }
 }
 
@@ -229,6 +250,7 @@ function addLabel(group, text, cx, cy, boundsW, boundsH) {
 
 export function mountTopview(panel) {
   const image = panel.querySelector('[data-topview-image]');
+  const emptyBox = panel.querySelector('[data-topview-empty]');
   const statusText = panel.querySelector('[data-topview-status]');
   const select = panel.querySelector('[data-topview-source]');
   const modeSelect = panel.querySelector('[data-topview-mode]');
@@ -237,12 +259,16 @@ export function mountTopview(panel) {
   const pointsControl = panel.querySelector('[data-topview-points-control]');
   const pointsToggle = panel.querySelector('[data-topview-points-toggle]');
   const pointsMeta = panel.querySelector('[data-topview-points-meta]');
-  const sitePixels = parseSitePixels(panel.dataset?.topviewPoints);
+  const sitePixelsList = parseSitePixels(panel.dataset?.topviewPoints);
+  const pixelsFor = cameraId => sitePixelsList.find(doc => doc.source_id === cameraId) || null;
+  const pendingTexts = typeof panel.querySelectorAll === 'function'
+    ? [...panel.querySelectorAll('[data-topview-points-pending]')] : [];
   const defaultOrientation = orientationText?.textContent ?? '';
   let timer, request, imageUrl;
   let currentRotationDeg = DEFAULT_ROTATION_DEG;
   let currentRectified = null;
-  let findLiveCamera = Boolean(select?.options?.length > 1);
+  // #141 hops to the next camera on missing frames, unless the running job chose this one (inbound -> S arm).
+  let findLiveCamera = Boolean(select?.options?.length > 1) && panel.dataset?.topviewJobCamera === undefined;
   let missingFrames = 0;
 
   function currentCameraId() {
@@ -269,17 +295,17 @@ export function mountTopview(panel) {
 
   function renderOverlay() {
     const cameraId = currentCameraId();
+    const sitePixels = pixelsFor(cameraId);
     const viewMode = currentViewMode();
     const controlsEligible = Boolean(
       sitePixels
-      && sitePixels.source_id
-      && cameraId === sitePixels.source_id
       && viewMode === 'raw'
       && currentRectified === null,
     );
     const enabled = pointsToggle ? Boolean(pointsToggle.checked) : true;
     setElementHidden(pointsControl, !controlsEligible);
     setElementHidden(pointsMeta, !(controlsEligible && enabled));
+    for (const text of pendingTexts) setElementHidden(text, text.dataset?.pointsSource !== cameraId);
     if (!overlay) return;
     const visible = shouldShowOverlay({
       sitePixels,
@@ -354,6 +380,12 @@ export function mountTopview(panel) {
     if (statusText.textContent !== text) statusText.textContent = text;
   }
 
+  function setEmpty(text) {
+    if (!emptyBox) return;
+    if (emptyBox.textContent !== text) emptyBox.textContent = text;
+    setElementHidden(emptyBox, !text);
+  }
+
   function stop() {
     clearTimeout(timer);
     request?.abort();
@@ -386,11 +418,13 @@ export function mountTopview(panel) {
           URL.revokeObjectURL(nextUrl);
           status = 502;
           clearImage();
+          setEmpty('');
         } else {
           const previousUrl = imageUrl;
           imageUrl = nextUrl;
           image.src = nextUrl;
           if (image.hidden) image.hidden = false;
+          setEmpty('');
           currentRotationDeg = applyRotation(image, response.headers.get('X-Frame-Rotation-Deg'), currentCameraId());
           if (previousUrl) URL.revokeObjectURL(previousUrl);
           renderOverlay();
@@ -398,13 +432,19 @@ export function mountTopview(panel) {
       } else {
         if (status === 200) status = 502;
         clearImage();
+        setEmpty(emptyFrameMessage(status, currentCameraId()));
       }
       if (orientationText && defaultOrientation) {
-        orientationText.textContent = currentRectified === 'map-overlay'
-          ? '버드뷰 실제 환경 + 좌표 (지도 +X 오른쪽 · +Y 위)'
-          : currentRectified === 'map'
-            ? '버드뷰 평면 (지도 +X 오른쪽 · +Y 위)'
-            : defaultOrientation;
+        const camId = currentCameraId();
+        orientationText.textContent = SIDE_CAMERA_SOURCES.includes(camId)
+          ? '옆 카메라 원본 방향 (컨테이너가 쌓이는 모습)'
+          : ARM_S_CAMERA_SOURCES.includes(camId)
+            ? 'S암 탑뷰 (Pinky 짐칸 · 컨베이어 투입 방향)'
+            : currentRectified === 'map-overlay'
+              ? '버드뷰 실제 환경 + 좌표 (지도 +X 오른쪽 · +Y 위)'
+              : currentRectified === 'map'
+                ? '버드뷰 평면 (지도 +X 오른쪽 · +Y 위)'
+                : defaultOrientation;
       }
       setStatus(frameStatus(status, response.headers.get('X-Frame-Captured-At'), currentRectified));
     } catch (_) {
@@ -412,6 +452,7 @@ export function mountTopview(panel) {
       status = 0;
       currentRectified = null;
       clearImage();
+      setEmpty('');
       setStatus(frameStatus(status));
     } finally {
       if (request === current) {
@@ -436,12 +477,13 @@ export function mountTopview(panel) {
   }
 
   function changeSource() {
-    if (modeSelect && sitePixels?.source_id) {
-      modeSelect.value = currentCameraId() === sitePixels.source_id ? 'raw' : 'auto';
+    if (modeSelect && sitePixelsList.length) {
+      modeSelect.value = pixelsFor(currentCameraId()) ? 'raw' : 'auto';
     }
     currentRectified = null;
     currentRotationDeg = DEFAULT_ROTATION_DEG;
     clearImage();
+    setEmpty('');
     restart();
   }
 
@@ -454,12 +496,14 @@ export function mountTopview(panel) {
     findLiveCamera = false;
     currentRectified = null;
     clearImage();
+    setEmpty('');
     restart();
   }
 
   function onPageHide() {
     stop();
     clearImage();
+    setEmpty('');
   }
 
   function onPageShow(event) {
@@ -489,6 +533,7 @@ export function mountTopview(panel) {
   return () => {
     stop();
     clearImage();
+    setEmpty('');
     resizeObserver?.disconnect();
     select?.removeEventListener('change', onSourceChange);
     modeSelect?.removeEventListener('change', onModeChange);

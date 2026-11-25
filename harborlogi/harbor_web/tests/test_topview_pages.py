@@ -117,3 +117,102 @@ class TopviewPagesTests(TestCase):
         inventory_response = self.client.get('/inventory/')
         self.assertEqual(inventory_response.status_code, 200)
         self.assertContains(inventory_response, 'ROSY 탑뷰', count=1)
+
+    def test_board_default_camera_follows_running_job_without_extra_queries(self):
+        from harbor_web import services
+        from harbor_web.models import CellPlanDispatch, Command, Order, Plan
+
+        condition = self.condition()
+        cargo_out = self.cargo('OUT1')
+        cargo_in = self.cargo('IN1')
+        obs = self.observe(condition, self.payload(cargo_out))
+        self.reader.sources.return_value = {
+            'sources': ['ceiling_north', 'omx_arm_s_top', 'omx_side', 'top'],
+        }
+
+        # 1) No running job -> yard topview ('top'), arm S still in <select>, empty placeholder present.
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['topview']['default_source_id'], 'top')
+        self.assertContains(response, 'data-topview-url="/topview/top/frame/"')
+        self.assertContains(response, 'data-topview-camera="top"')
+        self.assertContains(response, 'value="/topview/top/frame/" selected')
+        self.assertContains(response, 'value="/topview/omx_arm_s_top/frame/" data-camera-id="omx_arm_s_top"')
+        self.assertContains(response, 'data-topview-empty hidden')
+
+        # 2) Running OUTBOUND Command -> yard topview ('top').
+        out_order = services.create_order(
+            self.operator, cargo=cargo_out, kind='OUTBOUND',
+            priority_group=1, sequence=1, tie_policy='FIXED',
+        )
+        out_plan = services.make_plan(
+            self.operator, order_id=out_order.pk, expected_version=1, observation_id=obs.pk,
+        )
+        out_cmd = Command.objects.create(
+            order=out_order, plan=out_plan, actor=self.operator, plan_version=1,
+            ledger_identity='out-1', fleet_origin='https://fleet.example', fleet_principal='svc',
+            body_digest='a' * 64, binding={}, state='RECONCILED',
+        )
+        out_resp = self.client.get('/')
+        self.assertEqual(out_resp.context['topview']['default_source_id'], 'top')
+        self.assertContains(out_resp, 'value="/topview/top/frame/" selected')
+        self.assertNotContains(out_resp, 'data-topview-job-camera')
+
+        # 3) Running REARRANGE Command -> yard topview ('top').
+        Command.objects.filter(pk=out_cmd.pk).update(state='COMPLETED')
+        rearr_order = Order.objects.create(created_by=self.operator, kind='REARRANGE')
+        rearr_plan = Plan.objects.create(
+            order=rearr_order, order_version=1, observation=obs, condition=condition,
+            queue_digest='q', result={'status': 'READY', 'reason': '', 'moves': [{'cargo_id': 'OUT1', 'source': 'a', 'destination': 'b'}]},
+            created_by=self.operator,
+        )
+        rearr_cmd = Command.objects.create(
+            order=rearr_order, plan=rearr_plan, actor=self.operator, plan_version=1,
+            ledger_identity='rearr-1', fleet_origin='https://fleet.example', fleet_principal='svc',
+            body_digest='b' * 64, binding={}, state='DISPATCHING',
+        )
+        rearr_resp = self.client.get('/')
+        self.assertEqual(rearr_resp.context['topview']['default_source_id'], 'top')
+
+        # 4) Running INBOUND Command -> S-arm topview ('omx_arm_s_top') with pending places shown.
+        Command.objects.filter(pk=rearr_cmd.pk).update(state='COMPLETED')
+        in_order = services.create_order(
+            self.operator, cargo=cargo_in, kind='INBOUND',
+            priority_group=1, sequence=2, tie_policy='FIXED',
+        )
+        in_plan = Plan.objects.create(
+            order=in_order, order_version=1, observation=obs, condition=condition,
+            queue_digest='q', result={'status': 'READY', 'reason': '', 'moves': []}, created_by=self.operator,
+        )
+        in_cmd = Command.objects.create(
+            order=in_order, plan=in_plan, actor=self.operator, plan_version=1,
+            ledger_identity='in-1', fleet_origin='https://fleet.example', fleet_principal='svc',
+            body_digest='c' * 64, binding={}, state='RECONCILED',
+        )
+        # Zero extra queries for the camera choice is asserted in test_topview_proxy (active_order_kind).
+        in_resp = self.client.get('/')
+        self.assertEqual(in_resp.context['topview']['default_source_id'], 'omx_arm_s_top')
+        self.assertContains(in_resp, 'data-topview-url="/topview/omx_arm_s_top/frame/"')
+        self.assertContains(in_resp, 'data-topview-camera="omx_arm_s_top" data-topview-job-camera')
+        self.assertContains(in_resp, 'value="/topview/omx_arm_s_top/frame/" selected')
+        self.assertNotContains(in_resp, 'value="/topview/top/frame/" selected')
+        self.assertContains(in_resp, 'data-points-source="omx_arm_s_top">위치 미정: Pinky 짐칸 · 컨베이어 투입</span>')
+
+        # 5) Running INBOUND when arm_s_top is not in ROSY sources -> falls back to yard ('top').
+        self.reader.sources.return_value = {'sources': ['ceiling_north', 'omx_side', 'top']}
+        fallback_resp = self.client.get('/')
+        self.assertEqual(fallback_resp.context['topview']['default_source_id'], 'top')
+        self.assertContains(fallback_resp, 'value="/topview/top/frame/" selected')
+
+        # 6) Running INBOUND CellPlanDispatch -> S-arm topview ('arm_s_top').
+        Command.objects.filter(pk=in_cmd.pk).update(state='CANCELLED')
+        self.reader.sources.return_value = {'sources': ['top', 'arm_s_top']}
+        CellPlanDispatch.objects.create(
+            order=in_order, plan=in_plan, observation=obs,
+            dispatch_mode='ROSY_DIRECTIVE', directive_mode='INBOUND',
+            request_key='cp-in-1', order_source='harbor',
+            state='RUNNING', created_by=self.operator,
+        )
+        cp_resp = self.client.get('/')
+        self.assertEqual(cp_resp.context['topview']['default_source_id'], 'arm_s_top')
+        self.assertContains(cp_resp, 'value="/topview/arm_s_top/frame/" selected')
