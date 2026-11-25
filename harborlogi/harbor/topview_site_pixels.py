@@ -209,6 +209,7 @@ def validate_topview_site_pixels(document: Any) -> dict[str, Any] | None:
         'image': [width, height],
         'status': status,
         'rosy_commit': rosy_commit.strip() if isinstance(rosy_commit, str) and rosy_commit.strip() else '',
+        'frame_source': document['frame_source'].strip() if isinstance(document.get('frame_source'), str) else '',
         'points': validated_points,
     }
 

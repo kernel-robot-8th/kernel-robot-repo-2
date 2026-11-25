@@ -4,6 +4,7 @@ import {
   frameStatus,
   mountTopview,
   resolveRotationDeg,
+  displayRotationDeg,
   projectPoint,
   projectRoi,
   shouldShowOverlay,
@@ -396,3 +397,10 @@ try {
   URL.revokeObjectURL = revoke;
 }
 console.log('Topview lifecycle and overlay projection tests passed');
+
+// Deployed omx_overhead sends X-Frame-Rotation-Deg: 0; Harbor still shows the yard turned 180° (conveyor at the bottom).
+assert.equal(displayRotationDeg('0', 'omx_overhead'), 180);
+assert.equal(displayRotationDeg('0', 'top'), 180);
+assert.equal(displayRotationDeg('90', 'top'), 270);
+assert.equal(displayRotationDeg('0', 'ceiling_north'), 0);
+assert.equal(displayRotationDeg(null, 'omx_overhead'), 180);
