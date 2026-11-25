@@ -127,6 +127,8 @@ class PortEventProjectionTests(TestCase):
         self.assertEqual(dispatch.request_payload['intake_occurrence_id'], 'first')
         self.assertEqual(dispatch.request_payload['placement_attempt_id'], dispatch.request_key)
         self.assertIs(dispatch.request_payload['propose'], True)
+        for commercial_field in ('shipper_name', 'shipper_tier', 'destination', 'weight_kg', 'volume_m3', 'tag_value'):
+            self.assertNotIn(f'"{commercial_field}"', json.dumps(dispatch.request_payload))
         self.assertContains(self.client.get('/inventory/'), '제안 접수 · 승인 대기')
         requested = dispatch.request_payload['steps'][0]['dst_site']
         slot = 'yard-r1-c4-l1' if requested != 'yard-r1-c4-l1' else 'yard-r1-c1-l1'
@@ -176,7 +178,7 @@ class PortEventProjectionTests(TestCase):
         self.assertEqual((legacy.read('C1')['slot_ref'], IntakeOccurrence.objects.count()), (second.observed_slot, 2))
 
     def test_receipt_binds_unique_scheduled_order_and_retries_unknown_cargo(self):
-        from harbor_web.models import Cargo, IntakeOccurrence, Order
+        from harbor_web.models import Cargo, CargoTag, IntakeOccurrence, Order
         first = services.create_order(self.user, kind='INBOUND', cargo=Cargo.objects.get(code='C1'),
             priority_group=1, sequence=1, tie_policy='FIXED')
         for cargo, occurrence, digit in [('C1', 'scheduled', '1'), ('C4', 'unregistered', '2')]:
@@ -186,11 +188,25 @@ class PortEventProjectionTests(TestCase):
         intake_loop.tick(self.registry, now=timezone.now())
         self.assertEqual(IntakeOccurrence.objects.get(pk='scheduled').order_id, first.pk)
         self.assertEqual(IntakeOccurrence.objects.get(pk='unregistered').status, 'CARGO_UNKNOWN')
-        services.register_cargo(self.user, code='C4', name='C4', weight_kg=1, volume_m3=1,
-            destination='yard', length_cells=3)
+        self.assertFalse(Cargo.objects.filter(code='C4').exists())
+        registered = services.register_cargo(self.user, code='C4', name='C4', weight_kg=7, volume_m3=1,
+            shipper_name='시험 화주', shipper_tier=2, tag_value='C4-test-tag', destination='Busan', length_cells=3)
         intake_loop.tick(self.registry, now=timezone.now())
-        self.assertEqual(IntakeOccurrence.objects.get(pk='unregistered').order.cargo.code, 'C4')
-        self.assertEqual(Order.objects.count(), 2)
+        original = IntakeOccurrence.objects.get(pk='unregistered').order
+        repeat = dict(kind='container.received_at_intake', object_ref='C4', identity='observed',
+                      intake_point='belt', event_id='3'*64, observation_ref='obs-3',
+                      intake_occurrence_id='repeat-C4', observed_at=timezone.now().isoformat())
+        self.fleet.events.append(repeat)
+        intake_loop.tick(self.registry, now=timezone.now())
+        intake_loop.tick(self.registry, now=timezone.now())
+        latest = IntakeOccurrence.objects.get(pk='repeat-C4').order
+        self.assertNotEqual(original.pk, latest.pk)
+        self.assertEqual((original.cargo_id, latest.cargo_id), (registered.pk, registered.pk))
+        self.assertEqual((original.priority_group, latest.priority_group), (2, 2))
+        self.assertEqual((latest.cargo.shipper_name, latest.cargo.destination, latest.cargo.weight_kg),
+                         ('시험 화주', 'Busan', 7))
+        self.assertEqual(CargoTag.objects.get(tag_value='C4-test-tag').cargo_id, registered.pk)
+        self.assertEqual(Order.objects.count(), 3)
 
     def test_day1_empty_map_stored_event_projects_and_renders_on_inventory(self):
         ev_id = 'a' * 64
