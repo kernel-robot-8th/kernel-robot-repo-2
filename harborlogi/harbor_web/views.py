@@ -434,7 +434,7 @@ def order_detail(request, pk):
 @require_roles('viewer', 'operator', 'field', 'admin')
 @require_http_methods(['GET'])
 def inventory(request):
-    observations = Observation.objects.select_related('condition').order_by('-id')
+    observations = Observation.objects.select_related('condition').order_by('-observed_at', '-pk')
     condition = None
     if 'condition' in request.GET:
         value = request.GET['condition']
@@ -453,6 +453,10 @@ def inventory(request):
     choices = list(observations[:100])
     if selected and all(item.pk != selected.pk for item in choices):
         choices.insert(0, selected)
+    from harbor_web.site_config import covers_spatial_yard
+    incomplete = bool(selected and selected.payload.get('schema') == 'grid-placement-v1' and not covers_spatial_yard(selected))
+    if incomplete:
+        selected = None
     from harbor_web.yard_view import yard_view, spatial_yard_view
     from harbor_web.yard_scene import attach_cargo_metadata, present_stage, scene_for
     from harbor_web.map_config import map_scene
@@ -485,7 +489,7 @@ def inventory(request):
     from harbor_web.yard_pages import yard_page_context
     from harbor_web.intake_occurrences import inventory_occurrences
     return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices, topview=topview_context(request),
-                intake_occurrences=inventory_occurrences(),
+                intake_occurrences=inventory_occurrences(), incomplete_yard=incomplete,
                 site_recognition=site_recognition_context(
                     request,
                     observation=selected,

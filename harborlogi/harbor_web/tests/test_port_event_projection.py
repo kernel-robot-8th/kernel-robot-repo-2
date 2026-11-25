@@ -111,10 +111,22 @@ class PortEventProjectionTests(TestCase):
         intake_loop.tick(self.registry, now=timezone.now())
         plan = Plan.objects.filter(order=receipt.order).latest('pk')
         self.assertEqual(plan.observation, full)
-        dispatch = auto_dispatch_next(client=_FakeCellPlanClient(), production=False)
+        fleet = _FakeCellPlanClient()
+        with mock.patch('harbor_web.readiness.first_unmet_cell_plan', return_value='READINESS_WORKCELL_INCIDENT_HOLD'):
+            self.assertIsNone(auto_dispatch_next(client=fleet, production=True))
+        page = self.client.get('/inventory/')
+        rec = plan.result['recommendation']
+        target = '{area_id}-r{row}-c{column}-l{level}'.format(**rec)
+        self.assertContains(page, target)
+        self.assertContains(page, 'READINESS_WORKCELL_INCIDENT_HOLD')
+        self.assertContains(page, '관측 대기')
+        self.assertFalse(fleet.calls)
+        dispatch = auto_dispatch_next(client=fleet, production=False)
         self.assertEqual(dispatch.plan_id, plan.pk)
         self.assertEqual(dispatch.request_payload['intake_occurrence_id'], 'first')
         self.assertEqual(dispatch.request_payload['placement_attempt_id'], dispatch.request_key)
+        self.assertIs(dispatch.request_payload['propose'], True)
+        self.assertContains(self.client.get('/inventory/'), '제안 접수 · 승인 대기')
         requested = dispatch.request_payload['steps'][0]['dst_site']
         slot = 'yard-r1-c4-l1' if requested != 'yard-r1-c4-l1' else 'yard-r1-c1-l1'
         import_partial('partial-after-submit', timezone.now())

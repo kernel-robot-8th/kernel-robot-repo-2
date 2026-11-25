@@ -1,16 +1,18 @@
 """Bind Fleet receipts and independently observed placement results to their Harbor requests."""
 import logging
+import re
 
 from django.db import transaction
 from django.db.models import Prefetch
 from django.utils import timezone
+from harbor.process import anchor_address
 
 from harbor_web.autoplanning import replan_enabled
 from harbor_web.command_models import ACTIVE_CELL_PLAN_DISPATCH_STATES, ACTIVE_COMMAND_STATES, CellPlanDispatch
 from harbor_web.coordination import serialized
 from harbor_web.models import Audit, Cargo, IntakeOccurrence, IntakeProjectionCursor, Observation, Order, Plan
 from harbor_web.plan_freshness import plan_changes
-from harbor_web.plan_service import placement_decision
+from harbor_web.plan_service import DECIDE_ACTION, placement_decision
 from harbor_web.service_common import automatic_actor
 from harbor_web.site_config import covers_spatial_yard
 from harbor_web.order_queue import back_of_tier
@@ -18,6 +20,12 @@ from harbor_web.port_event_projection import _ProjectionRejected, _record_reject
 
 logger = logging.getLogger(__name__)
 WAITING = ('CARGO_UNKNOWN', 'AMBIGUOUS_ORDER', 'WAITING_FOR_YARD', 'PLANNING_CAPACITY')
+DISPATCH_LABELS = {
+    'SUBMITTING': '제출 중', 'PROPOSED': '제안 접수 · 승인 대기', 'PARTIALLY_ADMITTED': '일부 단계 승인',
+    'QUEUED': '실행 대기', 'RUNNING': '실행 중', 'PAUSED_HUMAN': '작업자 확인 대기',
+    'COMPLETED': '작업 완료', 'ABORTED': '작업 중단', 'CANCELLED': '취소', 'REJECTED': '접수 거절',
+    'UNCERTAIN': '접수 여부 대조 중', 'NOT_FOUND': '접수 기록 없음',
+}
 
 
 def requested_slot(dispatch):
@@ -31,9 +39,40 @@ def requested_slot(dispatch):
 def inventory_occurrences():
     dispatches = CellPlanDispatch.objects.select_related('order__cargo').order_by('-pk')
     receipts = IntakeOccurrence.objects.select_related('order').prefetch_related(
-        Prefetch('order__cell_plan_dispatches', queryset=dispatches, to_attr='sent_placements'))
-    return [(receipt, requested_slot(receipt.order.sent_placements[0]) if receipt.order_id and receipt.order.sent_placements else None)
-            for receipt in receipts.order_by('-received_at')[:50]]
+        Prefetch('order__cell_plan_dispatches', queryset=dispatches[:1], to_attr='sent_placements'),
+        Prefetch('order__plan_set', queryset=Plan.objects.order_by('-pk')[:1], to_attr='placement_plans'))
+    receipts = list(receipts.order_by('-received_at')[:50])
+    plan_ids = [str(order.placement_plans[0].pk) for receipt in receipts if (order := receipt.order) and order.placement_plans]
+    facts = {(row.object_id, row.action): row.detail for row in Audit.objects.filter(object_type='Plan',
+        object_id__in=plan_ids, action__in=(DECIDE_ACTION, 'cell_plan.auto_hold')).order_by('pk')}
+    rows = []
+    for receipt in receipts:
+        order = receipt.order
+        plan = order.placement_plans[0] if order and order.placement_plans else None
+        dispatch = order.sent_placements[0] if order and order.sent_placements else None
+        sent = requested_slot(dispatch)
+        target, reason = None, ''
+        if plan:
+            decision = facts.get((str(plan.pk), DECIDE_ACTION), {})
+            rec = decision.get('recommendation') or plan.result.get('recommendation')
+            if rec:
+                target = anchor_address(rec['area_id'], rec['row'], rec['column'], rec['level'])
+            reason = facts.get((str(plan.pk), 'cell_plan.auto_hold'), {}).get('reason', '')
+            if not reason and plan.result.get('status') == 'HOLD':
+                reason = plan.result.get('reason', '')
+        local_reason = reason if not dispatch or dispatch.plan_id != getattr(plan, 'pk', None) else ''
+        local_code = local_reason if isinstance(local_reason, str) and re.fullmatch(r'[A-Z][A-Z0-9_]{1,95}', local_reason) else ''
+        # A worker's diagnostic body can contain device data. Only stable codes appear here.
+        code = dispatch.reason if dispatch and re.fullmatch(r'[A-Z][A-Z0-9_]{1,95}', dispatch.reason or '') else ''
+        action = ''
+        if code in ('SITE_NOT_CALIBRATED', 'STAND_NOT_CALIBRATED', 'UNCALIBRATED_DISPLACED_SITE'):
+            action = '현장 보정 필요'
+        elif code in ('SITE_ARM_NOT_ALLOWED', 'STAND_REQUIRES_ARM_A', 'INVALID_CELL_SLOT_COORDINATE', 'NO_LEGAL_PLAN'):
+            action = '현재 장치 구성에서 실행 불가'
+        rows.append(dict(receipt=receipt, target=target, sent=sent,
+                         state=DISPATCH_LABELS.get(dispatch.state, dispatch.state) if dispatch else '미제출',
+                         reason=code, action=action, local_reason=local_code))
+    return rows
 
 
 @serialized

@@ -3,6 +3,7 @@
   <div><h1>야드</h1><p>지금 어디에 무엇이 있나 · 화살은 지금 하는 일 하나</p></div>
 </div>
 <div class="yard-page-layout">
+  {% if incomplete_yard %}<p role="status">선택한 관측은 야드 일부만 포함합니다. 전체 배치는 새 관측을 기다립니다.</p>{% endif %}
   <div class="yard-main-col">
     <section class="panel yard-current-panel" aria-labelledby="yard-current-title">
       <div class="panel-h"><h2 id="yard-current-title">지금 야드</h2></div>
@@ -125,10 +126,13 @@
 {% if intake_occurrences %}
 <section class="panel" aria-labelledby="intake-placement-title">
   <div class="panel-h"><h2 id="intake-placement-title">최근 입고 회차와 배치 결과</h2></div>
-  <table><thead><tr><th>화물</th><th>입고 회차</th><th>요청한 자리</th><th>관측된 자리</th><th>확인 근거</th><th>상태</th></tr></thead>
-  <tbody>{% for receipt, requested in intake_occurrences %}<tr><td>{{ receipt.object_ref }}</td><td>{{ receipt.pk }}</td>
-    <td>{{ requested|default:"미제출" }}</td><td>{{ receipt.observed_slot|default:"관측 대기" }}</td>
-    <td>{{ receipt.get_result_identity_display|default:"—" }}</td><td>{{ receipt.get_status_display }}</td>
+  <table><thead><tr><th>화물</th><th>입고 회차</th><th>Harbor 지시 위치</th><th>최근 제출 위치</th><th>ROSY 접수·실행</th><th>관측된 자리</th><th>확인 근거</th><th>배치 결과</th><th>보류 사유</th></tr></thead>
+  <tbody>{% for row in intake_occurrences %}<tr><td>{{ row.receipt.object_ref }}</td><td>{{ row.receipt.pk }}</td>
+    <td>{{ row.target|default:"계획 대기" }}</td><td>{{ row.sent|default:"미제출" }}</td>
+    <td>{{ row.state }}</td>
+    <td>{{ row.receipt.observed_slot|default:"관측 대기" }}</td><td>{{ row.receipt.get_result_identity_display|default:"—" }}</td>
+    <td>{{ row.receipt.get_status_display }}</td><td>{% if row.local_reason %}Harbor · {{ row.local_reason }}{% endif %}
+    {% if row.reason %}ROSY · {% if row.action %}{{ row.action }} · {% endif %}{{ row.reason }}{% elif not row.local_reason %}—{% endif %}</td>
   </tr>{% endfor %}</tbody></table>
 </section>
 {% endif %}

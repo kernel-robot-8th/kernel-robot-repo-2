@@ -131,6 +131,10 @@ def _targets_stand(row: CellPlanDispatch) -> bool:
 
 
 def _failure_reason(parsed) -> str:
+    from harbor.cell_plan import RECEIPT_REFUSALS
+    for task in parsed.tasks:
+        if task.status in ('ABORTED', 'PAUSED_HUMAN', 'CANCELLED') and task.last_refusal in RECEIPT_REFUSALS:
+            return task.last_refusal
     if parsed.plan.hold_reason:
         return parsed.plan.hold_reason[:192]
     for task in parsed.tasks:
@@ -383,7 +387,7 @@ def _submit_harbor_plan(actor, *, plan_id: int, robot_id: str | None, client, pr
         if Observation.objects.filter(condition_id=plan.condition_id, provenance='PORT_EVENT',
                 observed_at__gt=plan.observation.observed_at).exists():
             raise services.Conflict('INTAKE_YARD_OBSERVATION_CHANGED')
-        payload.update(intake_occurrence_id=receipt.pk, placement_attempt_id=req_key)
+        payload.update(intake_occurrence_id=receipt.pk, placement_attempt_id=req_key, propose=True)
     rosy_client = client if client is not None else _default_client()
     return _create_and_submit(
         actor,

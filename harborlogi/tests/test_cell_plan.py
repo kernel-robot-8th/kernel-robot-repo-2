@@ -107,6 +107,13 @@ class CellPlanUnitTests(unittest.TestCase):
             ],
         }
         self.assertIs(validate_cell_plan_response(good, expected_order_source='harbor', expected_step_count=2), good)
+        # Older Fleet task bodies may have only a typed worker error; arbitrary diagnostics stay private.
+        for worker_error, expected in [('SITE_NOT_CALIBRATED', 'SITE_NOT_CALIBRATED'),
+                                       ('STAND_REQUIRES_ARM_A', 'STAND_REQUIRES_ARM_A'),
+                                       ('unstructured device diagnostics', None)]:
+            failed = {**good['tasks'][0], 'status': 'ABORTED', 'hardware_telemetry': {'error': worker_error}}
+            reply = parse_cell_plan_response({**good, 'tasks': [failed, good['tasks'][1]]}, expected_order_source='harbor')
+            self.assertEqual(reply.tasks[0].last_refusal, expected)
         with self.assertRaises(ValueError):
             validate_cell_plan_response(good, expected_order_source='rosy_r')
         broken_dep = {
