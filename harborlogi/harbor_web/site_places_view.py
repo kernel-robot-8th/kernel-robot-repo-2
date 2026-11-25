@@ -30,6 +30,20 @@ _STATUS_LABELS = {
     'planned_unverified': '예정 · 미검증',
 }
 
+_HANDOFF_HOLD_LABELS = {
+    'INTAKE_HANDOFF_UNCONFIGURED': '하역 연결 미등록',
+    'INTAKE_STOP_UNVERIFIED': '하역 정지선 배차 조건 미충족',
+    'INTAKE_ZONE_UNVERIFIED': '하역 대상 구역 실물 검증 대기',
+    'INTAKE_HANDOFF_UNVERIFIED': '하역 연결 배차 조건 미충족',
+    'OUTBOUND_HANDOFF_UNCONFIGURED': '반출 연결 미등록',
+    'OUTBOUND_ZONE_UNVERIFIED': '반출대 실물 검증 대기',
+    'OUTBOUND_PICKUP_STOP_UNCONFIGURED': '반출 상차 정지선 미지정',
+    'OUTBOUND_PICKUP_STOP_UNVERIFIED': '반출 상차 정지선 배차 조건 미충족',
+    'OUTBOUND_EXIT_STOP_UNCONFIGURED': '반출 전용 출구 미지정',
+    'OUTBOUND_EXIT_STOP_UNVERIFIED': '반출 전용 출구 배차 조건 미충족',
+    'OUTBOUND_HANDOFF_UNVERIFIED': '반출 연결 배차 조건 미충족',
+}
+
 
 def site_places_context(*, condition=None):
     """Return read-only port site-place summary for the yard page; fail closed on any error."""
@@ -76,11 +90,14 @@ def site_places_context(*, condition=None):
         dispatchable_handoff_count=sum(handoff.dispatchable for handoff in handoffs),
         schema=places.schema,
         digest=places.digest,
-        intake_summary=f'사용 가능: {intake_stop}' if intake_stop else f'보류 ({intake_reason})',
+        intake_summary=(
+            f'사용 가능: {intake_stop}' if intake_stop
+            else f'보류 · {_HANDOFF_HOLD_LABELS.get(intake_reason, intake_reason)}'
+        ),
         outbound_summary=(
             f'상차 {outbound_stops[0]} → 출구 {outbound_stops[1]}'
             if outbound_stops
-            else f'보류 ({outbound_reason})'
+            else f'보류 · {_HANDOFF_HOLD_LABELS.get(outbound_reason, outbound_reason)}'
         ),
         alignment=alignment,
         not_places=sorted(places.not_places),

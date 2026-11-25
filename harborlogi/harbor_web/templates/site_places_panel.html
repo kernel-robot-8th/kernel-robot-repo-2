@@ -11,15 +11,15 @@
       <div><dt>설비 제외 요소</dt><dd>{% for item in site_places.not_places %}<code>{{ item }}</code>{% if not forloop.last %}, {% endif %}{% empty %}없음{% endfor %}</dd></div>
     </dl>
     <p class="helptext">ROSY의 좌표 없는 포트 정지선·구역 연결 상태를 표시합니다 (좌표·팔 계산 비노출).</p>
+    {% if site_places.alignment.issues %}
+    <ul class="notice">
+      {% for issue in site_places.alignment.issues %}
+      <li>{{ issue.label }} (<code>{{ issue.code }}</code>)</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
     <details class="fold">
       <summary>차량 정지선·충전 칸 {{ site_places.vehicle_places|length }}개 · 셀 구역 {{ site_places.cell_zones|length }}개 · 연결 {{ site_places.handoff_count }}건 (배차 가능 {{ site_places.dispatchable_handoff_count }}건) 보기</summary>
-      {% if site_places.alignment.issues %}
-      <ul class="notice">
-        {% for issue in site_places.alignment.issues %}
-        <li>{{ issue.label }} (<code>{{ issue.code }}</code>)</li>
-        {% endfor %}
-      </ul>
-      {% endif %}
       <div class="site-places-tables">
         <div class="table-wrap">
           <table>

@@ -62,8 +62,8 @@ class SitePlacesPanelTests(TestCase):
         self.assertContains(response, 'S_OUT')
         self.assertContains(response, 'S3')
         self.assertContains(response, 'belt')
-        self.assertContains(response, '보류 (INTAKE_ZONE_UNVERIFIED)')
-        self.assertContains(response, '보류 (OUTBOUND_ZONE_UNVERIFIED)')
+        self.assertContains(response, '보류 · 하역 대상 구역 실물 검증 대기')
+        self.assertContains(response, '보류 · 반출대 실물 검증 대기')
         _assert_glossary_clean(self, html)
 
     def test_inventory_fails_closed_when_rosy_payload_leaks_geometry(self):
@@ -96,4 +96,8 @@ class SitePlacesPanelTests(TestCase):
         self.assertContains(response, '정합 점검 필요')
         self.assertContains(response, 'NO_ACTIVE_CONDITION')
         self.assertContains(response, 'OUTBOUND_EXIT_ROLE_MISMATCH')
+        summary, _ = html.split('<details class="fold">', 1)
+        self.assertIn('반출 출구로 지정된 S1에 전용 출구 역할이 필요합니다', summary)
+        self.assertIn('CELL_ZONES_UNVERIFIED', summary)
+        self.assertIn('OUTBOUND_PICKUP_UNVERIFIED', summary)
         _assert_glossary_clean(self, html)

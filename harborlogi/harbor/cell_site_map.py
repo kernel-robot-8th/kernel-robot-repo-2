@@ -767,7 +767,7 @@ def compare_condition_with_rosy(
             if exit_id and exit_id in vp_by_id and vp_by_id[exit_id].port_role != 'outbound_exit':
                 issues.append({
                     'code': 'OUTBOUND_EXIT_ROLE_MISMATCH',
-                    'label': f'반출 출구 정지선({exit_id})이 전용 반출 출구(outbound_exit) 역할이 아닙니다',
+                    'label': f'반출 출구로 지정된 {exit_id}에 전용 출구 역할이 필요합니다',
                 })
         unverified_zones = [cz.zone_id for cz in getattr(site_places, 'cell_zones', ()) if cz.status != 'verified']
         if unverified_zones:
