@@ -69,8 +69,11 @@ def site_places_context(*, condition=None):
         summary='일치' if report['aligned'] else f"정합 점검 필요 ({len(report['issues'])}건)",
         issues=report['issues'],
     )
+    handoffs = places.intake_handoffs + places.outbound_handoffs
     return dict(
         available=True,
+        handoff_count=len(handoffs),
+        dispatchable_handoff_count=sum(handoff.dispatchable for handoff in handoffs),
         schema=places.schema,
         digest=places.digest,
         intake_summary=f'사용 가능: {intake_stop}' if intake_stop else f'보류 ({intake_reason})',

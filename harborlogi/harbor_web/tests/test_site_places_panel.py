@@ -58,6 +58,7 @@ class SitePlacesPanelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.content.decode('utf-8')
         self.assertContains(response, 'ROSY 위치 체계')
+        self.assertContains(response, '차량 정지선·충전 칸 9개 · 셀 구역 4개 · 연결 2건 (배차 가능 0건) 보기')
         self.assertContains(response, 'S_OUT')
         self.assertContains(response, 'S3')
         self.assertContains(response, 'belt')
