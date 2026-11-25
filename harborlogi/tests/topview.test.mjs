@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   pollDelay,
   frameStatus,
+  emptyFrameMessage,
   mountTopview,
   resolveRotationDeg,
   displayRotationDeg,
@@ -414,6 +415,115 @@ try {
   assert.equal(svgAttrs.has('hidden'), true, 'SVG overlay hidden attribute must be set when toggled off');
   assert.equal(ovMeta.hidden, true);
   ovCleanup();
+
+  // S-arm stale/404 shows grey placeholder message while preserving pending points; user camera choice persists.
+  assert.equal(emptyFrameMessage(404, 'omx_arm_s_top'), 'S암 카메라 영상 없음 (ROSY 송출 확인)');
+  assert.equal(emptyFrameMessage(404, 'arm_s_top'), 'S암 카메라 영상 없음 (ROSY 송출 확인)');
+  assert.equal(emptyFrameMessage(404, 'top'), '야드 카메라 영상 없음 (ROSY 송출 확인)');
+  assert.equal(emptyFrameMessage(404, 'omx_overhead'), '야드 카메라 영상 없음 (ROSY 송출 확인)');
+  assert.equal(emptyFrameMessage(404, 'omx_side'), '사이드 카메라 영상 없음 (ROSY 송출 확인)');
+  assert.equal(emptyFrameMessage(404, 'side'), '사이드 카메라 영상 없음 (ROSY 송출 확인)');
+  assert.equal(emptyFrameMessage(404, 'ceiling_north'), '카메라 영상 없음 (ROSY 송출 확인)');
+  assert.equal(emptyFrameMessage(200, 'omx_arm_s_top'), '');
+  assert.equal(emptyFrameMessage(502, 'omx_arm_s_top'), '');
+
+  timers.clear();
+  calls.length = 0;
+  const armImage = {hidden: true, style: {}, removeAttribute() {}};
+  const armEmpty = {hidden: true, textContent: ''};
+  const armStatus = {textContent: ''};
+  const armOrientation = {textContent: '야드 기본 방향'};
+  const armSelect = new EventTarget();
+  armSelect.options = [
+    {value: '/topview/top/frame/', dataset: {cameraId: 'top'}},
+    {value: '/topview/omx_side/frame/', dataset: {cameraId: 'omx_side'}},
+    {value: '/topview/omx_arm_s_top/frame/', dataset: {cameraId: 'omx_arm_s_top'}},
+  ];
+  armSelect.value = '/topview/omx_arm_s_top/frame/';
+  const armMode = new EventTarget();
+  armMode.value = 'raw';
+  const armControl = {hidden: false};
+  const armMeta = {hidden: false};
+  const armPending = {hidden: false, dataset: {pointsSource: 'omx_arm_s_top'}};
+  const armNodes = {
+    '[data-topview-image]': armImage,
+    '[data-topview-empty]': armEmpty,
+    '[data-topview-status]': armStatus,
+    '[data-topview-source]': armSelect,
+    '[data-topview-mode]': armMode,
+    '[data-topview-orientation]': armOrientation,
+    '[data-topview-points-control]': armControl,
+    '[data-topview-points-meta]': armMeta,
+  };
+  const armPoints = [
+    {source_id: 'top', image: [640, 480], status: 'planned_unverified', points: []},
+    {source_id: 'omx_side', image: [640, 480], status: 'planned_unverified', points: []},
+    {
+      source_id: 'omx_arm_s_top',
+      image: [640, 480],
+      status: 'planned_unverified',
+      points: [
+        {site: 'not_places:vehicle_tray', label: 'Pinky 짐칸', short_label: 'Pinky 짐칸', kind: 'pick', point: null},
+        {site: 'belt-in', label: '컨베이어 투입', short_label: '컨베이어 투입', kind: 'pick', point: null},
+      ],
+    },
+  ];
+  doc2.hidden = false;
+  decodeBehavior = () => Promise.resolve();
+  respond = () => Promise.resolve(new Response('frame stale', {status: 404}));
+  const armCleanup = mountTopview({
+    querySelector: selector => armNodes[selector],
+    querySelectorAll: selector => (selector === '[data-topview-points-pending]' ? [armPending] : []),
+    dataset: {
+      topviewUrl: '/topview/omx_arm_s_top/frame/',
+      topviewCamera: 'omx_arm_s_top',
+      topviewPoints: JSON.stringify(armPoints),
+    },
+  });
+  await settle();
+  assert.equal(calls.at(-1).url, '/topview/omx_arm_s_top/frame/?view=raw');
+  assert.equal(armImage.hidden, true);
+  assert.equal(armEmpty.hidden, false);
+  assert.equal(armEmpty.textContent, 'S암 카메라 영상 없음 (ROSY 송출 확인)');
+  assert.equal(armMeta.hidden, false);
+  assert.equal(armPending.hidden, false);
+
+  // User picks yard camera via select -> stays on yard camera across 404, 200 recovery, and visibilitychange.
+  armSelect.value = '/topview/top/frame/';
+  respond = () => Promise.resolve(new Response('frame unavailable', {status: 404}));
+  armSelect.dispatchEvent(new Event('change'));
+  await settle();
+  assert.equal(calls.at(-1).url, '/topview/top/frame/?view=raw');
+  assert.equal(armEmpty.hidden, false);
+  assert.equal(armEmpty.textContent, '야드 카메라 영상 없음 (ROSY 송출 확인)');
+  assert.equal(armPending.hidden, true);
+
+  respond = () => Promise.resolve(new Response('yard-jpeg', {
+    headers: {'Content-Type': 'image/jpeg', 'X-Frame-Captured-At': captured},
+  }));
+  tick(); await settle();
+  assert.equal(calls.at(-1).url, '/topview/top/frame/?view=raw');
+  assert.equal(armSelect.value, '/topview/top/frame/');
+  assert.equal(armImage.hidden, false);
+  assert.equal(armEmpty.hidden, true);
+
+  doc2.hidden = true;
+  doc2.dispatchEvent(new Event('visibilitychange'));
+  doc2.hidden = false;
+  doc2.dispatchEvent(new Event('visibilitychange'));
+  await settle();
+  assert.equal(calls.at(-1).url, '/topview/top/frame/?view=raw', '사용자 선택 카메라는 재개 후에도 유지된다');
+  assert.equal(armSelect.value, '/topview/top/frame/');
+
+  // Side camera 404 (no camera connected) shows side placeholder message too.
+  armSelect.value = '/topview/omx_side/frame/';
+  respond = () => Promise.resolve(new Response('frame unavailable', {status: 404}));
+  armSelect.dispatchEvent(new Event('change'));
+  await settle();
+  assert.equal(calls.at(-1).url, '/topview/omx_side/frame/?view=raw');
+  assert.equal(armEmpty.hidden, false);
+  assert.equal(armEmpty.textContent, '사이드 카메라 영상 없음 (ROSY 송출 확인)');
+  armCleanup();
 } finally {
   Object.assign(globalThis, saved);
   URL.revokeObjectURL = revoke;
@@ -426,3 +536,26 @@ assert.equal(displayRotationDeg('0', 'top'), 180);
 assert.equal(displayRotationDeg('90', 'top'), 270);
 assert.equal(displayRotationDeg('0', 'ceiling_north'), 0);
 assert.equal(displayRotationDeg(null, 'omx_overhead'), 180);
+
+// Side camera is shown as captured; yard cameras are turned 180°.
+assert.equal(displayRotationDeg('0', 'omx_side'), 0);
+assert.equal(displayRotationDeg('0', 'side'), 0);
+assert.equal(displayRotationDeg(null, 'omx_side'), 0);
+{
+  const doc = {image: [640, 480], points: [{site: 'side:yard-r1-t1', kind: 'tier', roi: [316, 375, 400, 460]}]};
+  const side = buildOverlayItems(doc, [640, 480], displayRotationDeg('0', 'omx_side')).slots[0].rect;
+  const yard = buildOverlayItems(doc, [640, 480], displayRotationDeg('0', 'top')).slots[0].rect;
+  assert.deepEqual([side.x, side.y, side.width, side.height], [316, 375, 84, 85]);
+  assert.deepEqual([yard.x, yard.y], [640 - 400, 480 - 460]);
+}
+console.log('Side camera rotation tests passed');
+
+// Arm S camera is not turned; places without pixels go to the pending list, not the overlay.
+assert.equal(displayRotationDeg('0', 'omx_arm_s_top'), 0);
+{
+  const doc = {image: [640, 480], points: [{site: 'belt-in', kind: 'pick', point: null}]};
+  const items = buildOverlayItems(doc, [640, 480], 0);
+  assert.equal(items.picks.length, 0);
+  assert.deepEqual(items.pending.map(p => p.site), ['belt-in']);
+}
+console.log('Arm S tests passed');

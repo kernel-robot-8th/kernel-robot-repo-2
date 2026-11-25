@@ -101,7 +101,8 @@ def overview(request):
     request._open_field_episodes = open_episodes
     board = board_context(request, observation=observation, operations=operations)
     return page(request, 'overview.html', section='overview', rows=rows, operations=operations, board=board,
-                observations=observations, topview=topview_context(request),
+                observations=observations,
+                topview=topview_context(request, active_order_kind=board['running_order_kind']),
                 observation=observation, condition=observation.condition if observation else None,
                 field_pending=open_field)
 
