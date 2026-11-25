@@ -69,6 +69,21 @@ class TopviewPagesTests(TestCase):
         for response in self.pages():
             self.assertContains(response, 'data-topview-url="/topview/ceiling_north/frame/"')
             self.assertNotContains(response, 'data-topview-source')
+            self.assertContains(response, '<option value="auto" selected>실제 환경 + 좌표</option>')
+
+    def test_omx_overhead_is_selected_first_in_raw_mode_with_points_controls_and_unverified_notice(self):
+        self.reader.sources.return_value = {'sources': ['ceiling_north', 'arm_a_wrist', 'omx_overhead']}
+        for response in self.pages():
+            html = response.content.decode()
+            self.assertContains(response, 'data-topview-url="/topview/omx_overhead/frame/"')
+            self.assertContains(response, 'value="/topview/omx_overhead/frame/" selected')
+            self.assertContains(response, 'value="/topview/ceiling_north/frame/"')
+            self.assertNotContains(response, 'arm_a_wrist')
+            self.assertLess(html.index('omx_overhead'), html.index('ceiling_north'))
+            self.assertContains(response, '<option value="raw" selected>카메라 화면</option>')
+            self.assertContains(response, 'data-topview-points-toggle checked')
+            self.assertContains(response, '위치는 실측 전 참고값')
+            self.assertContains(response, '위치 미정: A1 · A2 · A3')
 
     def test_connection_errors_leave_both_pages_available(self):
         for error in (OSError('test-fleet-secret'), ValueError('invalid response')):

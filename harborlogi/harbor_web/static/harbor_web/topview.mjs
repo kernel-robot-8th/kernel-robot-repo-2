@@ -1,3 +1,7 @@
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const FRAME_ROTATIONS = [0, 90, 180, 270];
+const DEFAULT_ROTATION_DEG = 180;
+
 function parseCapturedAt(capturedAt) {
   if (!capturedAt) return null;
   const text = String(capturedAt).trim();
@@ -40,13 +44,179 @@ export function frameStatus(status, capturedAt, rectified = null) {
   return modePrefix ? `${modePrefix} · 찍은 시각 ${time}` : '찍은 시각 ' + time;
 }
 
-const FRAME_ROTATIONS = [0, 90, 180, 270];
+export function resolveRotationDeg(header) {
+  const trimmed = typeof header === 'string' ? header.trim() : '';
+  const deg = trimmed !== '' ? Number(trimmed) : NaN;
+  return trimmed && FRAME_ROTATIONS.includes(deg) ? deg : DEFAULT_ROTATION_DEG;
+}
 
 function applyRotation(image, header) {
   // An absent or invalid header resets to the CSS default (rotate(180deg)).
   const trimmed = typeof header === 'string' ? header.trim() : '';
   const deg = trimmed !== '' ? Number(trimmed) : NaN;
   image.style.transform = trimmed && FRAME_ROTATIONS.includes(deg) ? `rotate(${deg}deg)` : '';
+  return trimmed && FRAME_ROTATIONS.includes(deg) ? deg : DEFAULT_ROTATION_DEG;
+}
+
+export function rotatedImageSize(sourceSize, rotationDeg = DEFAULT_ROTATION_DEG) {
+  const [srcW, srcH] = sourceSize;
+  const deg = FRAME_ROTATIONS.includes(rotationDeg) ? rotationDeg : DEFAULT_ROTATION_DEG;
+  return deg === 90 || deg === 270 ? [srcH, srcW] : [srcW, srcH];
+}
+
+export function projectPoint(point, sourceSize, displaySize, rotationDeg = DEFAULT_ROTATION_DEG) {
+  const [x, y] = point;
+  const [srcW, srcH] = sourceSize;
+  const [dispW, dispH] = displaySize;
+  const deg = FRAME_ROTATIONS.includes(rotationDeg) ? rotationDeg : DEFAULT_ROTATION_DEG;
+  let rx, ry, rotW, rotH;
+  if (deg === 0) {
+    rx = x; ry = y; rotW = srcW; rotH = srcH;
+  } else if (deg === 90) {
+    rx = srcH - y; ry = x; rotW = srcH; rotH = srcW;
+  } else if (deg === 270) {
+    rx = y; ry = srcW - x; rotW = srcH; rotH = srcW;
+  } else {
+    rx = srcW - x; ry = srcH - y; rotW = srcW; rotH = srcH;
+  }
+  return {
+    x: (rx / rotW) * dispW,
+    y: (ry / rotH) * dispH,
+  };
+}
+
+export function projectRoi(roi, sourceSize, displaySize, rotationDeg = DEFAULT_ROTATION_DEG) {
+  const [x1, y1, x2, y2] = roi;
+  const p1 = projectPoint([x1, y1], sourceSize, displaySize, rotationDeg);
+  const p2 = projectPoint([x2, y2], sourceSize, displaySize, rotationDeg);
+  const x = Math.min(p1.x, p2.x);
+  const y = Math.min(p1.y, p2.y);
+  const width = Math.abs(p2.x - p1.x);
+  const height = Math.abs(p2.y - p1.y);
+  return {
+    x,
+    y,
+    width,
+    height,
+    cx: x + width / 2,
+    cy: y + height / 2,
+  };
+}
+
+export function extractCameraId(url) {
+  if (typeof url !== 'string') return '';
+  const match = url.match(/\/topview\/([^/?#]+)\/frame\/?/);
+  if (!match) return '';
+  try {
+    return decodeURIComponent(match[1]);
+  } catch (_) {
+    return match[1];
+  }
+}
+
+export function shouldShowOverlay({sitePixels, cameraId, viewMode, rectified, enabled, imageVisible}) {
+  return Boolean(
+    sitePixels
+    && sitePixels.source_id
+    && cameraId === sitePixels.source_id
+    && viewMode === 'raw'
+    && rectified === null
+    && enabled
+    && imageVisible,
+  );
+}
+
+export function buildOverlayItems(sitePixels, displaySize, rotationDeg = DEFAULT_ROTATION_DEG) {
+  if (!sitePixels || !Array.isArray(sitePixels.image) || !Array.isArray(sitePixels.points)) {
+    return {slots: [], picks: [], pending: []};
+  }
+  const sourceSize = sitePixels.image;
+  const slots = [];
+  const picks = [];
+  const pending = [];
+  for (const entry of sitePixels.points) {
+    const shortLabel = entry.short_label || entry.label || entry.site;
+    const base = {
+      site: entry.site,
+      label: entry.label || entry.site,
+      shortLabel,
+      zone: entry.zone || 'yard',
+    };
+    if (entry.kind === 'pick') {
+      if (Array.isArray(entry.point) && entry.point.length === 2) {
+        picks.push({...base, point: projectPoint(entry.point, sourceSize, displaySize, rotationDeg)});
+      }
+      continue;
+    }
+    if (Array.isArray(entry.roi) && entry.roi.length === 4) {
+      slots.push({...base, rect: projectRoi(entry.roi, sourceSize, displaySize, rotationDeg)});
+    } else {
+      pending.push(base);
+    }
+  }
+  return {slots, picks, pending};
+}
+
+function parseSitePixels(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function setElementHidden(el, hidden) {
+  if (!el) return;
+  const flag = Boolean(hidden);
+  if (typeof el.toggleAttribute === 'function') {
+    el.toggleAttribute('hidden', flag);
+  } else if (typeof el.setAttribute === 'function' && typeof el.removeAttribute === 'function') {
+    if (flag) el.setAttribute('hidden', '');
+    else el.removeAttribute('hidden');
+  }
+  el.hidden = flag;
+}
+
+function svgEl(tag, attrs = {}) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    el.setAttribute(key, String(value));
+  }
+  return el;
+}
+
+function estimateLabelWidth(text) {
+  let width = 10;
+  for (const ch of text) {
+    width += ch.codePointAt(0) >= 0x1100 ? 11.5 : 6.2;
+  }
+  return Math.max(26, width);
+}
+
+function addLabel(group, text, cx, cy, boundsW, boundsH) {
+  const estWidth = estimateLabelWidth(text);
+  const pillH = 16;
+  const clampedX = Math.max(estWidth / 2 + 2, Math.min(boundsW - estWidth / 2 - 2, cx));
+  const clampedY = Math.max(pillH / 2 + 2, Math.min(boundsH - pillH / 2 - 2, cy));
+  group.appendChild(svgEl('rect', {
+    class: 'topview-label-bg',
+    x: (clampedX - estWidth / 2).toFixed(1),
+    y: (clampedY - pillH / 2).toFixed(1),
+    width: estWidth.toFixed(1),
+    height: pillH,
+    rx: 3,
+  }));
+  const label = svgEl('text', {
+    class: 'topview-label',
+    x: clampedX.toFixed(1),
+    y: clampedY.toFixed(1),
+    'text-anchor': 'middle',
+    'dominant-baseline': 'central',
+  });
+  label.textContent = text;
+  group.appendChild(label);
 }
 
 export function mountTopview(panel) {
@@ -55,15 +225,111 @@ export function mountTopview(panel) {
   const select = panel.querySelector('[data-topview-source]');
   const modeSelect = panel.querySelector('[data-topview-mode]');
   const orientationText = panel.querySelector('[data-topview-orientation]');
+  const overlay = panel.querySelector('[data-topview-overlay]');
+  const pointsControl = panel.querySelector('[data-topview-points-control]');
+  const pointsToggle = panel.querySelector('[data-topview-points-toggle]');
+  const pointsMeta = panel.querySelector('[data-topview-points-meta]');
+  const sitePixels = parseSitePixels(panel.dataset?.topviewPoints);
   const defaultOrientation = orientationText?.textContent ?? '';
   let timer, request, imageUrl;
+  let currentRotationDeg = DEFAULT_ROTATION_DEG;
+  let currentRectified = null;
+
+  function currentCameraId() {
+    if (select) {
+      const selectedOption = select.selectedOptions?.[0]
+        || (select.options ? [...select.options].find(opt => opt.value === select.value) : null);
+      if (selectedOption?.dataset?.cameraId) return selectedOption.dataset.cameraId;
+      return extractCameraId(select.value);
+    }
+    return panel.dataset?.topviewCamera || extractCameraId(panel.dataset?.topviewUrl || '');
+  }
+
+  function currentViewMode() {
+    return modeSelect?.value === 'raw' ? 'raw' : 'auto';
+  }
 
   function requestUrl() {
     const base = select?.value || panel.dataset.topviewUrl;
-    if (modeSelect?.value === 'raw') {
+    if (currentViewMode() === 'raw') {
       return `${base}${base.includes('?') ? '&' : '?'}view=raw`;
     }
     return base;
+  }
+
+  function renderOverlay() {
+    const cameraId = currentCameraId();
+    const viewMode = currentViewMode();
+    const controlsEligible = Boolean(
+      sitePixels
+      && sitePixels.source_id
+      && cameraId === sitePixels.source_id
+      && viewMode === 'raw'
+      && currentRectified === null,
+    );
+    const enabled = pointsToggle ? Boolean(pointsToggle.checked) : true;
+    setElementHidden(pointsControl, !controlsEligible);
+    setElementHidden(pointsMeta, !(controlsEligible && enabled));
+    if (!overlay) return;
+    const visible = shouldShowOverlay({
+      sitePixels,
+      cameraId,
+      viewMode,
+      rectified: currentRectified,
+      enabled,
+      imageVisible: !image.hidden,
+    });
+    if (!visible) {
+      setElementHidden(overlay, true);
+      if (typeof overlay.replaceChildren === 'function') overlay.replaceChildren();
+      return;
+    }
+    if (typeof document.createElementNS !== 'function') {
+      setElementHidden(overlay, false);
+      return;
+    }
+    const [rotW, rotH] = rotatedImageSize(sitePixels.image, currentRotationDeg);
+    const dispW = image.clientWidth > 0 ? image.clientWidth : rotW;
+    const dispH = image.clientHeight > 0 ? image.clientHeight : rotH;
+    overlay.setAttribute('viewBox', `0 0 ${dispW} ${dispH}`);
+    const {slots, picks} = buildOverlayItems(sitePixels, [dispW, dispH], currentRotationDeg);
+    const nodes = [];
+    for (const slot of slots) {
+      const group = svgEl('g', {
+        class: `topview-slot topview-zone-${slot.zone}`,
+        'data-site': slot.site,
+      });
+      group.appendChild(svgEl('rect', {
+        x: slot.rect.x.toFixed(1),
+        y: slot.rect.y.toFixed(1),
+        width: slot.rect.width.toFixed(1),
+        height: slot.rect.height.toFixed(1),
+        rx: 3,
+      }));
+      addLabel(group, slot.shortLabel, slot.rect.cx, slot.rect.cy, dispW, dispH);
+      const title = svgEl('title');
+      title.textContent = `${slot.label} (${slot.site})`;
+      group.appendChild(title);
+      nodes.push(group);
+    }
+    for (const pick of picks) {
+      const group = svgEl('g', {
+        class: `topview-pick topview-zone-${pick.zone}`,
+        'data-site': pick.site,
+      });
+      const px = pick.point.x;
+      const py = pick.point.y;
+      group.appendChild(svgEl('line', {x1: (px - 10).toFixed(1), y1: py.toFixed(1), x2: (px + 10).toFixed(1), y2: py.toFixed(1)}));
+      group.appendChild(svgEl('line', {x1: px.toFixed(1), y1: (py - 10).toFixed(1), x2: px.toFixed(1), y2: (py + 10).toFixed(1)}));
+      group.appendChild(svgEl('circle', {cx: px.toFixed(1), cy: py.toFixed(1), r: 5}));
+      addLabel(group, pick.shortLabel, px, py - 16, dispW, dispH);
+      const title = svgEl('title');
+      title.textContent = `${pick.label} (${pick.site})`;
+      group.appendChild(title);
+      nodes.push(group);
+    }
+    overlay.replaceChildren(...nodes);
+    setElementHidden(overlay, false);
   }
 
   function clearImage() {
@@ -71,6 +337,7 @@ export function mountTopview(panel) {
     image.removeAttribute('src');
     if (imageUrl) URL.revokeObjectURL(imageUrl);
     imageUrl = null;
+    renderOverlay();
   }
 
   function setStatus(text) {
@@ -94,6 +361,8 @@ export function mountTopview(panel) {
       });
       if (request !== current) return;
       status = response.status;
+      const rawRectified = response.headers.get('X-Frame-Rectified');
+      currentRectified = rawRectified === 'map-overlay' || rawRectified === 'map' ? rawRectified : null;
       if (response.ok && response.headers.get('Content-Type')?.split(';')[0] === 'image/jpeg') {
         const blob = await response.blob();
         if (request !== current) return;
@@ -112,26 +381,26 @@ export function mountTopview(panel) {
           imageUrl = nextUrl;
           image.src = nextUrl;
           if (image.hidden) image.hidden = false;
-          applyRotation(image, response.headers.get('X-Frame-Rotation-Deg'));
+          currentRotationDeg = applyRotation(image, response.headers.get('X-Frame-Rotation-Deg'));
           if (previousUrl) URL.revokeObjectURL(previousUrl);
+          renderOverlay();
         }
       } else {
         if (status === 200) status = 502;
         clearImage();
       }
-      const rawRectified = response.headers.get('X-Frame-Rectified');
-      const rectified = rawRectified === 'map-overlay' || rawRectified === 'map' ? rawRectified : null;
       if (orientationText && defaultOrientation) {
-        orientationText.textContent = rectified === 'map-overlay'
+        orientationText.textContent = currentRectified === 'map-overlay'
           ? '버드뷰 실제 환경 + 좌표 (지도 +X 오른쪽 · +Y 위)'
-          : rectified === 'map'
+          : currentRectified === 'map'
             ? '버드뷰 평면 (지도 +X 오른쪽 · +Y 위)'
             : defaultOrientation;
       }
-      setStatus(frameStatus(status, response.headers.get('X-Frame-Captured-At'), rectified));
+      setStatus(frameStatus(status, response.headers.get('X-Frame-Captured-At'), currentRectified));
     } catch (_) {
       if (request !== current) return;
       status = 0;
+      currentRectified = null;
       clearImage();
       setStatus(frameStatus(status));
     } finally {
@@ -148,7 +417,18 @@ export function mountTopview(panel) {
     refresh();
   }
 
-  function onChange() {
+  function onSourceChange() {
+    if (modeSelect && sitePixels?.source_id) {
+      modeSelect.value = currentCameraId() === sitePixels.source_id ? 'raw' : 'auto';
+    }
+    currentRectified = null;
+    currentRotationDeg = DEFAULT_ROTATION_DEG;
+    clearImage();
+    restart();
+  }
+
+  function onModeChange() {
+    currentRectified = null;
     clearImage();
     restart();
   }
@@ -162,20 +442,38 @@ export function mountTopview(panel) {
     if (event.persisted) restart();
   }
 
-  select?.addEventListener('change', onChange);
-  modeSelect?.addEventListener('change', onChange);
+  let resizeObserver = null;
+  if (typeof ResizeObserver === 'function' && overlay && image) {
+    try {
+      resizeObserver = new ResizeObserver(renderOverlay);
+      resizeObserver.observe(image);
+    } catch (_) {
+      resizeObserver = null;
+    }
+  }
+
+  select?.addEventListener('change', onSourceChange);
+  modeSelect?.addEventListener('change', onModeChange);
+  pointsToggle?.addEventListener('change', renderOverlay);
+  image?.addEventListener?.('load', renderOverlay);
   document.addEventListener('visibilitychange', restart);
   window.addEventListener('pagehide', onPageHide);
   window.addEventListener('pageshow', onPageShow);
+  window.addEventListener('resize', renderOverlay);
+  renderOverlay();
   refresh();
   return () => {
     stop();
     clearImage();
-    select?.removeEventListener('change', onChange);
-    modeSelect?.removeEventListener('change', onChange);
+    resizeObserver?.disconnect();
+    select?.removeEventListener('change', onSourceChange);
+    modeSelect?.removeEventListener('change', onModeChange);
+    pointsToggle?.removeEventListener('change', renderOverlay);
+    image?.removeEventListener?.('load', renderOverlay);
     document.removeEventListener('visibilitychange', restart);
     window.removeEventListener('pagehide', onPageHide);
     window.removeEventListener('pageshow', onPageShow);
+    window.removeEventListener('resize', renderOverlay);
   };
 }
 
