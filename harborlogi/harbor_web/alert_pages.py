@@ -52,7 +52,7 @@ ATTENTION_TEXT = {
 }
 # Short category shown on each alert chip ("야드 현황 1건") instead of a repeated "처리할 것".
 ATTENTION_KIND = {'관측 없음': '야드 현황', '관측 유효 시간 밖': '야드 현황', '같은 출처에 새 관측 있음': '야드 현황',
-                  'HOLD 계획': '작업 막힘', '계획 다시 짜야 함': '계획'}
+                  'HOLD 계획': '작업 막힘', '계획 다시 짜야 함': '계획', '인식 불일치': '인식 불일치'}
 COMMAND_TEXT = {
     'UNKNOWN': 'ROSY 응답을 확인하지 못했습니다. 자동으로 다시 보내지 않습니다.',
     'BLOCKED': '설치 조건이나 야드 현황, 복구 조건을 확인해야 합니다.',
@@ -129,6 +129,13 @@ def alerts_context(request, *, observation=None, operations=None):
     if can_read:
         intake_items, intake_status = intake_alert_items(can_read)
         alerts.extend(dict(item, kind='반입 확인') for item in intake_items)
+        from harbor_web.site_recognition_view import site_recognition_alert_items
+        alerts.extend(site_recognition_alert_items(
+            request,
+            observation=observation,
+            can_open_field=bool(held & {'operator', 'admin', 'field'}),
+            kind=ATTENTION_KIND['인식 불일치'],
+        ))
     return dict(alerts=alerts, alert_total=sum(item['count'] for item in alerts), intake_status=intake_status)
 
 

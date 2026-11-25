@@ -1,0 +1,28 @@
+<section id="site-recognition" class="panel site-recognition-panel" aria-labelledby="site-recognition-title" data-site-recognition>
+  <div class="panel-h">
+    <h3 id="site-recognition-title">ROSY 인식</h3>
+    {% if site_recognition.available and site_recognition.compared %}
+      <span class="scope">일치 {{ site_recognition.match_count }}자리{% if site_recognition.mismatch_count %} · 불일치 {{ site_recognition.mismatch_count }}건{% endif %}</span>
+    {% endif %}
+    {% if site_recognition.mismatch_count and site_recognition.field_href %}
+      <a class="button quiet site-recognition-action" href="{{ site_recognition.field_href }}">현장 확인</a>
+    {% endif %}
+  </div>
+  <div class="panel-b">
+    <p role="status" class="site-recognition-status" data-site-recognition-status>{{ site_recognition.summary_line }}</p>
+    {% if site_recognition.mismatches %}
+    <ul class="site-recognition-list" data-site-recognition-mismatches>
+      {% for item in site_recognition.mismatches %}
+      <li data-recognition-result="{{ item.result }}">
+        <span class="chip tone-hold">인식 불일치</span>
+        <span class="site-recognition-main">
+          <strong><code>{{ item.site_ref }}</code> · {{ item.cargo_label }}</strong>
+          <span class="site-recognition-reason">{{ item.reason }}</span>
+        </span>
+        {% if site_recognition.field_href %}<a class="button quiet site-recognition-action" href="{{ site_recognition.field_href }}">현장 확인</a>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+</section>

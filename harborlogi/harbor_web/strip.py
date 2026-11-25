@@ -96,6 +96,8 @@ def _alert_count(request, *, held, can_read, observation, stale, superseded, com
         total += _unmatched_completed_count(commands)
         from harbor_web.intake_pages import read_holds
         total += len(read_holds()[0])
+        from harbor_web.site_recognition_view import cached_site_recognition_mismatch_count
+        total += cached_site_recognition_mismatch_count(request, observation)
 
     if held & {'operator', 'admin'} or can_read:
         cached = getattr(request, '_open_field_count', None)

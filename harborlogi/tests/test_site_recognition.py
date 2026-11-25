@@ -266,38 +266,60 @@ class SiteRecognitionClientTests(unittest.TestCase):
         self.assertEqual(opener.request.get_header('Authorization'), 'Bearer synthetic-harbor')
         self.assertEqual(opener.request.get_header('Content-type'), 'application/json')
 
-    def test_disabled_loader_never_calls_transport_even_if_client_is_available(self):
+    def test_disabled_loader_only_when_zero_or_unconfigured_and_enabled_by_default(self):
         calls = []
-        client = RosyClient(transport=lambda *args: calls.append(args))
-        for flag in ('', '0', 'true'):
-            with patch.dict(os.environ, {'HARBOR_ROSY_SITE_RECOGNITION': flag}):
-                self.assertEqual(load_site_recognition(client), (None, 'ROSY 인식 연동 전'))
+        client = RosyClient(transport=lambda *args: (calls.append(args), payload())[1])
+        with patch.dict(os.environ, {'HARBOR_ROSY_SITE_RECOGNITION': '0'}):
+            self.assertEqual(load_site_recognition(client), (None, 'ROSY 인식 연동 전'))
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(load_site_recognition(), (None, 'ROSY 인식 연동 전'))
         self.assertEqual(calls, [])
 
+        for env in ({}, {'HARBOR_ROSY_SITE_RECOGNITION': ''}, {'HARBOR_ROSY_SITE_RECOGNITION': '1'}):
+            with self.subTest(env=env), patch.dict(os.environ, env, clear=True):
+                snapshot, status = load_site_recognition(client)
+                self.assertEqual(snapshot['snapshot_id'], 'snapshot-1')
+                self.assertEqual(status, '')
+        self.assertEqual(len(calls), 3)
+
     def test_enabled_loader_returns_snapshot_and_known_refs_are_checked(self):
         client = RosyClient(transport=lambda *args: payload())
-        with patch.dict(os.environ, {'HARBOR_ROSY_SITE_RECOGNITION': '1'}):
+        with patch.dict(os.environ, {}, clear=True):
             snapshot, status = load_site_recognition(client)
             self.assertEqual(snapshot['snapshot_id'], 'snapshot-1')
             self.assertEqual(status, '')
             self.assertEqual(load_site_recognition(client, known_site_refs=set()),
                              (None, 'ROSY 인식 응답 형식 오류'))
 
-    def test_loader_distinguishes_missing_api_invalid_payload_and_connection_failure(self):
+    def test_loader_distinguishes_404_not_yet_observed_missing_api_and_errors(self):
+        class BrokenBody:
+            def read(self, *_args):
+                raise OSError('broken stream')
+
+            def close(self):
+                pass
+
+        not_observed_body = json.dumps({'detail': {'code': 'CELL_SITE_RECOGNITION_NOT_YET_OBSERVED'}}).encode()
+        other_code_body = json.dumps({'detail': {'code': 'SOME_OTHER_404'}}).encode()
+        oversized_body = b'{"detail":{"code":"CELL_SITE_RECOGNITION_NOT_YET_OBSERVED","pad":"' + b'x' * (65 * 1024) + b'"}}'
         cases = [
+            (HTTPError('http://synthetic', 404, 'not observed', {}, io.BytesIO(not_observed_body)), 'ROSY 인식 스냅샷 수신 대기'),
+            (HTTPError('http://synthetic', 404, 'other', {}, io.BytesIO(other_code_body)), 'ROSY에 아직 인식 API 없음'),
             (HTTPError('http://synthetic', 404, 'missing', {}, None), 'ROSY에 아직 인식 API 없음'),
+            (HTTPError('http://synthetic', 404, 'html', {}, io.BytesIO(b'<html>not found</html>')), 'ROSY에 아직 인식 API 없음'),
+            (HTTPError('http://synthetic', 404, 'huge', {}, io.BytesIO(oversized_body)), 'ROSY에 아직 인식 API 없음'),
+            (HTTPError('http://synthetic', 404, 'broken', {}, BrokenBody()), 'ROSY에 아직 인식 API 없음'),
             (HTTPError('http://synthetic', 403, 'forbidden', {}, None), 'ROSY 인식 연결 오류'),
             (URLError('offline'), 'ROSY 인식 연결 오류'),
+            (TimeoutError('timed out'), 'ROSY 인식 연결 오류'),
             (ValueError('bad JSON'), 'ROSY 인식 응답 형식 오류'),
         ]
         for error, status in cases:
             def transport(*args):
                 raise error
-            with self.subTest(error=error), patch.dict(os.environ, {'HARBOR_ROSY_SITE_RECOGNITION': '1'}):
+            with self.subTest(error=error), patch.dict(os.environ, {}, clear=True):
                 self.assertEqual(load_site_recognition(RosyClient(transport=transport)), (None, status))
-        with patch.dict(os.environ, {'HARBOR_ROSY_SITE_RECOGNITION': '1'}):
+        with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(load_site_recognition(RosyClient(transport=lambda *args: {})),
                              (None, 'ROSY 인식 응답 형식 오류'))
 
