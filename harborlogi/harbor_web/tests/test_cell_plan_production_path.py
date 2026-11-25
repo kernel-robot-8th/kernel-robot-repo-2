@@ -89,7 +89,8 @@ class CellPlanProductionPathTests(TestCase):
         self.check()
         self.assertEqual(readiness.first_unmet_cell_plan(self.observation), '')
         self.assertEqual(readiness.first_unmet(self.plan), 'READINESS_BINDING_REQUIRED')  # legacy Command gate unchanged
-        with patch('harbor_web.readiness.MAX_AGE', timedelta(0)):
+        after_expiry = bridge.last_check().created_at + readiness.MAX_AGE + timedelta(seconds=1)
+        with patch('harbor_web.readiness.timezone.now', return_value=after_expiry):
             self.assertEqual(readiness.first_unmet_cell_plan(self.observation), 'READINESS_CHECK_STALE')
 
     def test_each_cell_plan_gate_blocks_with_its_own_reason(self):

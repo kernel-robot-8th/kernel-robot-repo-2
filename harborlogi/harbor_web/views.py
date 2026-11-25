@@ -490,6 +490,7 @@ def inventory(request):
     from harbor_web.intake_occurrences import inventory_occurrences
     return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices, topview=topview_context(request),
                 intake_occurrences=inventory_occurrences(), incomplete_yard=incomplete,
+                can_read_commercial=has_role(request.user, 'viewer', 'operator', 'admin'),
                 site_recognition=site_recognition_context(
                     request,
                     observation=selected,

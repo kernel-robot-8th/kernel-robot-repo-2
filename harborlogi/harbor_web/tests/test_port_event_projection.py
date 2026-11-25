@@ -127,7 +127,8 @@ class PortEventProjectionTests(TestCase):
         self.assertEqual(dispatch.request_payload['intake_occurrence_id'], 'first')
         self.assertEqual(dispatch.request_payload['placement_attempt_id'], dispatch.request_key)
         self.assertIs(dispatch.request_payload['propose'], True)
-        for commercial_field in ('shipper_name', 'shipper_tier', 'destination', 'weight_kg', 'volume_m3', 'tag_value'):
+        for commercial_field in ('shipper_name', 'shipper_tier', 'destination', 'weight_kg', 'volume_m3',
+                                 'tag_value', 'color', 'color_confirmed', 'nominal_length_ft', 'container_type', 'goods_contents'):
             self.assertNotIn(f'"{commercial_field}"', json.dumps(dispatch.request_payload))
         self.assertContains(self.client.get('/inventory/'), '제안 접수 · 승인 대기')
         requested = dispatch.request_payload['steps'][0]['dst_site']
@@ -190,7 +191,8 @@ class PortEventProjectionTests(TestCase):
         self.assertEqual(IntakeOccurrence.objects.get(pk='unregistered').status, 'CARGO_UNKNOWN')
         self.assertFalse(Cargo.objects.filter(code='C4').exists())
         registered = services.register_cargo(self.user, code='C4', name='C4', weight_kg=7, volume_m3=1,
-            shipper_name='시험 화주', shipper_tier=2, tag_value='C4-test-tag', destination='Busan', length_cells=3)
+            shipper_name='시험 화주', shipper_tier=2, tag_value='C4-test-tag', destination='Busan', length_cells=3,
+            color='orange', color_confirmed=False)
         intake_loop.tick(self.registry, now=timezone.now())
         original = IntakeOccurrence.objects.get(pk='unregistered').order
         repeat = dict(kind='container.received_at_intake', object_ref='C4', identity='observed',
@@ -207,6 +209,40 @@ class PortEventProjectionTests(TestCase):
                          ('시험 화주', 'Busan', 7))
         self.assertEqual(CargoTag.objects.get(tag_value='C4-test-tag').cargo_id, registered.pk)
         self.assertEqual(Order.objects.count(), 3)
+        self.assertEqual((latest.cargo.current_commercial.color, latest.cargo.current_commercial.color_confirmed),
+                         ('orange', False))
+        page = self.client.get('/inventory/')
+        self.assertContains(page, '주황')
+        self.assertContains(page, '색 확인 전')
+        self.assertContains(page, '시험 화주')
+        self.assertContains(page, f'/cargo/{registered.pk}/history/')
+        self.assertContains(page, f'/cargo/{registered.pk}/commercial/')
+        self.assertContains(page, f'/requests/{latest.pk}/contents/')
+        self.assertContains(page, f'/requests/{original.pk}/contents/')
+        profile_url = f'/cargo/{registered.pk}/commercial/'
+        response = self.client.post(profile_url, dict(expected_revision=0, nominal_length_ft=40,
+            container_type='냉장', color='sky', color_confirmed='on'))
+        self.assertEqual(response.status_code, 302)
+        from harbor_web.commercial import goods_digest
+        for order, contents in ((original, '첫 입고 바나나'), (latest, '둘째 입고 사과')):
+            response = self.client.post(f'/requests/{order.pk}/contents/',
+                dict(expected_digest=goods_digest(''), goods_contents=contents))
+            self.assertEqual(response.status_code, 302)
+        intake_loop.tick(self.registry, now=timezone.now())
+        rows = self.client.get('/inventory/').context['intake_occurrences']
+        indexed = {row['receipt'].pk: row for row in rows}
+        self.assertEqual(indexed['unregistered']['receipt'].order.goods_contents, '첫 입고 바나나')
+        self.assertEqual(indexed['repeat-C4']['receipt'].order.goods_contents, '둘째 입고 사과')
+        page = self.client.get('/inventory/')
+        for label in ('첫 입고 바나나', '둘째 입고 사과', '40 ft', '냉장', '하늘', '색 확인됨'):
+            self.assertContains(page, label)
+        field = User.objects.create_user('field-reader')
+        field.groups.add(Group.objects.get_or_create(name='field')[0])
+        self.client.force_login(field)
+        field_page = self.client.get('/inventory/')
+        self.assertContains(field_page, 'repeat-C4')
+        self.assertNotContains(field_page, '둘째 입고 사과')
+        self.assertNotContains(field_page, profile_url)
 
     def test_day1_empty_map_stored_event_projects_and_renders_on_inventory(self):
         ev_id = 'a' * 64

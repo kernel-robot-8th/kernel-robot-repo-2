@@ -126,14 +126,21 @@
 {% if intake_occurrences %}
 <section class="panel" aria-labelledby="intake-placement-title">
   <div class="panel-h"><h2 id="intake-placement-title">최근 입고 회차와 배치 결과</h2></div>
-  <table><thead><tr><th>화물</th><th>입고 회차</th><th>Harbor 지시 위치</th><th>최근 제출 위치</th><th>ROSY 접수·실행</th><th>관측된 자리</th><th>확인 근거</th><th>배치 결과</th><th>보류 사유</th></tr></thead>
-  <tbody>{% for row in intake_occurrences %}<tr><td>{{ row.receipt.object_ref }}</td><td>{{ row.receipt.pk }}</td>
+  <div class="table-wrap"><table><thead><tr><th scope="col">화물</th><th scope="col">입고 회차</th><th scope="col">Harbor 지시 위치</th><th scope="col">최근 제출 위치</th><th scope="col">ROSY 접수·실행</th><th scope="col">관측된 자리</th><th scope="col">확인 근거</th><th scope="col">배치 결과</th><th scope="col">보류 사유</th></tr></thead>
+  <tbody>{% for row in intake_occurrences %}<tr><td>
+    {% if row.cargo and can_read_commercial %}<a href="{% url 'cargo_history' row.cargo.pk %}">{{ row.cargo.code }}</a>
+    <div>{% if row.commercial.color %}<span class="cargo-color-tag"><i class="cargo-color-dot color-{{ row.commercial.color }}" aria-hidden="true"></i>{{ row.commercial.get_color_display }}</span>
+      {% if row.commercial.color_confirmed %}· 색 확인됨{% else %}· 색 확인 전{% endif %}{% else %}색 미등록{% endif %}</div>
+    <div>화주 {{ row.cargo.shipper_name|default:"미등록" }}</div>
+    <a href="{% url 'cargo_commercial' row.cargo.pk %}">컨테이너 정보{% if row.commercial.nominal_length_ft %} · {{ row.commercial.nominal_length_ft }} ft{% endif %}{% if row.commercial.container_type %} · {{ row.commercial.container_type }}{% endif %}</a>
+    {% else %}{{ row.receipt.object_ref }}{% endif %}</td><td>{{ row.receipt.pk }}
+    {% if can_read_commercial and row.receipt.order_id %}<div><a href="{% url 'order_contents' row.receipt.order_id %}">이 회차 내용물</a> · {{ row.receipt.order.goods_contents|default:"미입력"|truncatechars:60 }}</div>{% endif %}</td>
     <td>{{ row.target|default:"계획 대기" }}</td><td>{{ row.sent|default:"미제출" }}</td>
     <td>{{ row.state }}</td>
     <td>{{ row.receipt.observed_slot|default:"관측 대기" }}</td><td>{{ row.receipt.get_result_identity_display|default:"—" }}</td>
     <td>{% if row.receipt.status == 'PLANNING' %}적재 결과 대기{% else %}{{ row.receipt.get_status_display }}{% endif %}</td><td>{% if row.local_reason %}Harbor · {{ row.local_reason }}{% endif %}
     {% if row.reason %}ROSY · {% if row.action %}{{ row.action }} · {% endif %}{{ row.reason }}{% elif not row.local_reason %}—{% endif %}</td>
-  </tr>{% endfor %}</tbody></table>
+  </tr>{% endfor %}</tbody></table></div>
 </section>
 {% endif %}
 {% endblock %}

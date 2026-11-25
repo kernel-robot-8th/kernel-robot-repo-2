@@ -38,10 +38,12 @@ def requested_slot(dispatch):
 
 def inventory_occurrences():
     dispatches = CellPlanDispatch.objects.select_related('order__cargo').order_by('-pk')
-    receipts = IntakeOccurrence.objects.select_related('order').prefetch_related(
+    receipts = IntakeOccurrence.objects.select_related('order__cargo__commercial_profile').prefetch_related(
         Prefetch('order__cell_plan_dispatches', queryset=dispatches[:1], to_attr='sent_placements'),
         Prefetch('order__plan_set', queryset=Plan.objects.order_by('-pk')[:1], to_attr='placement_plans'))
     receipts = list(receipts.order_by('-received_at')[:50])
+    unbound_codes = {receipt.object_ref for receipt in receipts if not receipt.order_id}
+    unbound_cargo = Cargo.objects.select_related('commercial_profile').in_bulk(unbound_codes, field_name='code')
     plan_ids = [str(order.placement_plans[0].pk) for receipt in receipts if (order := receipt.order) and order.placement_plans]
     facts = {(row.object_id, row.action): row.detail for row in Audit.objects.filter(object_type='Plan',
         object_id__in=plan_ids, action__in=(DECIDE_ACTION, 'cell_plan.auto_hold')).order_by('pk')}
@@ -69,7 +71,9 @@ def inventory_occurrences():
             action = '현장 보정 필요'
         elif code in ('SITE_ARM_NOT_ALLOWED', 'STAND_REQUIRES_ARM_A', 'INVALID_CELL_SLOT_COORDINATE', 'NO_LEGAL_PLAN'):
             action = '현재 장치 구성에서 실행 불가'
-        rows.append(dict(receipt=receipt, target=target, sent=sent,
+        cargo = order.cargo if order else unbound_cargo.get(receipt.object_ref)
+        rows.append(dict(receipt=receipt, cargo=cargo, commercial=cargo.current_commercial if cargo else None,
+                         target=target, sent=sent,
                          state=DISPATCH_LABELS.get(dispatch.state, dispatch.state) if dispatch else '미제출',
                          reason=code, action=action, local_reason=local_code))
     return rows
