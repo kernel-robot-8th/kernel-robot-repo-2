@@ -218,6 +218,7 @@ def spatial_snapshot(observation):
             raise ValueError('Observation exceeds the cargo limit.')
         placements, shapes, holdings = [], [], []
         fields = {'cargo_id', 'area_id', 'row', 'column', 'level', 'orientation', 'footprint_revision'}
+        rev_ids = set()
         for item in payload['placements']:
             if not isinstance(item, dict) or set(item) != fields or type(item['footprint_revision']) is not int:
                 raise ValueError('Each placement requires a pinned footprint revision and complete address.')
@@ -225,8 +226,14 @@ def spatial_snapshot(observation):
                 if not isinstance(item[key], str):
                     raise ValueError('Expected text identifiers.')
                 clean_text(item[key])
-            footprint = CargoFootprint.objects.filter(pk=item['footprint_revision'], cargo__code=item['cargo_id']).first()
-            if footprint is None:
+            rev_ids.add(item['footprint_revision'])
+        footprints_by_pk = (
+            {fp.pk: fp for fp in CargoFootprint.objects.filter(pk__in=rev_ids).select_related('cargo')}
+            if rev_ids else {}
+        )
+        for item in payload['placements']:
+            footprint = footprints_by_pk.get(item['footprint_revision'])
+            if footprint is None or footprint.cargo.code != item['cargo_id']:
                 raise ValueError('Footprint revision must belong to the observed cargo.')
             shapes.append(CargoShape(item['cargo_id'], footprint.length_cells, footprint.pk))
             placements.append(Placement(**{k: v for k, v in item.items() if k != 'footprint_revision'}))
@@ -238,7 +245,7 @@ def spatial_snapshot(observation):
             if item['holder_id'] is not None:
                 clean_text(item['holder_id'])
         codes = {h.cargo_id for h in holdings}
-        if codes != set(Cargo.objects.filter(code__in=codes).values_list('code', flat=True)):
+        if codes and codes != set(Cargo.objects.filter(code__in=codes).values_list('code', flat=True)):
             raise ValueError('Every held cargo must be registered.')
         return SpatialSnapshot(observation.pk or 0, observation.observed_at, layout, areas,
             tuple(shapes), tuple(placements), tuple(holdings))

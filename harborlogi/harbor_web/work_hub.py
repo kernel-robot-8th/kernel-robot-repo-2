@@ -1,14 +1,111 @@
 """Read-only work hub built from registered orders and saved execution records."""
+from django.core.exceptions import ValidationError
 from django.db.models import CharField, Exists, OuterRef, Q, Subquery
 from django.db.models.functions import Cast
 from django.utils import timezone
 
-from harbor_web.models import Audit, CellPlanDispatch, Command, Order, Plan
-from harbor_web.order_queue import completed_order_ids
+from harbor_web.models import Audit, CellPlanDispatch, Command, Observation, Order, Plan
+from harbor_web.order_queue import TIERS, completed_order_ids, tier_of
+from harbor_web.plan_service import _outbound_schedule
+from harbor_web.presentation import reason_text
 from harbor_web.rearrangement import current_authorization
 from harbor_web.page_helpers import page
+from harbor_web.reorder_validate import _latest_footprints, _simulate_orders, short_hold_reason
+from harbor_web.site_config import spatial_policy, spatial_snapshot
 from harbor_web.work_state import work_state, shown_state
 from harbor_web.yard_rows import place_context, placement_text
+
+SIMULATION_LIMIT = 8
+
+
+def _apply_schedule_simulation(schedule, *, now):
+    """Simulate the first SIMULATION_LIMIT pending schedule entries in memory without writing to DB."""
+    for row in schedule:
+        row['card_place'] = row['place']
+        row['card_place_kind'] = 'place' if row['place'] else ''
+        row['sim_status'] = None
+    if not schedule:
+        return
+    observation = Observation.objects.select_related('condition').order_by('-pk').first()
+    if observation is None or not isinstance(observation.payload, dict) or observation.payload.get('schema') != 'grid-placement-v1':
+        return
+    try:
+        snapshot = spatial_snapshot(observation)
+        policy = spatial_policy(observation.condition.payload)
+    except (ValueError, ValidationError):
+        return
+    window = schedule[:SIMULATION_LIMIT]
+    window_orders = [row['order'] for row in window]
+    inbound_orders = [order for order in window_orders if order.kind == 'INBOUND']
+    footprints = _latest_footprints(inbound_orders)
+    outbound_ranks = _outbound_schedule()
+    try:
+        result = _simulate_orders(
+            snapshot,
+            policy,
+            window_orders,
+            footprints=footprints,
+            now=now,
+            schedule=outbound_ranks,
+            observation=observation,
+        )
+    except (ValueError, ValidationError):
+        return
+    step_by_id = {item['id']: item for item in result['items']}
+    missing_codes = set(result['missing'])
+    for row in window:
+        order = row['order']
+        step = step_by_id.get(order.pk)
+        if step is not None:
+            if step['ok']:
+                row['sim_status'] = 'READY'
+                if order.kind == 'INBOUND':
+                    row['card_place'] = step['place']
+                    row['card_place_kind'] = 'place'
+                    summary_parts = []
+                    if step['moves'] > 0:
+                        summary_parts.append(f"이동 {step['moves']}회")
+                    if step['place']:
+                        summary_parts.append(step['place'])
+                    row['plan_summary'] = ' · '.join(summary_parts)
+                else:
+                    row['card_place'] = (
+                        f"이동 {step['moves']}회 · 재취급 {step['rehandles']}회"
+                        if step['rehandles'] > 0
+                        else f"이동 {step['moves']}회"
+                    )
+                    row['card_place_kind'] = 'moves'
+                    summary_parts = [f"이동 {step['moves']}회", f"재취급 {step['rehandles']}회"]
+                    dest = order.cargo.destination if order.cargo_id else ''
+                    if dest:
+                        summary_parts.append(dest)
+                    row['plan_summary'] = ' · '.join(summary_parts)
+            else:
+                row['sim_status'] = 'HOLD'
+                short = step.get('short_reason') or short_hold_reason(step['reason_code'], order.kind)
+                row['card_place'] = short
+                row['card_place_kind'] = 'blocked'
+                detail = (
+                    reason_text(step['reason_code'])
+                    if step['reason_code'] and step['reason_code'] != 'OUTBOUND_BEFORE_INBOUND'
+                    else step['reason']
+                )
+                row['plan_summary'] = f'보류 · {detail}'
+        elif order.kind == 'OUTBOUND' and order.cargo_id and order.cargo.code in missing_codes:
+            row['sim_status'] = 'HOLD'
+            row['card_place'] = short_hold_reason('OUTBOUND_NOT_OBSERVED', 'OUTBOUND')
+            row['card_place_kind'] = 'blocked'
+            row['plan_summary'] = f"보류 · {reason_text('OUTBOUND_NOT_OBSERVED')}"
+        else:
+            row['sim_status'] = 'UNCOMPUTED'
+            row['card_place'] = '계산 전'
+            row['card_place_kind'] = 'uncomputed'
+            row['plan_summary'] = '계산 전'
+    for row in schedule[SIMULATION_LIMIT:]:
+        row['sim_status'] = 'UNCOMPUTED'
+        row['card_place'] = '계산 전'
+        row['card_place_kind'] = 'uncomputed'
+        row['plan_summary'] = '계산 전'
 
 
 def hub_context(*, now=None):
@@ -26,7 +123,7 @@ def hub_context(*, now=None):
     latest_cp = CellPlanDispatch.objects.filter(order_id=OuterRef('pk')).order_by('-pk')
     orders = list(Order.objects.filter(
         ~Q(pk__in=completed_order_ids()) | Exists(today_cmd_exists) | Exists(today_cp_exists)
-    ).select_related('cargo').annotate(
+    ).select_related('cargo', 'planning_observation').annotate(
         latest_plan_id=Subquery(latest_plan.values('pk')[:1]),
         latest_cp_id=Subquery(latest_cp.values('pk')[:1]),
     ).order_by('priority_group', 'sequence', 'pk'))
@@ -77,14 +174,38 @@ def hub_context(*, now=None):
             f'/plans/{cp.plan_id}/' if (cp and cp.plan_id) else (f'/plans/{plan.pk}/' if plan else f'/requests/{order.pk}/')
         )
         row = dict(order=order, command=command, cell_plan_dispatch=cp, plan=plan, recorded_at=recorded_at,
+            done=bool(recorded_at),
+            tier=tier_of(order.priority_group),
+            tier_name=order.tier_label,
             kind={'INBOUND': '입고', 'OUTBOUND': '반출', 'REARRANGE': '재배치'}[order.kind],
             state=shown_state(state, command, cell_plan_dispatch=cp),
             tone={'진행 중': 'running', '완료': 'done', '처리할 것': 'attention'}.get(state, 'waiting'),
+            shipper=order.cargo.shipper_name if order.cargo_id else '',
+            voyage=order.voyage_code,
+            cutoff_text=timezone.localtime(order.cutoff_at).strftime('%m-%d %H:%M') if order.cutoff_at else '',
             href=href)
+        row['place'] = None
+        if (order.kind == 'INBOUND' and plan and plan.order_version == order.version
+                and plan.result.get('status') == 'READY'
+                and plan.result.get('plan_kind') == 'inbound-placement'
+                and plan.result.get('recommendation')):
+            labels, slot = place_context(plan.condition.payload)
+            row['place'] = placement_text(plan.result['recommendation'], labels, slot)
+        summary_parts = []
+        if plan and plan.order_version == order.version and plan.result.get('status') == 'READY':
+            moves = plan.result.get('moves') or []
+            if order.kind == 'OUTBOUND' and moves:
+                rehandles = next((i for i, m in enumerate(moves) if m.get('cargo_id') == order.cargo.code), 0)
+                summary_parts.extend((f'이동 {len(moves)}회', f'재취급 {rehandles}회'))
+            elif moves:
+                summary_parts.append(f'이동 {len(moves)}회')
+        dest = row['place'] or (order.cargo.destination if order.cargo_id else '')
+        if dest:
+            summary_parts.append(dest)
+        row['plan_summary'] = ' · '.join(summary_parts)
         if recorded_at:
             past.append(row)
         else:
-            row['place'] = None
             # Automatic mode computes placements itself; no manual "calculate" link there.
             row['auto'] = auto_run or order.auto_replan
             row['place_hint'] = '자동 계산 대기' if row['auto'] else '자리 결정 대기'
@@ -92,12 +213,6 @@ def hub_context(*, now=None):
                 row['place_hint'] = '요청 바뀜 · 다시 계산'
             elif plan and plan.result.get('status') == 'HOLD':
                 row['place_hint'] = '보류 · 요청 확인'
-            if (order.kind == 'INBOUND' and plan and plan.order_version == order.version
-                    and plan.result.get('status') == 'READY'
-                    and plan.result.get('plan_kind') == 'inbound-placement'
-                    and plan.result.get('recommendation')):
-                labels, slot = place_context(plan.condition.payload)
-                row['place'] = placement_text(plan.result['recommendation'], labels, slot)
             pending.append(row)
 
     past.sort(key=lambda row: (row['recorded_at'], row['order'].pk))
@@ -107,7 +222,18 @@ def hub_context(*, now=None):
         next_row['is_next'] = True
     if past and upcoming and upcoming[0]['state'] == '대기':
         past[-1]['state'] = '완료 · 다음 작업 대기 중'
+    schedule = [row for row in pending if row['order'].kind in ('OUTBOUND', 'INBOUND')]
+    for idx, row in enumerate(schedule, start=1):
+        row['seq_num'] = idx
+    _apply_schedule_simulation(schedule, now=now)
+    schedule_tiers = [
+        dict(group=group, name=name, rows=[row for row in schedule if row['tier'] == group])
+        for group, name in TIERS
+    ]
     return dict(timeline=past + upcoming,
+        done_rows=past,
+        schedule=schedule,
+        schedule_tiers=schedule_tiers,
         outbound=[row for row in pending if row['order'].kind == 'OUTBOUND'],
         inbound=[row for row in pending if row['order'].kind == 'INBOUND'],
         rearrangements=[row for row in pending if row['order'].kind == 'REARRANGE'],

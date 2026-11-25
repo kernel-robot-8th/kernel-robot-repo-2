@@ -13,6 +13,21 @@ from harbor_web.service_common import Conflict, _role
 
 
 TIERS = ((1, '긴급'), (2, '우선'), (3, '일반'))  # priority_group 1·2·3 (KAN-116); smaller leaves first
+RUNNING_COMMAND_STATES = frozenset({'DISPATCHING', 'RECONCILED'})
+RUNNING_CELL_PLAN_STATES = frozenset({'SUBMITTING', 'PARTIALLY_ADMITTED', 'QUEUED', 'RUNNING'})
+
+
+def running_order_ids(order_ids):
+    """Order pks that currently have an in-progress Command or CellPlanDispatch."""
+    if not order_ids:
+        return set()
+    return set(
+        Command.objects.filter(order_id__in=order_ids, state__in=RUNNING_COMMAND_STATES).values_list('order_id', flat=True)
+    ) | set(
+        CellPlanDispatch.objects.filter(
+            order_id__in=order_ids, state__in=RUNNING_CELL_PLAN_STATES
+        ).values_list('order_id', flat=True)
+    )
 
 
 def tier_of(group):
@@ -62,13 +77,20 @@ def create_order(actor, *, cargo, kind, priority_group, sequence, tie_policy, no
 
 @serialized
 @transaction.atomic
-def update_order(actor, *, order_id, expected_version, priority_group, sequence, tie_policy, note='', title=None,
+def update_order(actor, *, order_id, expected_version, priority_group, sequence=None, tie_policy, note='', title=None,
                  voyage_code=None, cutoff_at=None, clear_cutoff=False):
     _role(actor, 'operator')
     obj = Order.objects.get(pk=order_id)
     if obj.version != expected_version:
         raise Conflict('Order changed; reload before editing.')
     before = request_snapshot(obj)
+    tier_changed = priority_group != obj.priority_group
+    if sequence is None:
+        sequence = back_of_tier(priority_group, obj.kind)[1] if tier_changed else obj.sequence
+    elif (tier_changed and obj.kind == 'OUTBOUND' and tie_policy == 'FIXED'
+            and Order.objects.filter(kind='OUTBOUND', priority_group=priority_group, sequence=sequence).exclude(pk=obj.pk).exists()):
+        # Changing tier with a reused sequence from the previous tier places the order at the back of the new tier.
+        sequence = back_of_tier(priority_group, obj.kind)[1]
     for key, value in dict(priority_group=priority_group, sequence=sequence, tie_policy=tie_policy, note=note).items():
         setattr(obj, key, value)
     if title is not None:  # None keeps the current title for callers that predate titles
@@ -118,26 +140,26 @@ def _closed_sequence_top(group):
         pk__in=open_outbound_orders()).aggregate(top=Max('sequence'))['top'] or 0
 
 
-@serialized
-@transaction.atomic
-def reorder_outbound(actor, *, lanes):
-    """Renumber every open outbound order from the three tier lanes in one revision step.
-
-    ``lanes`` is three ``dict(fixed=bool, orders=[(order_id, expected_version), ...])`` for 긴급 · 우선 · 일반
-    and must list each open outbound order exactly once; a tier may be empty. Position j in tier g becomes
-    (g, j) above any finished order's slot. Only orders whose group, sequence or tie policy changes get a
-    new revision and an audit row.
-    """
+def _reorder_lanes(actor, *, lanes, queryset, conflict_msg):
     _role(actor, 'operator')
     if len(lanes) != len(TIERS):
         raise Conflict('The queue has three tiers.')
     entries = [(order_id, version) for lane in lanes for order_id, version in lane['orders']]
     ids = [order_id for order_id, _ in entries]
-    current = {order.pk: order for order in open_outbound_orders().select_related('cargo').select_for_update()}
+    current = {order.pk: order for order in queryset.select_related('cargo').select_for_update()}
     if len(set(ids)) != len(ids) or set(ids) != set(current):
-        raise Conflict('The outbound queue changed; reload before reordering.')
+        raise Conflict(conflict_msg)
     if any(current[order_id].version != version for order_id, version in entries):
         raise Conflict('Order changed; reload before reordering.')
+    running = running_order_ids(ids)
+    if running:
+        seen_non_running = False
+        for order_id in ids:
+            if order_id in running:
+                if seen_non_running:
+                    raise ValidationError('실행 중인 작업보다 앞에 둘 수 없습니다.')
+            else:
+                seen_non_running = True
     target = {}
     for (group, _), lane in zip(TIERS, lanes):
         policy, base = 'FIXED' if lane['fixed'] else 'ANY', _closed_sequence_top(group)
@@ -148,7 +170,7 @@ def reorder_outbound(actor, *, lanes):
     if not changed:
         return []
     # Park changed orders above every group first: the fixed-sequence constraint is checked per row.
-    park = max(Order.objects.filter(kind='OUTBOUND').aggregate(top=Max('priority_group'))['top'] or 0, len(TIERS)) + 1
+    park = max(Order.objects.filter(kind__in=('OUTBOUND', 'INBOUND')).aggregate(top=Max('priority_group'))['top'] or 0, len(TIERS)) + 1
     for offset, order in enumerate(changed):
         Order.objects.filter(pk=order.pk).update(priority_group=park + offset, sequence=1, tie_policy='FIXED')
     befores = {order.pk: request_snapshot(order) for order in changed}
@@ -167,6 +189,32 @@ def reorder_outbound(actor, *, lanes):
     from harbor_web.autoplanning import replan_enabled
     replan_enabled(actor, 'order.update')
     return changed
+
+
+@serialized
+@transaction.atomic
+def reorder_outbound(actor, *, lanes):
+    """Renumber every open outbound order from the three tier lanes in one revision step.
+
+    ``lanes`` is three ``dict(fixed=bool, orders=[(order_id, expected_version), ...])`` for 긴급 · 우선 · 일반
+    and must list each open outbound order exactly once; a tier may be empty. Position j in tier g becomes
+    (g, j) above any finished order's slot. Only orders whose group, sequence or tie policy changes get a
+    new revision and an audit row.
+    """
+    return _reorder_lanes(
+        actor, lanes=lanes, queryset=open_outbound_orders(),
+        conflict_msg='The outbound queue changed; reload before reordering.',
+    )
+
+
+@serialized
+@transaction.atomic
+def reorder_schedule(actor, *, lanes):
+    """Renumber every open inbound and outbound order across the three tier lanes in one revision step."""
+    return _reorder_lanes(
+        actor, lanes=lanes, queryset=open_schedule_orders(),
+        conflict_msg='The schedule queue changed; reload before reordering.',
+    )
 
 
 def _lane_entries():
@@ -214,6 +262,10 @@ def completed_order_ids():
 
 def open_outbound_orders():
     return Order.objects.filter(kind='OUTBOUND').exclude(pk__in=completed_order_ids())
+
+
+def open_schedule_orders():
+    return Order.objects.filter(kind__in=('OUTBOUND', 'INBOUND')).exclude(pk__in=completed_order_ids())
 
 
 def queue_digest():

@@ -141,7 +141,7 @@ def workspace_context(order, plan=None, *, priority_form=None, plan_form=None, r
             initial=dict(expected_version=order.version, observation=review_observation.pk if review_observation else None))
     if priority_form is None:
         priority_form = forms.PriorityForm(initial=dict(expected_version=order.version, priority_group=order.priority_group,
-            sequence=order.sequence, tie_policy=order.tie_policy, note=order.note))
+            tie_policy=order.tie_policy, note=order.note))
     occupancy = occupancy_map(stages[0] if stages else None, moves)
     scene = scene_for(stages)
     if scene:

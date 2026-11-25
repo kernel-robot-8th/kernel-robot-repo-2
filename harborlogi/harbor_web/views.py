@@ -284,15 +284,25 @@ def parse_lanes(values):
 @require_roles('operator')
 @require_http_methods(['POST'])
 def outbound_reorder(request):
+    from harbor_web.order_queue import reorder_schedule
     lanes = parse_lanes(request.POST.getlist('lane'))
     if lanes is None:
         return HttpResponseBadRequest('반출 순서 형식이 올바르지 않습니다.')
+    submitted_ids = [oid for lane in lanes for oid, _ in lane['orders']]
+    use_schedule = (
+        request.POST.get('scope') == 'schedule'
+        or Order.objects.filter(pk__in=submitted_ids, kind='INBOUND').exists()
+    )
     try:
-        changed = services.reorder_outbound(request.user, lanes=lanes)
+        changed = (
+            reorder_schedule(request.user, lanes=lanes)
+            if use_schedule
+            else services.reorder_outbound(request.user, lanes=lanes)
+        )
     except (services.Conflict, ValidationError):
-        return render(request, 'error.html', dict(heading='반출 대기열이 바뀌었습니다', reason='편집하는 동안 다른 변경이 있었습니다. 최신 순서를 다시 불러와 편집하세요.', return_url='/outbound/'), status=409)
-    messages.success(request, f'반출 순서를 저장했습니다. 순서가 바뀐 요청 {len(changed)}건은 새 revision이 되어 계획을 다시 검토해야 합니다.' if changed else '바뀐 순서가 없습니다.')
-    return redirect('/outbound/')
+        return render(request, 'error.html', dict(heading='대기열이 바뀌었습니다', reason='편집하는 동안 다른 변경이 있었습니다. 최신 순서를 다시 불러와 편집하세요.', return_url='/work/' if use_schedule else '/outbound/'), status=409)
+    messages.success(request, f'순서를 저장했습니다. 순서가 바뀐 요청 {len(changed)}건은 새 revision이 되어 계획을 다시 검토해야 합니다.' if changed else '바뀐 순서가 없습니다.')
+    return redirect('/work/' if use_schedule else '/outbound/')
 
 
 @require_roles('operator')
@@ -362,7 +372,7 @@ def order_detail(request, pk):
     suffix = f'?observation={observation.pk}' if observation else ''
     priority = forms.PriorityForm(initial=dict(
         expected_version=order.version, title=order.title, voyage_code=order.voyage_code,
-        cutoff_at=order.cutoff_at, priority_group=order.priority_group, sequence=order.sequence,
+        cutoff_at=order.cutoff_at, priority_group=order.priority_group,
         tie_policy=order.tie_policy, note=order.note,
     ))
     plan_form = forms.PlanForm(initial={'expected_version': order.version, 'observation': observation}, review_observation=observation)
@@ -387,9 +397,13 @@ def order_detail(request, pk):
                         data['voyage_code'] = None
                     if 'cutoff_at' in request.POST and data.get('cutoff_at') is None:
                         data['clear_cutoff'] = True
-                    if data.get('sequence') is None:  # same tier keeps its place; a new tier puts it last
-                        data['sequence'] = order.sequence if data['priority_group'] == order.priority_group else \
-                            services.back_of_tier(data['priority_group'], order.kind)[1]
+                    if data['priority_group'] != order.priority_group and (
+                        data.get('sequence') is None or data.get('sequence') == order.sequence
+                    ):
+                        # Tier changed without a new explicit sequence: reallocate atomically in update_order.
+                        data['sequence'] = None
+                    elif data.get('sequence') is None:
+                        data['sequence'] = order.sequence
                     services.update_order(request.user, order_id=pk, **data)
                 else:
                     data = active.cleaned_data
