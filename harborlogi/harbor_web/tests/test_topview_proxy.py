@@ -119,23 +119,18 @@ class TopviewProxyTests(TestCase):
         self.assertEqual(rejected.status_code, 404)
         self.camera.lease.assert_not_called()
 
-    def test_camera_allowlist_filters_unneeded_sources_and_orders_omx_overhead_first(self):
+    def test_registered_sources_are_selectable_and_omx_overhead_is_first(self):
         from django.test import RequestFactory
         from harbor_web.topview_proxy import _camera_sources, topview_context
 
         self.camera.sources.return_value = {
-            'sources': ['ceiling_north', 'arm_a_wrist', 'omx_overhead', 'side_cam'],
+            'sources': ['ceiling_north', 'arm_a_wrist', 'omx_overhead', 'side_cam', 'side_cam'],
         }
         self.assertEqual(
             _camera_sources('https://fleet.example', 'test-fleet-secret', None, timeout=2),
-            ['omx_overhead', 'ceiling_north'],
+            ['omx_overhead', 'ceiling_north', 'arm_a_wrist', 'side_cam'],
         )
-        # Proxy rejects non-allowlisted cameras (e.g. arm_a_wrist) before leasing.
-        blocked = self.client.get(reverse('topview_frame', args=['arm_a_wrist']))
-        self.assertEqual(blocked.status_code, 404)
-        self.camera.lease.assert_not_called()
-
-        # Proxy serves allowlisted omx_overhead camera.
+        # Proxy serves the registered omx_overhead camera.
         self.camera.lease.return_value = {
             'source_id': 'omx_overhead', 'lease': 'test-lease-secret',
             'frame_path': '/api/vision/sources/omx_overhead/frame',
@@ -149,7 +144,8 @@ class TopviewProxyTests(TestCase):
         request.user = self.user
         request.session = {}
         ctx = topview_context(request)
-        self.assertEqual([s['source_id'] for s in ctx['sources']], ['omx_overhead', 'ceiling_north'])
+        self.assertEqual([s['source_id'] for s in ctx['sources']],
+                         ['omx_overhead', 'ceiling_north', 'arm_a_wrist', 'side_cam'])
         self.assertEqual(ctx['default_source_id'], 'omx_overhead')
         self.assertEqual(ctx['default_view_mode'], 'raw')
         self.assertIsNotNone(ctx['site_pixels'])
@@ -167,15 +163,19 @@ class TopviewProxyTests(TestCase):
         request.session = {}
         ctx = topview_context(request)
         self.assertEqual([s['source_id'] for s in ctx['sources']],
-                         ['omx_overhead', 'ceiling_north', 'omx_arm_s_top'])
+                         ['omx_overhead', 'ceiling_north', 'omx_arm_s_top', 'omx_arm_s_wrist'])
         self.assertEqual(ctx['site_pixels']['source_id'], 'omx_overhead')
 
         url = reverse('topview_frame', args=['omx_arm_s_top'])
         response = self.client.get(url, {'view': 'raw'})
         self.assertEqual((response.status_code, response.content), (200, b'jpeg-test'))
         self.camera.lease.assert_called_once_with('omx_arm_s_top')
+        url = reverse('topview_frame', args=['omx_arm_s_wrist'])
+        response = self.client.get(url, {'view': 'raw'})
+        self.assertEqual((response.status_code, response.content), (200, b'jpeg-test'))
+        self.camera.lease.assert_called_with('omx_arm_s_wrist')
 
-    def test_camera_allowlist_falls_back_to_all_valid_sources_when_none_match(self):
+    def test_registered_sources_keep_fleet_order_without_preferred_cameras(self):
         from django.test import RequestFactory
         from harbor_web.topview_proxy import _camera_sources, topview_context
 
@@ -201,11 +201,11 @@ class TopviewProxyTests(TestCase):
         request.user = self.user
         request.session = {}
         ctx = topview_context(request)
-        self.assertEqual([s['source_id'] for s in ctx['sources']], ['top', 'ceiling_north'])
+        self.assertEqual([s['source_id'] for s in ctx['sources']], ['top', 'ceiling_north', 'side'])
         self.assertEqual((ctx['default_source_id'], ctx['default_view_mode']), ('top', 'raw'))
         self.assertEqual(ctx['site_pixels']['source_id'], 'top')
 
-    def test_topview_context_defaults_to_auto_mode_when_only_ceiling_north_present(self):
+    def test_topview_context_defaults_to_auto_mode_when_ceiling_north_is_first(self):
         from django.test import RequestFactory
         from harbor_web.topview_proxy import topview_context
 
@@ -214,7 +214,7 @@ class TopviewProxyTests(TestCase):
         request.user = self.user
         request.session = {}
         ctx = topview_context(request)
-        self.assertEqual([s['source_id'] for s in ctx['sources']], ['ceiling_north'])
+        self.assertEqual([s['source_id'] for s in ctx['sources']], ['ceiling_north', 'arm_a_wrist'])
         self.assertEqual(ctx['default_source_id'], 'ceiling_north')
         self.assertEqual(ctx['default_view_mode'], 'auto')
 

@@ -135,6 +135,28 @@ try {
   assert.equal(timers.size, 0);
   assert.equal(image.hidden, true);
 
+  const autoSelect = new EventTarget();
+  autoSelect.options = ['offline', 'live', 'manual'].map(id => ({value: `/topview/${id}/frame/`}));
+  autoSelect.selectedIndex = 0;
+  Object.defineProperty(autoSelect, 'value', {get: () => autoSelect.options[autoSelect.selectedIndex].value});
+  const autoNodes = {...nodes, '[data-topview-source]': autoSelect};
+  respond = () => Promise.resolve(calls.at(-1).url.includes('/live/')
+    ? new Response('jpeg', {headers: {'Content-Type': 'image/jpeg'}})
+    : new Response('frame unavailable', {status: 404}));
+  const cleanAuto = mountTopview({querySelector: selector => autoNodes[selector], dataset: {}});
+  await settle();
+  assert.equal(autoSelect.selectedIndex, 0, 'a cold stream gets another request');
+  tick(); await settle();
+  assert.equal(autoSelect.selectedIndex, 1, 'the next camera is shown if the default has no fresh frame');
+  assert.equal(image.hidden, false);
+  autoSelect.selectedIndex = 0;
+  autoSelect.dispatchEvent(new Event('change'));
+  await settle();
+  tick(); await settle();
+  assert.equal(autoSelect.selectedIndex, 0, 'an explicit choice stays selected while unavailable');
+  assert.equal(image.hidden, true);
+  cleanAuto();
+
   // Offscreen Image.decode() atomic frame swap, mid-decode abort, corrupt JPEG rejection, and full cleanup.
   let hiddenState = true;
   const hiddenTransitions = [];

@@ -40,7 +40,7 @@ from harbor_web.rosy_account import access_token
 
 # The live site lists the cell top camera as 'top' (D-1065 role name); older setups use 'omx_overhead'.
 YARD_CAMERA_SOURCES = ('top', 'omx_overhead')
-ALLOWED_CAMERA_SOURCES = YARD_CAMERA_SOURCES + ('ceiling_north', 'omx_arm_s_top')
+PREFERRED_CAMERA_SOURCES = YARD_CAMERA_SOURCES + ('ceiling_north', 'omx_arm_s_top')
 
 _CACHE_MAX_ENTRIES = 64
 _SOURCES_TTL_S = 15.0
@@ -104,8 +104,8 @@ def _camera_sources(origin, token, ca_file, *, timeout):
     valid = list(dict.fromkeys(source for source in sources
         if isinstance(source, str) and source and '/' not in source and source not in ('.', '..')
         and not any(ord(char) < 32 or ord(char) == 127 for char in source)))
-    allowed = [source for source in ALLOWED_CAMERA_SOURCES if source in valid]
-    return allowed if allowed else valid
+    preferred = [source for source in PREFERRED_CAMERA_SOURCES if source in valid]
+    return preferred + [source for source in valid if source not in preferred]
 
 
 def topview_context(request):
