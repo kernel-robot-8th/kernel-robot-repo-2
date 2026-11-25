@@ -172,6 +172,19 @@ class TopviewProxyTests(TestCase):
         self.assertEqual(ctx['default_source_id'], 'lab_cam_b')
         self.assertEqual(ctx['default_view_mode'], 'auto')
 
+    def test_live_top_camera_id_is_the_yard_camera_with_points(self):
+        from django.test import RequestFactory
+        from harbor_web.topview_proxy import topview_context
+
+        self.camera.sources.return_value = {'sources': ['ceiling_north', 'side', 'top']}
+        request = RequestFactory().get('/')
+        request.user = self.user
+        request.session = {}
+        ctx = topview_context(request)
+        self.assertEqual([s['source_id'] for s in ctx['sources']], ['top', 'ceiling_north'])
+        self.assertEqual((ctx['default_source_id'], ctx['default_view_mode']), ('top', 'raw'))
+        self.assertEqual(ctx['site_pixels']['source_id'], 'top')
+
     def test_topview_context_defaults_to_auto_mode_when_only_ceiling_north_present(self):
         from django.test import RequestFactory
         from harbor_web.topview_proxy import topview_context

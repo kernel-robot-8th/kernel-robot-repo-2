@@ -22,7 +22,7 @@ class TopviewSitePixelsTests(unittest.TestCase):
         self.assertEqual(loaded['source_id'], 'omx_overhead')
         self.assertEqual(loaded['image'], [640, 480])
         self.assertEqual(loaded['status'], 'planned_unverified')
-        self.assertTrue(loaded['rosy_commit'])
+        self.assertTrue(loaded['frame_source'])
 
         points_by_site = {pt['site']: pt for pt in loaded['points']}
         expected_slots = set(canonical_cell_slot_specs().keys())
@@ -32,13 +32,13 @@ class TopviewSitePixelsTests(unittest.TestCase):
         all_refs = {ref for pt in loaded['points'] if pt['kind'] == 'slot' for ref in pt['wire_refs']}
         self.assertEqual(all_refs, canonical_cell_wire_refs())
 
-        # temp_a has roi=None (unmeasured), temp_b/yard/stand have concrete ROIs, belt has pick point.
+        # Both temp plates and the yard are in the live top frame; the stand is outside it (roi=None).
         for row in (1, 2, 3):
-            self.assertIsNone(points_by_site[f'temp_a:r{row}-s1']['roi'])
+            self.assertEqual(len(points_by_site[f'temp_a:r{row}-s1']['roi']), 4)
             self.assertEqual(len(points_by_site[f'temp_b:r{row}-s1']['roi']), 4)
-        self.assertEqual(points_by_site['stand:r1-s1']['roi'], [410.0, 30.0, 570.0, 125.0])
+        self.assertIsNone(points_by_site['stand:r1-s1']['roi'])
         self.assertEqual(points_by_site['belt']['kind'], 'pick')
-        self.assertEqual(points_by_site['belt']['point'], [341.0, 112.0])
+        self.assertEqual(points_by_site['belt']['point'], [349.0, 101.0])
 
     def test_non_canonical_sites_and_wire_refs_are_discarded_and_logged(self):
         base = json.loads(DEFAULT_SITE_PIXELS_PATH.read_text(encoding='utf-8'))

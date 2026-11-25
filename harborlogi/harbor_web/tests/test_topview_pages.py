@@ -83,7 +83,7 @@ class TopviewPagesTests(TestCase):
             self.assertContains(response, '<option value="raw" selected>카메라 화면</option>')
             self.assertContains(response, 'data-topview-points-toggle checked')
             self.assertContains(response, '위치는 실측 전 참고값')
-            self.assertContains(response, '위치 미정: A1 · A2 · A3')
+            self.assertContains(response, '위치 미정: 반출대')
 
     def test_connection_errors_leave_both_pages_available(self):
         for error in (OSError('test-fleet-secret'), ValueError('invalid response')):

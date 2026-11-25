@@ -1,26 +1,16 @@
 {
   "schema": "harbor.topview-site-pixels.v1",
   "source_id": "omx_overhead",
-  "image": [640, 480],
+  "image": [
+    640,
+    480
+  ],
   "status": "planned_unverified",
-  "rosy_commit": "ef7042f609",
   "assumptions": {
-    "yard_col_row_mapping": {
-      "summary": "TOP_ROI_BY_COL_ROW의 (col 1..3, row 1..2)를 정본 yard 3행×2슬롯으로 대응하되, 물리 좌표 방향에 맞춰 col 3->r1, col 2->r2, col 1->r3 및 row 2->s1, row 1->s2로 배치했다.",
-      "basis": [
-        "rosy_cell_area_zones.py:42-49,265,276,351-358 및 rosy_cell_slot_overlay.py:27-29는 6칸 키를 (col 1..3, row 1..2) / c{col}r{row}로 사용한다.",
-        "rosy_site_points_catalog.py:229,233-264에서 arm_a(y=-168.25)와 stand(y=-168.25, top_roi_px u=410..570, v=30..125)는 큰 u·작은 v 쪽에 있고, belt(y=+7.0, top_px=[341,112])는 중앙·작은 v 쪽에 있으며, yard rows_y_mm는 r1=-38.0(arm_a 쪽, 큰 u=col 3), r2=0.0(중앙=col 2), r3=+38.0(arm_b 쪽, 작은 u=col 1)이다.",
-        "Harbor 180도 회전 표시(아래쪽 컨베이어·반출대, 왼쪽 팔 A)를 적용하면 col 3->왼쪽(r1), col 2->중앙(r2), col 1->오른쪽(r3), row 2->위쪽(s1), row 1->아래쪽(s2, 컨베이어·반출대 인접)이 되어 야드 평면도와 방향이 일치한다."
-      ]
-    },
-    "temp_plate_assignment": {
-      "summary": "TEMP_PLATE_TOP_ROI_BY_LANE(lane 1..3)은 temp_b(arm_b)로 대응시키고, temp_a(arm_a)는 roi=null(위치 미정)로 두었다.",
-      "basis": [
-        "rosy_cell_area_zones.py:51-55의 TEMP_PLATE_TOP_ROI_BY_LANE(u=124..292, v=362..440)는 arm_a 소유 STAND_TOP_ROI(u=410..570, v=30..125)의 반대편(작은 u = +y = arm_b 쪽)에 위치한다.",
-        "rosy_cell_area_zones.py:94는 기본 팔로 arm_b를 가정하고, rosy_cell_slot_overlay.py:5도 cell-arm-b-stack.json을 예시 설정으로 사용한다.",
-        "Harbor 180도 회전 후 TEMP_PLATE_TOP_ROI_BY_LANE은 오른쪽 위(u'=348..516, v'=40..118)에 놓여 야드 평면의 오른쪽 팔 B(temp_b) 위치와 일치한다."
-      ]
-    }
+    "yard": "화면(180° 회전) 기준 야드 3열 왼→오 = r1·r2·r3, 위 칸 = s1, 아래 칸(컨베이어 쪽) = s2.",
+    "temp": "화면 왼쪽 위 부채꼴 판 = temp_a(팔 A 쪽), 오른쪽 위 = temp_b. 레인 번호는 화면 왼→오 1·2·3로 가정.",
+    "stand": "반출대는 이 카메라 화면 밖이라 위치 미정.",
+    "belt": "컨베이어 집기 점은 벨트 위 화물 중심."
   },
   "points": [
     {
@@ -29,9 +19,17 @@
       "short_label": "Y r1·s1",
       "zone": "yard",
       "kind": "slot",
-      "source_key": "c3r2",
-      "wire_refs": ["yard-r1-c1-l1", "yard-r1-c1-l2", "yard-r1-c1-l3"],
-      "roi": [425, 271, 480, 380]
+      "wire_refs": [
+        "yard-r1-c1-l1",
+        "yard-r1-c1-l2",
+        "yard-r1-c1-l3"
+      ],
+      "roi": [
+        378,
+        298,
+        418,
+        400
+      ]
     },
     {
       "site": "yard:r1-s2",
@@ -39,9 +37,17 @@
       "short_label": "Y r1·s2",
       "zone": "yard",
       "kind": "slot",
-      "source_key": "c3r1",
-      "wire_refs": ["yard-r1-c4-l1", "yard-r1-c4-l2", "yard-r1-c4-l3"],
-      "roi": [425, 165, 480, 270]
+      "wire_refs": [
+        "yard-r1-c4-l1",
+        "yard-r1-c4-l2",
+        "yard-r1-c4-l3"
+      ],
+      "roi": [
+        374,
+        203,
+        414,
+        294
+      ]
     },
     {
       "site": "yard:r2-s1",
@@ -49,9 +55,17 @@
       "short_label": "Y r2·s1",
       "zone": "yard",
       "kind": "slot",
-      "source_key": "c2r2",
-      "wire_refs": ["yard-r2-c1-l1", "yard-r2-c1-l2", "yard-r2-c1-l3"],
-      "roi": [370, 271, 420, 380]
+      "wire_refs": [
+        "yard-r2-c1-l1",
+        "yard-r2-c1-l2",
+        "yard-r2-c1-l3"
+      ],
+      "roi": [
+        336,
+        298,
+        375,
+        400
+      ]
     },
     {
       "site": "yard:r2-s2",
@@ -59,9 +73,17 @@
       "short_label": "Y r2·s2",
       "zone": "yard",
       "kind": "slot",
-      "source_key": "c2r1",
-      "wire_refs": ["yard-r2-c4-l1", "yard-r2-c4-l2", "yard-r2-c4-l3"],
-      "roi": [370, 165, 420, 270]
+      "wire_refs": [
+        "yard-r2-c4-l1",
+        "yard-r2-c4-l2",
+        "yard-r2-c4-l3"
+      ],
+      "roi": [
+        332,
+        203,
+        372,
+        294
+      ]
     },
     {
       "site": "yard:r3-s1",
@@ -69,9 +91,17 @@
       "short_label": "Y r3·s1",
       "zone": "yard",
       "kind": "slot",
-      "source_key": "c1r2",
-      "wire_refs": ["yard-r3-c1-l1", "yard-r3-c1-l2", "yard-r3-c1-l3"],
-      "roi": [315, 271, 368, 380]
+      "wire_refs": [
+        "yard-r3-c1-l1",
+        "yard-r3-c1-l2",
+        "yard-r3-c1-l3"
+      ],
+      "roi": [
+        294,
+        298,
+        334,
+        400
+      ]
     },
     {
       "site": "yard:r3-s2",
@@ -79,9 +109,17 @@
       "short_label": "Y r3·s2",
       "zone": "yard",
       "kind": "slot",
-      "source_key": "c1r1",
-      "wire_refs": ["yard-r3-c4-l1", "yard-r3-c4-l2", "yard-r3-c4-l3"],
-      "roi": [315, 165, 368, 270]
+      "wire_refs": [
+        "yard-r3-c4-l1",
+        "yard-r3-c4-l2",
+        "yard-r3-c4-l3"
+      ],
+      "roi": [
+        290,
+        203,
+        330,
+        294
+      ]
     },
     {
       "site": "temp_a:r1-s1",
@@ -89,8 +127,17 @@
       "short_label": "A1",
       "zone": "temp_a",
       "kind": "slot",
-      "wire_refs": ["temp_a-r1-c1-l1", "temp_a-r1-c1-l2", "temp_a-r1-c1-l3"],
-      "roi": null
+      "wire_refs": [
+        "temp_a-r1-c1-l1",
+        "temp_a-r1-c1-l2",
+        "temp_a-r1-c1-l3"
+      ],
+      "roi": [
+        580,
+        372,
+        640,
+        475
+      ]
     },
     {
       "site": "temp_a:r2-s1",
@@ -98,8 +145,17 @@
       "short_label": "A2",
       "zone": "temp_a",
       "kind": "slot",
-      "wire_refs": ["temp_a-r2-c1-l1", "temp_a-r2-c1-l2", "temp_a-r2-c1-l3"],
-      "roi": null
+      "wire_refs": [
+        "temp_a-r2-c1-l1",
+        "temp_a-r2-c1-l2",
+        "temp_a-r2-c1-l3"
+      ],
+      "roi": [
+        535,
+        382,
+        582,
+        480
+      ]
     },
     {
       "site": "temp_a:r3-s1",
@@ -107,8 +163,17 @@
       "short_label": "A3",
       "zone": "temp_a",
       "kind": "slot",
-      "wire_refs": ["temp_a-r3-c1-l1", "temp_a-r3-c1-l2", "temp_a-r3-c1-l3"],
-      "roi": null
+      "wire_refs": [
+        "temp_a-r3-c1-l1",
+        "temp_a-r3-c1-l2",
+        "temp_a-r3-c1-l3"
+      ],
+      "roi": [
+        468,
+        372,
+        532,
+        475
+      ]
     },
     {
       "site": "temp_b:r1-s1",
@@ -116,9 +181,17 @@
       "short_label": "B1",
       "zone": "temp_b",
       "kind": "slot",
-      "source_key": "lane1",
-      "wire_refs": ["temp_b-r1-c1-l1", "temp_b-r1-c1-l2", "temp_b-r1-c1-l3"],
-      "roi": [240, 365, 292, 433]
+      "wire_refs": [
+        "temp_b-r1-c1-l1",
+        "temp_b-r1-c1-l2",
+        "temp_b-r1-c1-l3"
+      ],
+      "roi": [
+        194,
+        372,
+        254,
+        475
+      ]
     },
     {
       "site": "temp_b:r2-s1",
@@ -126,9 +199,17 @@
       "short_label": "B2",
       "zone": "temp_b",
       "kind": "slot",
-      "source_key": "lane2",
-      "wire_refs": ["temp_b-r2-c1-l1", "temp_b-r2-c1-l2", "temp_b-r2-c1-l3"],
-      "roi": [182, 372, 234, 440]
+      "wire_refs": [
+        "temp_b-r2-c1-l1",
+        "temp_b-r2-c1-l2",
+        "temp_b-r2-c1-l3"
+      ],
+      "roi": [
+        140,
+        382,
+        188,
+        480
+      ]
     },
     {
       "site": "temp_b:r3-s1",
@@ -136,9 +217,17 @@
       "short_label": "B3",
       "zone": "temp_b",
       "kind": "slot",
-      "source_key": "lane3",
-      "wire_refs": ["temp_b-r3-c1-l1", "temp_b-r3-c1-l2", "temp_b-r3-c1-l3"],
-      "roi": [124, 362, 176, 430]
+      "wire_refs": [
+        "temp_b-r3-c1-l1",
+        "temp_b-r3-c1-l2",
+        "temp_b-r3-c1-l3"
+      ],
+      "roi": [
+        50,
+        375,
+        135,
+        475
+      ]
     },
     {
       "site": "stand:r1-s1",
@@ -146,9 +235,10 @@
       "short_label": "반출대",
       "zone": "stand",
       "kind": "slot",
-      "source_key": "stand",
-      "wire_refs": ["stand-r1-c1-l1"],
-      "roi": [410, 30, 570, 125]
+      "wire_refs": [
+        "stand-r1-c1-l1"
+      ],
+      "roi": null
     },
     {
       "site": "belt",
@@ -156,8 +246,11 @@
       "short_label": "컨베이어",
       "zone": "belt",
       "kind": "pick",
-      "source_key": "belt_out.top_px",
-      "point": [341, 112]
+      "point": [
+        349,
+        101
+      ]
     }
-  ]
+  ],
+  "frame_source": "실제 사이트 top 카메라 프레임(2026-11-24 21:46 상황판 캡처)에서 사람이 눈으로 고른 참고값"
 }

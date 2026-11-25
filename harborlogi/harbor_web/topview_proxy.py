@@ -38,8 +38,9 @@ from harbor_web.fleet_connection import connection_settings
 from harbor_web.auth import require_roles
 from harbor_web.rosy_account import access_token
 
-ALLOWED_CAMERA_SOURCES = ('omx_overhead', 'ceiling_north')
-DEFAULT_RAW_CAMERA_SOURCE = 'omx_overhead'
+# The live site lists the cell top camera as 'top' (D-1065 role name); older setups use 'omx_overhead'.
+YARD_CAMERA_SOURCES = ('top', 'omx_overhead')
+ALLOWED_CAMERA_SOURCES = YARD_CAMERA_SOURCES + ('ceiling_north',)
 
 _CACHE_MAX_ENTRIES = 64
 _SOURCES_TTL_S = 15.0
@@ -119,8 +120,11 @@ def topview_context(request):
     try:
         sources = _camera_sources(origin, token, ca_file, timeout=2)
         default_source_id = sources[0] if sources else ''
-        default_view_mode = 'raw' if default_source_id == DEFAULT_RAW_CAMERA_SOURCE else 'auto'
+        default_view_mode = 'raw' if default_source_id in YARD_CAMERA_SOURCES else 'auto'
         site_pixels = load_topview_site_pixels() if sources else None
+        yard_source = next((source for source in sources if source in YARD_CAMERA_SOURCES), None)
+        if site_pixels is not None and yard_source and site_pixels['source_id'] in YARD_CAMERA_SOURCES:
+            site_pixels['source_id'] = yard_source  # draw the points on whichever yard camera id the site offers
         site_pixels_json = (
             json.dumps(site_pixels, ensure_ascii=False, separators=(',', ':'))
             if site_pixels is not None else ''
