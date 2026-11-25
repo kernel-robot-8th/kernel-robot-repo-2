@@ -36,8 +36,32 @@ class Cargo(Immutable):
             models.CheckConstraint(condition=models.Q(color__in=['', *CARGO_COLORS]), name='cargo_valid_color'),
         ]
 
+    @property
+    def current_commercial(self):
+        profile = getattr(self, 'commercial_profile', None)
+        if profile is not None:
+            return profile
+        return CargoCommercial(cargo_id=self.pk, color=self.color, color_confirmed=self.color_confirmed)
+
     def __str__(self):
         return self.code
+
+
+class CargoCommercial(models.Model):
+    cargo = models.OneToOneField(Cargo, on_delete=models.PROTECT, related_name='commercial_profile', primary_key=True)
+    nominal_length_ft = models.PositiveSmallIntegerField(blank=True, null=True, validators=[MinValueValidator(1)])
+    container_type = models.CharField(max_length=80, blank=True)
+    color = models.CharField(max_length=16, choices=CARGO_COLOR_CHOICES, blank=True)
+    color_confirmed = models.BooleanField(default=False)
+    revision = models.PositiveIntegerField(default=0)
+
+    def clean(self):
+        super().clean()
+        if self.color_confirmed and not self.color:
+            raise ValidationError({'color': '실물 색을 확인했다면 색상을 선택하세요.'})
+        if self.container_type:
+            clean_text(self.container_type)
+
 
 
 class CargoTag(Immutable):
@@ -134,6 +158,7 @@ class Order(Authored):
     voyage_code = models.CharField(max_length=64, blank=True, default='')
     cutoff_at = models.DateTimeField(null=True, blank=True)
     note = models.CharField(max_length=500, blank=True)
+    goods_contents = models.TextField(max_length=4000, blank=True, default='')
     version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
     updated_at = models.DateTimeField(auto_now=True)
 

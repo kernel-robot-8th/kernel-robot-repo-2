@@ -13,6 +13,9 @@ class FootprintForm(forms.Form):
 
 
 class CargoForm(forms.ModelForm):
+    nominal_length_ft = forms.IntegerField(label='컨테이너 길이 (ft)', required=False, min_value=1, max_value=32767)
+    container_type = forms.CharField(label='컨테이너 종류', max_length=80, required=False)
+
     color = forms.ChoiceField(
         label='컨테이너 색', required=False,
         choices=[('', '---------'), *CARGO_COLOR_CHOICES],
@@ -27,6 +30,12 @@ class CargoForm(forms.ModelForm):
         help_text='선택 입력입니다. 등록 후 화물 목록에서도 추가 연결할 수 있습니다.',
     )
 
+    def clean(self):
+        data = super().clean()
+        if data.get('color_confirmed') and not data.get('color'):
+            self.add_error('color', '실물 색을 확인했다면 색상을 선택하세요.')
+        return data
+
     def clean_code(self):
         code = self.cleaned_data['code']
         if Cargo.objects.filter(code=code).exists():
@@ -35,7 +44,7 @@ class CargoForm(forms.ModelForm):
 
     class Meta:
         model = Cargo
-        fields = ['code', 'name', 'color', 'color_confirmed', 'weight_kg', 'volume_m3', 'destination', 'shipper_name', 'shipper_tier']
+        fields = ['code', 'name', 'nominal_length_ft', 'container_type', 'color', 'color_confirmed', 'weight_kg', 'volume_m3', 'destination', 'shipper_name', 'shipper_tier']
         labels = dict(
             code='화물 ID', name='화물 이름', color='컨테이너 색', color_confirmed='실물 색 확인',
             weight_kg='중량 (kg)', volume_m3='부피 (m³)',
@@ -78,9 +87,9 @@ class OrderForm(forms.ModelForm):
 
     class Meta:
         model = Order
-        fields = ['cargo', 'kind', 'title', 'voyage_code', 'cutoff_at', 'priority_group', 'sequence', 'tie_policy', 'note']
+        fields = ['cargo', 'kind', 'title', 'voyage_code', 'cutoff_at', 'priority_group', 'sequence', 'tie_policy', 'note', 'goods_contents']
         labels = dict(
-            cargo='화물', kind='요청 종류', title='요청 제목',
+            cargo='화물', kind='요청 종류', title='요청 제목', goods_contents='입고 품목 (한 줄에 한 품목)',
             voyage_code='배편 코드', cutoff_at='출항 마감 시각', tie_policy=TIE_POLICY_LABEL, note='요청 메모',
         )
         widgets = {'note': forms.Textarea(attrs={'rows': 3}), 'tie_policy': FixedOrderCheckbox(),
@@ -97,6 +106,8 @@ class OrderForm(forms.ModelForm):
 
     def clean(self):
         data = super().clean()
+        if data.get('goods_contents') and data.get('kind') != 'INBOUND':
+            self.add_error('goods_contents', '입고 요청에만 품목을 기록할 수 있습니다.')
         # The DB check constraint is the backstop; this gives the user a plain field error first.
         if data.get('kind') in ('INBOUND', 'OUTBOUND') and not data.get('cargo') and 'cargo' not in self.errors:
             self.add_error('cargo', '입고·반출 요청은 화물을 선택해야 합니다.')

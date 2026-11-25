@@ -60,9 +60,11 @@ def queue_snapshot():
 
 @serialized
 @transaction.atomic
-def create_order(actor, *, cargo, kind, priority_group, sequence, tie_policy, note='', title='', voyage_code='', cutoff_at=None):
+def create_order(actor, *, cargo, kind, priority_group, sequence, tie_policy, note='', title='', voyage_code='', cutoff_at=None, goods_contents=''):
     _role(actor, 'operator')
-    obj = Order(created_by=actor, cargo=cargo, kind=kind, priority_group=priority_group,
+    if goods_contents and kind != 'INBOUND':
+        raise ValidationError('입고 요청에만 품목을 기록할 수 있습니다.')
+    obj = Order(created_by=actor, cargo=cargo, kind=kind, goods_contents=goods_contents, priority_group=priority_group,
                 sequence=sequence, tie_policy=tie_policy, note=note, title=title,
                 voyage_code=voyage_code or '', cutoff_at=cutoff_at)
     _queue_policy(obj)

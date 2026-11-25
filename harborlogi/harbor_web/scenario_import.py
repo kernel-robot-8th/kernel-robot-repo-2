@@ -192,8 +192,8 @@ def _cargo(actor, code, name, color='', *, where=''):
     if cargo is None:
         return services.register_cargo(actor, code=code, name=name, weight_kg=Decimal('1.000'), volume_m3=Decimal('0.0120'),
                                        destination='컨베이어 · 시나리오', color=color, length_cells=3)
-    if color and cargo.color != color:
-        raise ValidationError(_color_mismatch_error(code, cargo.color, where=where))
+    if color and cargo.current_commercial.color != color:
+        raise ValidationError(_color_mismatch_error(code, cargo.current_commercial.color, where=where))
     footprint = CargoFootprint.objects.filter(cargo=cargo).order_by('-pk').first()
     if footprint is None or footprint.length_cells != 3:
         services.register_footprint(actor, cargo_id=cargo.pk, length_cells=3)
@@ -221,7 +221,7 @@ def import_scenario(actor, scenario, *, name):
     if Order.objects.filter(cargo__code__in=codes).exclude(kind='REARRANGE').exclude(pk__in=completed_order_ids()).exists():
         raise ValidationError('이 시나리오의 화물에 아직 끝나지 않은 요청이 있습니다. 새 화물 ID로 시나리오를 만드세요.')
     all_codes = {item['code'] for item in scenario['layout']} | codes
-    existing_colors = dict(Cargo.objects.filter(code__in=all_codes).values_list('code', 'color'))
+    existing_colors = {c.code: c.current_commercial.color for c in Cargo.objects.filter(code__in=all_codes).select_related('commercial_profile')}
     color_errors = []
     for item in scenario['layout']:
         sheet_color = item.get('color', '')

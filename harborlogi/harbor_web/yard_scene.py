@@ -128,7 +128,7 @@ def cargo_scene_metadata(codes):
     from harbor_web.models import Cargo, Order
     from harbor_web.order_queue import completed_order_ids
 
-    cargos = {c.code: c for c in Cargo.objects.filter(code__in=unique)}
+    cargos = {c.code: c for c in Cargo.objects.filter(code__in=unique).select_related('commercial_profile')}
     if not cargos:
         return {}
     done_ids = completed_order_ids()
@@ -163,9 +163,9 @@ def cargo_scene_metadata(codes):
             local_cutoff = timezone.localtime(info_order.cutoff_at) if timezone.is_aware(info_order.cutoff_at) else info_order.cutoff_at
             cutoff = f'{local_cutoff:%m-%d %H:%M}'
         meta[code] = dict(
-            color=cargo.color,
-            color_label=CARGO_COLOR_LABELS.get(cargo.color, '') if cargo.color else '',
-            color_confirmed=bool(cargo.color_confirmed),
+            color=cargo.current_commercial.color,
+            color_label=CARGO_COLOR_LABELS.get(cargo.current_commercial.color, '') if cargo.current_commercial.color else '',
+            color_confirmed=bool(cargo.current_commercial.color_confirmed),
             priority_group=priority_group,
             shipper_tier=cargo.shipper_tier,
             priority_tier=priority_tier,

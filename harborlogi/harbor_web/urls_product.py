@@ -1,6 +1,6 @@
 """Harbor product routes, separate from account and Fleet routes."""
 from django.urls import path, re_path
-from harbor_web import alert_pages, intake_pages
+from harbor_web import alert_pages, intake_pages, commercial_pages
 from harbor_web import views, planning_pages, field_pages, record_pages, guide_pages, map_pages, rearrangement_pages, reorder_validate, scenario_pages, topview_proxy
 
 urlpatterns = [
@@ -18,6 +18,8 @@ urlpatterns = [
     path('cargo/new/', views.cargo_new, name='cargo_new'),
     path('cargo/<int:pk>/tag/', views.cargo_tag_bind, name='cargo_tag_bind'),
     path('cargo/<int:pk>/footprint/', views.cargo_footprint, name='cargo_footprint'),
+    path('cargo/<int:pk>/commercial/', commercial_pages.cargo_commercial, name='cargo_commercial'),
+    path('requests/<int:pk>/contents/', commercial_pages.order_contents, name='order_contents'),
     path('cargo/<int:pk>/history/', views.cargo_history, name='cargo_history'),
     path('requests/', views.order_list, name='requests'),
     path('scenarios/', scenario_pages.scenarios, name='scenarios'),

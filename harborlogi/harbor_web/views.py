@@ -115,7 +115,7 @@ def cargo_list(request):
     columns = {'weight': 'weight_kg', 'volume': 'volume_m3'}
     field = columns.get(sort.lstrip('-'))
     order = (f'-{field}' if sort.startswith('-') else field, '-id') if field else ('-id',)
-    items = Cargo.objects.all()
+    items = Cargo.objects.select_related('commercial_profile')
     if q:
         items = items.filter(
             Q(code__icontains=q) | Q(name__icontains=q) | Q(destination__icontains=q)
