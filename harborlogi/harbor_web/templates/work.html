@@ -6,26 +6,37 @@
 <div class="page-head"><div><h1>작업</h1></div></div>
 <div class="work-hub">
 <section class="panel" aria-labelledby="work-today">
-  <div class="panel-h"><h2 id="work-today">오늘 시간표</h2></div>
-  <div class="panel-b">
-    {% if timeline %}<ol class="work-timeline" aria-label="오늘 작업 순서">
-    {% for row in timeline %}<li class="work-item work-{{ row.tone }}{% if row.is_next %} is-next{% endif %}">
-      <div class="work-item-head"><span class="work-step" aria-hidden="true">{{ forloop.counter }}</span>{% if row.recorded_at %}<time datetime="{{ row.recorded_at|date:'c' }}">{{ row.recorded_at|date:'H:i' }}</time>{% elif row.state == '진행 중' %}<span class="work-tag">지금</span>{% elif row.is_next %}<span class="work-tag">다음</span>{% endif %}</div>
-      <a class="work-item-title" href="{{ row.href }}">{% if row.order.cargo_id %}{{ row.order.cargo.code }} {% endif %}{{ row.kind }}</a>
-      <span class="work-state">{{ row.state }}</span>
-    </li>{% endfor %}</ol>{% else %}<p>등록된 작업이 없습니다</p>{% endif %}
-  </div>
-</section>
-<section class="panel" aria-labelledby="work-outbound">
-  <div class="panel-h"><h2 id="work-outbound">반출 순서</h2>{% if not can_operate %}<span class="scope">운영자만 바꿀 수 있음</span>{% endif %}</div>
-  <div class="panel-b"{% if can_operate and outbound %} data-reorder-editor data-validate-url="{% url 'outbound_validate' %}" data-reorder-url="{% url 'outbound_reorder' %}"{% endif %}>
-    {% if outbound %}
-    {% if can_operate %}<p id="wk-edit-help" class="helptext" hidden>카드를 끌거나 ‘맨 앞으로’를 눌러 순서를 바꾼 뒤 ‘이 순서로 할 수 있는지 확인’을 누르세요. (키보드: 카드 선택 후 ←→)</p>{% endif %}
-    <ol id="wk-flow" class="work-flow" aria-label="반출 순서">
-    {% for row in outbound %}<li class="work-{{ row.tone }}" data-order="{{ row.order.pk }}" data-version="{{ row.order.version }}" data-tier="{{ row.order.priority_group }}" data-code="{{ row.order.cargo.code }}" data-running="{% if row.state == '진행 중' %}1{% else %}0{% endif %}"><span class="work-chip"><span data-reorder-seq>{{ forloop.counter }}</span> <a href="{{ row.href }}">{{ row.order.cargo.code }}</a> <span>{{ row.order.tier_label }}</span> <span class="work-state">{{ row.state }}</span></span>{% if row.order.tie_policy == 'ANY' %}<small>단계 안 순서 자유</small>{% endif %}</li>{% endfor %}
-    </ol>
-    {% if can_operate %}<div id="wk-out-actions" class="actions"></div><div id="wk-result" aria-live="polite"></div><form method="post" action="{% url 'outbound_reorder' %}" data-reorder-form hidden>{% csrf_token %}</form><script type="module" src="{% static 'harbor_web/reorder.js' %}"></script>{% endif %}
-    {% else %}<p>남은 반출 작업이 없습니다</p>{% endif %}
+  <div class="panel-h"><h2 id="work-today">오늘 시간표</h2>{% if not can_operate %}<span class="scope">운영자만 바꿀 수 있음</span>{% endif %}</div>
+  <div class="panel-b"{% if can_operate and schedule %} data-reorder-editor data-validate-url="{% url 'outbound_validate' %}" data-reorder-url="{% url 'outbound_reorder' %}"{% elif done_rows or schedule %} data-schedule-viewer{% endif %}>
+    {% if done_rows or schedule %}
+    <div id="wk-flow" class="wf-board{% if can_operate and schedule %} is-edit{% endif %}" aria-label="오늘 시간표">
+      {% if done_rows %}
+      <section class="wf-tier wf-tier-done" data-wf-done aria-label="완료 단계">
+        <header class="wf-tier-head">
+          <span class="wf-tier-name">완료</span>
+          <span class="wf-tier-count">{{ done_rows|length }}건</span>
+        </header>
+        <ol class="wf-lane-list">
+          {% for row in done_rows %}<li class="wf-node work-done is-done wf-kind-{{ row.order.kind|lower }}" data-card-id="done-{{ row.order.pk }}" data-done="1" data-running="0" data-tier="{{ row.tier }}" data-tier-name="{{ row.tier_name }}" data-kind="{{ row.order.kind }}" data-kind-label="{{ row.kind }}" data-code="{% if row.order.cargo_id %}{{ row.order.cargo.code }}{% else %}{{ row.kind }}{% endif %}" data-state="{{ row.state }}" data-time="{{ row.recorded_at|date:'H:i' }}" data-shipper="{{ row.shipper }}" data-voyage="{{ row.voyage }}" data-cutoff="{{ row.cutoff_text }}" data-plan-summary="{{ row.plan_summary }}" data-href="{{ row.href }}"><div class="wf-card work-chip" tabindex="0" role="button" aria-expanded="false"><div class="wf-card-top"><time class="wf-time" datetime="{{ row.recorded_at|date:'c' }}">{{ row.recorded_at|date:'H:i' }}</time><span class="wf-kind wf-kind-{{ row.order.kind|lower }}">{{ row.kind }}</span><strong class="wf-code">{% if row.order.cargo_id %}{{ row.order.cargo.code }}{% else %}{{ row.kind }}{% endif %}</strong></div><div class="wf-card-meta"><span class="work-state">{{ row.state }}</span></div></div></li>{% endfor %}
+        </ol>
+      </section>
+      {% endif %}
+      {% if schedule %}
+      {% for tier in schedule_tiers %}
+      <section class="wf-tier wf-tier-{{ tier.group }}" data-wf-tier="{{ tier.group }}" data-tier-name="{{ tier.name }}" aria-label="{{ tier.name }} 단계">
+        <header class="wf-tier-head">
+          <span class="wf-tier-name">{{ tier.name }}</span>
+          <span class="wf-tier-count" data-wf-count>{{ tier.rows|length }}건</span>
+        </header>
+        <ol class="wf-lane-list" data-wf-list="{{ tier.group }}" data-empty-label="{{ tier.name }} 단계 작업 없음">
+          {% for row in tier.rows %}<li class="wf-node work-{{ row.tone }}{% if row.is_next %} is-next{% endif %}{% if row.card_place_kind == 'blocked' %} is-sim-blocked{% endif %} wf-kind-{{ row.order.kind|lower }}" data-card-id="{{ row.order.pk }}" data-order="{{ row.order.pk }}" data-version="{{ row.order.version }}" data-tier="{{ tier.group }}" data-tier-name="{{ tier.name }}" data-kind="{{ row.order.kind }}" data-kind-label="{{ row.kind }}" data-code="{{ row.order.cargo.code }}" data-state="{{ row.state }}" data-shipper="{{ row.shipper }}" data-voyage="{{ row.voyage }}" data-cutoff="{{ row.cutoff_text }}" data-plan-summary="{{ row.plan_summary }}" data-href="{{ row.href }}" data-running="{% if row.state == '진행 중' %}1{% else %}0{% endif %}" data-done="0"><div class="wf-card work-chip" tabindex="0" role="button" aria-expanded="false"><div class="wf-card-top"><span class="wf-seq" data-reorder-seq>{{ row.seq_num }}</span>{% if row.state == '진행 중' %}<span class="work-tag">지금</span>{% elif row.is_next %}<span class="work-tag">다음</span>{% endif %}<span class="wf-kind wf-kind-{{ row.order.kind|lower }}">{{ row.kind }}</span><strong class="wf-code">{{ row.order.cargo.code }}</strong></div><div class="wf-card-meta"><span class="work-state">{{ row.state }}</span>{% if row.card_place %}<span class="wf-place{% if row.card_place_kind == 'blocked' %} wf-place-blocked{% elif row.card_place_kind == 'uncomputed' %} wf-place-uncomputed{% endif %}">{{ row.card_place }}</span>{% endif %}{% if row.order.tie_policy == 'ANY' %}<small>단계 안 순서 자유</small>{% endif %}</div></div></li>{% endfor %}
+        </ol>
+      </section>
+      {% endfor %}
+      {% endif %}
+    </div>
+    {% if can_operate and schedule %}<p id="wk-drag-preview" class="helptext wf-drag-preview" hidden aria-live="polite"></p><div id="wk-out-actions" class="actions" hidden></div><div id="wk-result" aria-live="polite"></div><form method="post" action="{% url 'outbound_reorder' %}" data-reorder-form hidden>{% csrf_token %}</form><script type="module" src="{% static 'harbor_web/reorder.js' %}"></script>{% else %}<script type="module" src="{% static 'harbor_web/schedule-popover.js' %}"></script>{% endif %}
+    {% else %}<p>등록된 작업이 없습니다</p>{% endif %}
   </div>
 </section>
 <section class="panel" aria-labelledby="work-inbound">
