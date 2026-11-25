@@ -6,15 +6,22 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
+from harbor.cargo_colors import CARGO_COLORS, CARGO_COLOR_CHOICES as _CARGO_COLOR_CHOICES
 from harbor_web.model_base import Authored, Immutable, ImmutableQuerySet, clean_text  # noqa: F401 (re-exported)
 
 
+CARGO_COLOR_CHOICES = list(_CARGO_COLOR_CHOICES)
+
+
 class Cargo(Immutable):
+    COLOR_CHOICES = CARGO_COLOR_CHOICES
     code = models.CharField(max_length=96, unique=True)
     name = models.CharField(max_length=160)
     weight_kg = models.DecimalField(max_digits=12, decimal_places=3, validators=[MinValueValidator(Decimal('0.001'))])
     volume_m3 = models.DecimalField(max_digits=12, decimal_places=4, validators=[MinValueValidator(Decimal('0.0001'))])
     destination = models.CharField(max_length=160)
+    color = models.CharField(max_length=16, blank=True, default='', choices=CARGO_COLOR_CHOICES)
+    color_confirmed = models.BooleanField(default=False)
     shipper_name = models.CharField(max_length=96, blank=True, default='')
     shipper_tier = models.PositiveSmallIntegerField(
         null=True,
@@ -24,7 +31,10 @@ class Cargo(Immutable):
     )
 
     class Meta:
-        constraints = [models.CheckConstraint(condition=models.Q(weight_kg__gt=0, volume_m3__gt=0), name='cargo_positive_dimensions')]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(weight_kg__gt=0, volume_m3__gt=0), name='cargo_positive_dimensions'),
+            models.CheckConstraint(condition=models.Q(color__in=['', *CARGO_COLORS]), name='cargo_valid_color'),
+        ]
 
     def __str__(self):
         return self.code

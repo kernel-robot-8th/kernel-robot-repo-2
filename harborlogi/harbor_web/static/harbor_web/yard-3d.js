@@ -1,7 +1,8 @@
 import {mountLinkedGrid, selectionFor, atPosition, slotLabel, topBoxes} from './yard-selection.mjs';
-import {cloneBoxes, transit, moveBox, placementFromWorld} from './yard-model.mjs';
+import {cloneBoxes, transit, moveBox, dropTargetFromWorld} from './yard-model.mjs';
 import {DraftSession} from './yard-draft.mjs';
 import {applyYardView, bindUpcomingPlans, stageButtonSpecs} from './yard-inline.mjs';
+import {formatBoxInfo} from './yard-visuals.mjs';
 
 function fallback(figure) {
   const preview = figure.closest('[data-yard-preview]');
@@ -46,11 +47,21 @@ export async function mountYardViewer(figure) {
   const on = (node, type, fn) => node.addEventListener(type, fn, {signal: events.signal});
   const palette = getComputedStyle(document.documentElement);
   const token = name => palette.getPropertyValue(name).trim();
-  const colors = {target: token('--primitive-color-navy'), blocker: token('--primitive-color-orange'),
-    stored: token('--primitive-color-teal'), line: token('--semantic-border-divider'),
-    text: token('--semantic-text-primary'), muted: token('--semantic-text-secondary'),
-    floor: token('--semantic-surface-panel'), white: token('--primitive-color-white'),
-    canvas: token('--semantic-surface-canvas')};
+  const colorsFor = targetScene => {
+    const cargoNames = Array.isArray(targetScene?.cargo_colors) ? targetScene.cargo_colors : [];
+    return {
+      target: token('--primitive-color-navy'), blocker: token('--primitive-color-orange'),
+      stored: token('--primitive-color-teal'), danger: token('--primitive-color-danger-ink'),
+      tierUrgent: token('--primitive-color-danger-ink'), tierPriority: token('--primitive-color-orange-dark'),
+      tierNormal: token('--primitive-color-navy'), tierNeutral: token('--primitive-color-muted'),
+      cream: token('--primitive-color-cream'),
+      cargo: Object.fromEntries(cargoNames.map(name => [name, token(`--semantic-cargo-${name}`)])),
+      line: token('--semantic-border-divider'),
+      text: token('--semantic-text-primary'), muted: token('--semantic-text-secondary'),
+      floor: token('--semantic-surface-panel'), white: token('--primitive-color-white'),
+      canvas: token('--semantic-surface-canvas'),
+    };
+  };
   let index = Number(controls.find(b => b.getAttribute('aria-pressed') === 'true')?.dataset.yardStage || 0);
   let location = null, linked = null;
   let selected = '', current = cloneBoxes(scene.frames[index].boxes), draft = null;
@@ -70,13 +81,19 @@ export async function mountYardViewer(figure) {
   const ceiling = () => Math.max(...scene.areas.map(a => a.levels)) + .6;
   const makeRenderer = () => createRenderer(canvas, scene.areas, {
     showVolumes: scene.kind === 'map-definition', transpose: Boolean(slotCells()),
-    colors, onSelect: id => select(id), onTransform: (id, position) => {
+    colors: colorsFor(scene), onSelect: id => select(id),
+    onResolveDrop: (id, point) => {
+      if (!draft || playing) return null;
+      const target = dropTargetFromWorld(scene.areas, draft, id, point, {slotCells: slotCells()});
+      error.textContent = target ? (target.valid ? '' : target.reason) : '구역 안의 칸으로 옮겨주세요.';
+      return target;
+    },
+    onDrop: (id, target) => {
       if (!draft || playing) return;
-      const box = draft.find(b => b.id === id);
-      const placement = placementFromWorld(scene.areas, box, position);
-      if (placement) applyDraft(id, placement);
-      else { error.textContent = '구역 안의 격자 위치로 옮겨주세요.'; renderer.setBoxes(draft); }
-    }, onError: () => { destroy(); fallback(figure); },
+      if (target?.valid && target.placement) applyDraft(id, target.placement);
+      else { error.textContent = target?.reason || '구역 안의 칸으로 옮겨주세요.'; renderer.setBoxes(draft); }
+    },
+    onError: () => { destroy(); fallback(figure); },
   });
   let currentAreasKey = JSON.stringify(scene.areas);
   let renderer = makeRenderer();
@@ -115,8 +132,8 @@ export async function mountYardViewer(figure) {
       changes.append(item);
     }
     editTools.querySelector('[data-scene-edit-help]').textContent = draft ?
-      `${selected || '화물 미선택'} · 평면에서 ${slotCells() ? '자리의 ‘놓기’를' : '‘여기로 이동’ 칸을'} 누르세요. 놓을 수 없는 곳을 누르면 이유가 나옵니다. 옮긴 뒤 ‘가상 변경 재생’으로 이동을 다시 봅니다.` :
-      `화물을 선택하고 가상 배치 편집을 시작하세요. 옮긴 뒤 ‘가상 변경 재생’으로 이동을 볼 수 있습니다.${isPlanReplay() ? ' 저장된 계획 결과도 불러와 수정할 수 있습니다.' : ''}`;
+      `${selected || '화물 미선택'} · 3D에서 원하는 칸으로 끌거나 평면에서 ${slotCells() ? '‘놓기’를' : '‘여기로 이동’을'} 누르세요.` :
+      `화물을 선택하고 가상 배치 편집을 시작하세요.${isPlanReplay() ? ' 저장된 계획 결과도 불러와 수정할 수 있습니다.' : ''}`;
   }
   const selection = () => selectionFor(boxes().find(b => b.id === selected)) || location;
   const mode = () => scene.kind === 'map-definition' ? 'map-definition' : draft ? 'local-draft' : index ? 'predicted' : 'original';
@@ -133,7 +150,7 @@ export async function mountYardViewer(figure) {
     // With fixed slots the size, turn and covered cells never change, so only the slot is named.
     const where = box && (sc ? (draft ? '가상: ' + slotLabel(scene.areas, box, sc) + ' · 기준: ' + slotLabel(scene.areas, base, sc) : slotLabel(scene.areas, box, sc))
       : box.size + ' · ' + box.orientation + '도 · ' + (draft ? '가상: ' + box.area + ' / ' + box.row + '행 ' + box.column + '열 ' + box.level + '층 · 기준: ' + base.positions.join(' / ') : box.positions.join(' / ')));
-    info.textContent = box ? box.id + ' · ' + box.label + (!draft && scene.rehandle?.includes(box.id) ? ' (재취급 예정 · 계획 기준)' : '') + ' · ' + where
+    info.textContent = box ? formatBoxInfo(box, {where, rehandle: !draft && Boolean(scene.rehandle?.includes(box.id))})
       : location ? `${scene.kind === 'map-definition' ? '미관측 위치 · 점유 확인 안 됨' : sc ? '빈 자리' : '빈 위치'} · ${sc ? slotLabel(scene.areas, location, sc) : `${location.area} · ${location.row}행 ${location.column}열 ${location.level}층`} · 화물 아님`
         : `박스나 화물 목록을 선택해 ${sc ? '' : '크기·'}위치를 확인하세요.`;
     if (location && scene.kind === 'map-definition') status(info.textContent);
@@ -207,7 +224,7 @@ export async function mountYardViewer(figure) {
       // Start on cargo a move can lift: a buried one only shows '놓을 수 없음' everywhere.
       const free = topBoxes(draft);
       if (!free.some(box => box.id === selected)) selected = (free.find(box => box.role === 'target') || free[0])?.id || '';
-      status(usePlan ? '저장된 이동 순서와 결과를 불러왔습니다. 되돌리거나 이어서 편집하세요.' : '목적 칸 클릭·3D 이동 핸들·좌표 입력으로 배치하세요.');
+      status(usePlan ? '저장된 이동 순서와 결과를 불러왔습니다. 되돌리거나 이어서 편집하세요.' : '3D에서 박스를 끌어 옮기거나 평면·좌표로 배치하세요.');
     }
     error.textContent = ''; fillCargo(); select(selected);
     showFlat(flatView);

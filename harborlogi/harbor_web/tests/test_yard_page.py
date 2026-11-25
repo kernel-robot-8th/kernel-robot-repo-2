@@ -4,11 +4,12 @@ from pathlib import Path
 import re
 
 from django.contrib.auth.models import Group, User
+from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
 from harbor_web import rearrangement, services
-from harbor_web.models import Cargo, CargoFootprint, Command, Order, Plan
+from harbor_web.models import Cargo, CargoFootprint, CellPlanDispatch, Command, Order, Plan
 from harbor_web.tests.test_control_board import site_policy
 from harbor_web.yard_pages import outbound_chain_replay, yard_page_context
 
@@ -162,7 +163,13 @@ class YardPageTests(TestCase):
 
         context = yard_page_context(self.observation)
         items = {item['order'].pk: item for item in context['upcoming']}
-        self.assertEqual(set(items), {outbound.pk, inbound.pk, rearrange_order.pk})
+        # Open orders appear in queue order (completed done_order is excluded).
+        # rearrange_order defaults to priority_group=1, sequence=1, right after outbound.
+        self.assertEqual(
+            [item['order'].pk for item in context['upcoming']],
+            [outbound.pk, rearrange_order.pk, inbound.pk, other_order.pk, superseded.pk],
+        )
+        self.assertNotIn(done_order.pk, items)
 
         out_item = items[outbound.pk]
         self.assertEqual(len(out_item['stages']), len(outbound_plan.result['moves']) + 1)
@@ -175,8 +182,18 @@ class YardPageTests(TestCase):
 
         in_item = items[inbound.pk]
         self.assertEqual(in_item['target_label'], '→ 2행 1열 3층')
-        self.assertIsNone(in_item['scene'])
-        self.assertEqual(in_item['arrows'], [])
+        self.assertIsNotNone(in_item['scene'])
+        self.assertEqual(len(in_item['scene']['frames']), 2)
+        self.assertEqual(in_item['scene']['frames'][1]['move']['source'], 'belt')
+        self.assertEqual(in_item['scene']['frames'][1]['move']['destination'], 'yard-r1-c4-l3')
+        self.assertEqual(len(in_item['arrows']), 1)
+        self.assertEqual(in_item['arrows'][0]['phase'], '입고')
+
+        # Open orders without a READY plan on self.observation are previewed in memory without saving Plans.
+        self.assertIsNotNone(items[other_order.pk]['scene'])
+        self.assertIsNone(items[other_order.pk]['plan'])
+        self.assertIsNotNone(items[superseded.pk]['scene'])
+        self.assertIsNone(items[superseded.pk]['plan'])
 
         rr_item = items[rearrange_order.pk]
         self.assertIsNotNone(rr_item['scene'])
@@ -198,7 +215,7 @@ class YardPageTests(TestCase):
         self.assertIn('<summary>기준 · 출처 선택(지원 담당자용)</summary>', html)
         self.assertIn(f'id="upcoming-scene-{outbound_plan.pk}"', html)
         self.assertIn(f'id="upcoming-scene-{rearrange_plan.pk}"', html)
-        self.assertNotIn(f'id="upcoming-scene-{inbound_plan.pk}"', html)
+        self.assertIn(f'id="upcoming-scene-{inbound_plan.pk}"', html)
         self.assertIn('→ 2행 1열 3층', html)
         self.assertIn('data-yard-stages', html)
         self.assertIn(f'data-upcoming-plan="plan-{outbound_plan.pk}"', html)
@@ -365,3 +382,281 @@ class YardPageTests(TestCase):
         self.assertIsNone(re.search(r'#[0-9a-fA-F]{3,8}', css))
         body_without_media = re.sub(r'@media[^{]+\{', '', css)
         self.assertIsNone(re.search(r'\b\d+(?:\.\d+)?px\b', body_without_media))
+
+    def test_hold_preview_and_active_order_promotion(self):
+        # Unobserved outbound cargo produces a concise HOLD reason without saving a Plan.
+        services.register_cargo(
+            self.operator, code='MISSING-1', name='MISSING-1', weight_kg=2, volume_m3='0.012',
+            destination='컨베이어', length_cells=3,
+        )
+        missing_order = services.create_order(
+            self.operator, cargo=Cargo.objects.get(code='MISSING-1'), kind='OUTBOUND',
+            priority_group=1, sequence=1, tie_policy='FIXED',
+        )
+        running_order = services.create_order(
+            self.operator, cargo=Cargo.objects.get(code='K3'), kind='OUTBOUND',
+            priority_group=2, sequence=1, tie_policy='FIXED',
+        )
+        CellPlanDispatch.objects.create(
+            order=running_order,
+            observation=self.observation,
+            dispatch_mode='HARBOR_PLAN',
+            directive_mode='outbound',
+            request_key='cp-yard-active-1',
+            request_payload={},
+            order_source='harbor',
+            state='RUNNING',
+            created_by=self.operator,
+        )
+        before_plans = Plan.objects.count()
+        response = self.client.get(f'/inventory/?observation={self.observation.pk}')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Plan.objects.count(), before_plans)
+        upcoming = response.context['upcoming']
+        # Active RUNNING order is promoted ahead of queue order, matching the situation board.
+        self.assertEqual([item['order'].pk for item in upcoming], [running_order.pk, missing_order.pk])
+        self.assertTrue(upcoming[0]['active'])
+        self.assertIsNotNone(upcoming[0]['scene'])
+        self.assertIsNone(upcoming[1]['scene'])
+        self.assertEqual(upcoming[1]['hold_reason'], '야드에 화물 없음')
+        html = response.content.decode()
+        self.assertIn('진행 중', html)
+        self.assertIn('보류', html)
+        self.assertIn('야드에 화물 없음', html)
+
+    def test_saved_plans_respect_eight_scene_cap_and_condition_filter(self):
+        other_condition = services.register_condition(
+            self.admin, name='Other 3x6 site', calibration_ref='other', payload=site_policy(),
+        )
+        mismatched_cargo = services.register_cargo(
+            self.operator, code='M1', name='M1', weight_kg=2, volume_m3='0.012',
+            destination='보관', length_cells=3,
+        )
+        mismatched_order = services.create_order(
+            self.operator, cargo=mismatched_cargo, kind='INBOUND',
+            priority_group=1, sequence=1, tie_policy='FIXED',
+        )
+        mismatched_plan = Plan.objects.create(
+            created_by=self.operator, order=mismatched_order, order_version=mismatched_order.version,
+            observation=self.observation, condition=other_condition, queue_digest='mismatch',
+            result=dict(
+                plan_kind='inbound-placement',
+                status='READY',
+                reason='OK',
+                recommendation=dict(cargo_id='M1', area_id='yard', row=1, column=4, level=3, orientation=0),
+            ),
+        )
+        saved_orders = [mismatched_order]
+        for idx in range(2, 11):
+            cargo = services.register_cargo(
+                self.operator, code=f'S{idx}', name=f'S{idx}', weight_kg=2, volume_m3='0.012',
+                destination='보관', length_cells=3,
+            )
+            order = services.create_order(
+                self.operator, cargo=cargo, kind='INBOUND',
+                priority_group=1, sequence=idx, tie_policy='FIXED',
+            )
+            Plan.objects.create(
+                created_by=self.operator, order=order, order_version=order.version,
+                observation=self.observation, condition=self.condition, queue_digest=f'q{idx}',
+                result=dict(
+                    plan_kind='inbound-placement',
+                    status='READY',
+                    reason='OK',
+                    recommendation=dict(cargo_id=f'S{idx}', area_id='yard', row=1, column=4, level=3, orientation=0),
+                ),
+            )
+            saved_orders.append(order)
+
+        context = yard_page_context(self.observation)
+        upcoming = context['upcoming']
+        self.assertEqual(len(upcoming), 10)
+        # Plan with mismatched condition is ignored (previewed instead of using mismatched_plan).
+        self.assertIsNone(upcoming[0]['plan'])
+        self.assertNotEqual(upcoming[0]['key'], f'plan-{mismatched_plan.pk}')
+        # All 3D scene generation (including saved READY plans) is capped to the first 8 items.
+        self.assertTrue(all(item['scene'] is not None and not item['preview_skipped'] for item in upcoming[:8]))
+        self.assertTrue(all(item['scene'] is None and item['preview_skipped'] for item in upcoming[8:]))
+
+    def test_chained_previews_handle_hold_saved_inbound_auto_reservation_and_outbound_freed_slot(self):
+        # 1. HOLD order (unobserved outbound) must not alter chained state.
+        missing = services.register_cargo(
+            self.operator, code='GONE-1', name='GONE-1', weight_kg=2, volume_m3='0.012',
+            destination='컨베이어', length_cells=3,
+        )
+        hold_order = services.create_order(
+            self.operator, cargo=missing, kind='OUTBOUND',
+            priority_group=1, sequence=1, tie_policy='FIXED',
+        )
+        # 2. Outbound K2 (top of 1,1 stack) frees (1,1,2).
+        out_k2 = services.create_order(
+            self.operator, cargo=Cargo.objects.get(code='K2'), kind='OUTBOUND',
+            priority_group=1, sequence=2, tie_policy='FIXED',
+        )
+        # 3. Saved READY inbound N1 placed at (3, 1, 1) advances spatial_snap.
+        n1 = services.register_cargo(
+            self.operator, code='N1', name='N1', weight_kg=2, volume_m3='0.012',
+            destination='보관', length_cells=3,
+        )
+        in_n1 = services.create_order(
+            self.operator, cargo=n1, kind='INBOUND',
+            priority_group=1, sequence=3, tie_policy='FIXED',
+        )
+        Plan.objects.create(
+            created_by=self.operator, order=in_n1, order_version=in_n1.version,
+            observation=self.observation, condition=self.condition, queue_digest='n1',
+            result=dict(
+                plan_kind='inbound-placement',
+                status='READY',
+                reason='OK',
+                recommendation=dict(cargo_id='N1', area_id='yard', row=3, column=1, level=1, orientation=0),
+                incoming_shape=dict(cargo_id='N1', length_cells=3, footprint_revision=CargoFootprint.objects.get(cargo=n1).pk),
+            ),
+        )
+        # 4. Previewed inbound N2 must NOT collide with saved N1 at (3, 1, 1) or auto-reserved N3 at (3, 4, 1).
+        n2 = services.register_cargo(
+            self.operator, code='N2', name='N2', weight_kg=2, volume_m3='0.012',
+            destination='보관', length_cells=3,
+        )
+        in_n2 = services.create_order(
+            self.operator, cargo=n2, kind='INBOUND',
+            priority_group=1, sequence=4, tie_policy='FIXED',
+        )
+        # 5. Later automatic inbound N3 with a saved reservation at (3, 4, 1).
+        n3 = services.register_cargo(
+            self.operator, code='N3', name='N3', weight_kg=2, volume_m3='0.012',
+            destination='보관', length_cells=3,
+        )
+        in_n3 = services.create_order(
+            self.operator, cargo=n3, kind='INBOUND',
+            priority_group=2, sequence=1, tie_policy='FIXED',
+        )
+        in_n3.auto_replan = True
+        in_n3.planning_observation = self.observation
+        in_n3.save(update_fields=['auto_replan', 'planning_observation'])
+        Plan.objects.create(
+            created_by=self.operator, order=in_n3, order_version=in_n3.version,
+            observation=self.observation, condition=self.condition, queue_digest='n3',
+            result=dict(
+                plan_kind='inbound-placement',
+                status='READY',
+                reason='OK',
+                recommendation=dict(cargo_id='N3', area_id='yard', row=3, column=4, level=1, orientation=0),
+                incoming_shape=dict(cargo_id='N3', length_cells=3, footprint_revision=CargoFootprint.objects.get(cargo=n3).pk),
+            ),
+        )
+
+        context = yard_page_context(self.observation)
+        by_pk = {item['order'].pk: item for item in context['upcoming']}
+        self.assertEqual(by_pk[hold_order.pk]['hold_reason'], '야드에 화물 없음')
+        self.assertIsNotNone(by_pk[out_k2.pk]['scene'])
+        self.assertIsNotNone(by_pk[in_n1.pk]['scene'])
+        self.assertIsNotNone(by_pk[in_n2.pk]['scene'])
+        n2_box = next(b for b in by_pk[in_n2.pk]['scene']['frames'][1]['boxes'] if b['id'] == 'N2')
+        n2_slot = (n2_box['area'], n2_box['row'], n2_box['column'], n2_box['level'])
+        # N2 avoids saved N1 (3,1,1) and auto-reserved N3 (3,4,1), taking (1,1,2) freed by K2 outbound.
+        self.assertEqual(n2_slot, ('yard', 1, 1, 2))
+        self.assertNotIn('K2', {b['id'] for b in by_pk[in_n2.pk]['scene']['frames'][0]['boxes']})
+        self.assertIn('N1', {b['id'] for b in by_pk[in_n2.pk]['scene']['frames'][0]['boxes']})
+
+    def test_outbound_chain_replay_respects_limit(self):
+        for seq, code in enumerate(('K1', 'K2', 'K3', 'K4'), start=1):
+            services.create_order(
+                self.operator, cargo=Cargo.objects.get(code=code), kind='OUTBOUND',
+                priority_group=1, sequence=seq, tie_policy='FIXED',
+            )
+        chain = outbound_chain_replay(self.observation, limit=2)
+        self.assertIsNotNone(chain)
+        self.assertEqual(len(chain['cargo_codes']), 2)
+
+
+class SeedYardScheduleTests(TestCase):
+    def setUp(self):
+        call_command('seed_site_dataset', provenance='DECLARED', verbosity=0)
+        self.operator = User.objects.get(username='seed_operator')
+        self.client.force_login(self.operator)
+
+    def test_seed_yard_schedule_matches_board_order_and_never_persists_plans(self):
+        self.assertEqual(Plan.objects.count(), 0)
+        board_response = self.client.get('/')
+        self.assertEqual(board_response.status_code, 200)
+        yard_response = self.client.get('/inventory/')
+        self.assertEqual(yard_response.status_code, 200)
+
+        # Viewing /inventory/ must never write Plan rows (prevents auto_dispatch_next from proposing to ROSY).
+        self.assertEqual(Plan.objects.count(), 0)
+
+        upcoming = yard_response.context['upcoming']
+        self.assertEqual(len(upcoming), 22)
+
+        # Open order sequence matches main control board's 지금 + 다음 jobs.
+        board = board_response.context['board']
+        board_titles = [board['current_job']['title'], *[job['title'] for job in board['next_jobs']]]
+        yard_cargo_titles = [
+            f"{item['order'].cargo.code} {item['kind_label']}"
+            for item in upcoming[:len(board_titles)]
+        ]
+        self.assertEqual(yard_cargo_titles, board_titles)
+
+        # First 8 orders are previewed in memory; the rest are capped with '3D 준비 안 됨'.
+        self.assertTrue(all(item['scene'] is not None for item in upcoming[:8]))
+        self.assertTrue(all(item['scene'] is None and item['preview_skipped'] for item in upcoming[8:]))
+        self.assertIn('3D 준비 안 됨', yard_response.content.decode())
+
+        # First outbound (C-1) has a 5-step 3D scene (rehandle C-9, C-2 -> outbound C-1 -> return C-2, C-9).
+        by_code = {item['order'].cargo.code: item for item in upcoming}
+        first_outbound = by_code['C-1']
+        self.assertEqual(len(first_outbound['arrows']), 5)
+        self.assertEqual(len(first_outbound['scene']['frames']), 6)
+        self.assertEqual(
+            [a['phase'] for a in first_outbound['arrows']],
+            ['재취급', '재취급', '반출', '복귀', '복귀'],
+        )
+
+        # Sequential inbounds (C-5, C-8, C-18) advance spatial_snap so each gets a distinct destination.
+        first_inbound = by_code['C-5']
+        self.assertIsNotNone(first_inbound['scene'])
+        self.assertEqual(len(first_inbound['scene']['frames']), 2)
+        belt_box = next(b for b in first_inbound['scene']['frames'][0]['boxes'] if b['id'] == 'C-5')
+        yard_box = next(b for b in first_inbound['scene']['frames'][1]['boxes'] if b['id'] == 'C-5')
+        self.assertEqual(belt_box['area'], 'belt')
+        self.assertEqual((yard_box['area'], yard_box['row'], yard_box['column'], yard_box['level']), ('yard', 2, 4, 2))
+        self.assertEqual(first_inbound['scene']['frames'][1]['move']['source'], 'belt')
+        self.assertEqual(first_inbound['scene']['frames'][1]['move']['destination'], 'yard-r2-c4-l2')
+        self.assertEqual(first_inbound['arrows'][0]['source'], '반입(컨베이어)')
+        self.assertEqual(first_inbound['arrows'][0]['destination'], '2행 2열 2층')
+        tier1_inbound_targets = [by_code[c]['target_label'] for c in ('C-5', 'C-8', 'C-18')]
+        self.assertEqual(len(set(tier1_inbound_targets)), 3)
+        self.assertEqual(tier1_inbound_targets, ['→ 2행 2열 2층', '→ 2행 3열 2층', '→ 2행 2열 3층'])
+
+        # Inbound C-6 (after outbound C-3) uses the slot freed by C-3 (row=1, col=4, level=2 -> 2행 1열 2층).
+        self.assertEqual(by_code['C-6']['target_label'], '→ 2행 1열 2층')
+        self.assertNotIn('C-3', {b['id'] for b in by_code['C-6']['scene']['frames'][0]['boxes']})
+        # Outbound chain is bounded to outbound orders within the first 8 queue items.
+        chain = yard_response.context['outbound_chain']
+        self.assertIsNotNone(chain)
+        self.assertEqual(chain['cargo_codes'], ['C-1', 'C-4', 'C-3'])
+
+        # 3D scene JSON carries container color, confirmation flag, priority tier, and basic cargo metadata.
+        yard_boxes = {b['id']: b for b in yard_response.context['yard_scene']['frames'][0]['boxes']}
+        self.assertEqual(yard_boxes['C-1']['color'], 'pink')
+        self.assertTrue(yard_boxes['C-1']['color_confirmed'])
+        self.assertEqual(yard_boxes['C-1']['priority_tier'], 'urgent')
+        self.assertEqual(yard_boxes['C-1']['priority_group'], 1)
+        self.assertEqual(yard_boxes['C-1']['shipper'], '한진특송')
+        self.assertEqual(yard_boxes['C-1']['voyage'], 'V-BUSAN-01')
+        self.assertTrue(yard_boxes['C-1']['cutoff'])
+        self.assertEqual(yard_boxes['C-9']['color'], 'orange')
+        self.assertEqual(yard_boxes['C-9']['priority_tier'], 'normal')
+        self.assertEqual(yard_boxes['C-14']['color'], 'sky')
+        self.assertFalse(yard_boxes['C-14']['color_confirmed'])
+        self.assertEqual(yard_boxes['C-14']['priority_tier'], 'priority')
+        # Inbound C-18 preview carries yellow color on the belt/yard frame.
+        c18_box = next(b for b in by_code['C-18']['scene']['frames'][0]['boxes'] if b['id'] == 'C-18')
+        self.assertEqual((c18_box['color'], c18_box['color_confirmed'], c18_box['priority_tier']), ('yellow', False, 'urgent'))
+        html = yard_response.content.decode()
+        self.assertIn('class="scene-tier-legend"', html)
+        self.assertIn('긴급', html)
+        self.assertIn('우선', html)
+        self.assertIn('일반', html)
+        self.assertEqual(Plan.objects.count(), 0)

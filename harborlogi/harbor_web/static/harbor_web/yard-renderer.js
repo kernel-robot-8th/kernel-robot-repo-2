@@ -1,15 +1,185 @@
 import {transposeArea, transposeBox, transposePoint} from './yard-display.mjs';
+import {
+  DEFAULT_FIT_PADDING,
+  FOCUS_FIT_PADDING,
+  badgeColorsForBox,
+  computeFitDistance,
+  layoutNameplates,
+  resolvePriorityTier,
+} from './yard-visuals.mjs';
 import * as THREE from './vendor/three-0.186.1/three.module.js';
 import {OrbitControls} from './vendor/three-0.186.1/OrbitControls.js';
-import {TransformControls} from './vendor/three-0.186.1/TransformControls.js';
 
-export function createRenderer(canvas, areas, {onSelect, onTransform, onError, colors = {}, showVolumes = false, transpose = false} = {}) {
+export function bindDragInteraction({
+  canvas,
+  win = typeof window !== 'undefined' ? window : null,
+  orbit,
+  isEditable,
+  getSelected,
+  pickHitBox,
+  getStartPosition,
+  restorePosition,
+  resetOutline,
+  updatePreview,
+  clearDragVisuals,
+  onSelect,
+  onDrop,
+  invalidate,
+}) {
+  const activePointers = new Set();
+  let pointer = null, multiPointer = false, drag = null;
+
+  function endDrag(apply) {
+    if (!drag) return;
+    const finished = drag;
+    drag = null;
+    orbit.enabled = true;
+    clearDragVisuals?.();
+    resetOutline?.(finished.id);
+    if (finished.active) {
+      if (apply) {
+        onDrop?.(finished.id, finished.target);
+      } else {
+        restorePosition?.(finished.id, finished.startPos);
+      }
+      invalidate?.();
+    } else if (apply) {
+      onSelect?.(finished.id);
+    }
+  }
+  function cancelDrag() {
+    if (!drag) return;
+    const pointerId = drag.pointerId;
+    activePointers.delete(pointerId);
+    if (!activePointers.size) multiPointer = false;
+    endDrag(false);
+    try { canvas.releasePointerCapture?.(pointerId); } catch (_) {}
+    pointer = null;
+  }
+  function pointerDown(event) {
+    if (event.button !== 0) return;
+    activePointers.add(event.pointerId);
+    if (activePointers.size > 1) {
+      multiPointer = true;
+      cancelDrag();
+    }
+    if (multiPointer) { pointer = null; return; }
+    if (isEditable()) {
+      const hitId = pickHitBox(event);
+      if (hitId) {
+        orbit.enabled = false;
+        drag = {
+          id: hitId,
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          active: false,
+          target: null,
+          startPos: getStartPosition(hitId),
+        };
+        try { canvas.setPointerCapture?.(event.pointerId); } catch (_) {}
+        pointer = null;
+        return;
+      }
+    }
+    pointer = {x: event.clientX, y: event.clientY, id: event.pointerId, moved: false};
+  }
+  function pointerMove(event) {
+    if (drag && drag.pointerId === event.pointerId) {
+      if (!drag.active && Math.hypot(drag.startX - event.clientX, drag.startY - event.clientY) > 4) {
+        drag.active = true;
+        canvas.dataset.dragging = 'true';
+        if (getSelected?.() !== drag.id) onSelect?.(drag.id);
+      }
+      if (drag.active) {
+        const resolved = updatePreview?.(drag.id, event);
+        if (resolved !== undefined) drag.target = resolved;
+      }
+      return;
+    }
+    if (pointer?.id === event.pointerId && Math.hypot(pointer.x - event.clientX, pointer.y - event.clientY) > 5)
+      pointer.moved = true;
+  }
+  function pointerCancel(event) {
+    activePointers.delete(event.pointerId);
+    if (!activePointers.size) multiPointer = false;
+    if (drag && drag.pointerId === event.pointerId) {
+      endDrag(false);
+      try { canvas.releasePointerCapture?.(event.pointerId); } catch (_) {}
+    }
+    pointer = null;
+  }
+  function lostPointerCapture(event) {
+    if (drag && drag.pointerId === event.pointerId) {
+      activePointers.delete(event.pointerId);
+      if (!activePointers.size) multiPointer = false;
+      endDrag(false);
+      pointer = null;
+    }
+  }
+  function pointerUp(event) {
+    activePointers.delete(event.pointerId);
+    const suppressPick = multiPointer;
+    if (!activePointers.size) multiPointer = false;
+    if (drag && drag.pointerId === event.pointerId) {
+      endDrag(!suppressPick);
+      try { canvas.releasePointerCapture?.(event.pointerId); } catch (_) {}
+      return;
+    }
+    if (suppressPick) { pointer = null; return; }
+    if (!pointer || pointer.id !== event.pointerId) return;
+    const start = pointer; pointer = null;
+    if (start.moved || Math.hypot(start.x - event.clientX, start.y - event.clientY) > 5) return;
+    onSelect?.(pickHitBox(event));
+  }
+  function windowKeyDown(event) {
+    if (event.key === 'Escape' && drag) {
+      event.preventDefault?.();
+      cancelDrag();
+    }
+  }
+  function windowBlur() {
+    activePointers.clear();
+    multiPointer = false;
+    pointer = null;
+    if (drag) endDrag(false);
+  }
+  canvas.addEventListener('pointerdown', pointerDown, {capture: true});
+  canvas.addEventListener('pointermove', pointerMove);
+  canvas.addEventListener('pointercancel', pointerCancel);
+  canvas.addEventListener('lostpointercapture', lostPointerCapture);
+  canvas.addEventListener('pointerup', pointerUp);
+  win?.addEventListener('keydown', windowKeyDown);
+  win?.addEventListener('blur', windowBlur);
+  return {
+    endDrag,
+    isDragging: () => Boolean(drag),
+    dispose() {
+      endDrag(false);
+      canvas.removeEventListener('pointerdown', pointerDown, {capture: true});
+      canvas.removeEventListener('pointermove', pointerMove);
+      canvas.removeEventListener('pointercancel', pointerCancel);
+      canvas.removeEventListener('lostpointercapture', lostPointerCapture);
+      canvas.removeEventListener('pointerup', pointerUp);
+      win?.removeEventListener('keydown', windowKeyDown);
+      win?.removeEventListener('blur', windowBlur);
+    },
+  };
+}
+
+export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, onError, colors = {}, showVolumes = false, transpose = false} = {}) {
   if (transpose) areas = areas.map(transposeArea);
   const context = canvas.getContext('webgl2', {antialias: true, preserveDrawingBuffer: true});
   if (!context) throw new Error('WebGL2 is unavailable');
-  const palette = {target: '#112c3f', blocker: '#fe6d08', stored: '#2cbbb7',
-    line: '#d7e3e9', text: '#17364b', muted: '#506878', floor: '#ffffff',
-    white: '#ffffff', canvas: '#f4f8fb', ...Object.fromEntries(Object.entries(colors).filter(([, v]) => v))};
+  const cargoPalette = Object.fromEntries(Object.entries(colors.cargo || {}).filter(([, v]) => v));
+  const palette = {
+    target: '#112c3f', blocker: '#fe6d08', stored: '#2cbbb7', danger: '#b72d43',
+    tierUrgent: '#b72d43', tierPriority: '#b94d00', tierNormal: '#112c3f', tierNeutral: '#506878',
+    cream: '#fcf1d9', line: '#d7e3e9', text: '#17364b', muted: '#506878', floor: '#ffffff',
+    white: '#ffffff', canvas: '#f4f8fb',
+    ...Object.fromEntries(Object.entries(colors).filter(([k, v]) => k !== 'cargo' && v)),
+    cargo: cargoPalette,
+  };
   const renderer = new THREE.WebGLRenderer({canvas, context, antialias: true, preserveDrawingBuffer: true});
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
@@ -24,11 +194,6 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
   orbit.minDistance = .4;
   orbit.maxDistance = 300;
   orbit.maxPolarAngle = Math.PI * .49;
-  const transform = new TransformControls(camera, canvas);
-  transform.setMode('translate');
-  transform.setTranslationSnap(1);
-  transform.setSize(.85);
-  scene.add(transform.getHelper());
   scene.add(new THREE.HemisphereLight(palette.white, palette.muted, 2.2));
   const light = new THREE.DirectionalLight(palette.white, 3);
   light.position.set(-8, 18, 10);
@@ -50,22 +215,37 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
   const cube = keep(new THREE.BoxGeometry(1, 1, 1));
   const plane = keep(new THREE.PlaneGeometry(1, 1));
   const edges = keep(new THREE.EdgesGeometry(cube));
-  const materials = Object.fromEntries(['target', 'blocker', 'stored'].map(role =>
-    [role, keep(new THREE.MeshStandardMaterial({color: palette[role], roughness: .6, metalness: .25}))]));
+  const cargoMaterials = Object.fromEntries(Object.entries(palette.cargo).map(([name, hex]) =>
+    [name, keep(new THREE.MeshStandardMaterial({color: hex, roughness: .52, metalness: .18}))]));
+  const neutralMaterial = keep(new THREE.MeshStandardMaterial({color: palette.stored, roughness: .58, metalness: .22}));
+  const targetFrameMaterial = keep(new THREE.MeshBasicMaterial({color: palette.target}));
+  const blockerFrameMaterial = keep(new THREE.MeshBasicMaterial({color: palette.blocker}));
   const metal = keep(new THREE.MeshStandardMaterial({color: palette.muted, roughness: .5, metalness: .55}));
-  const edgeMaterial = keep(new THREE.LineBasicMaterial({color: palette.text, transparent: true, opacity: .55}));
+  const edgeMaterial = keep(new THREE.LineBasicMaterial({color: palette.text, transparent: true, opacity: .45}));
+  const targetOutlineMaterial = keep(new THREE.LineBasicMaterial({color: palette.target}));
+  const blockerOutlineMaterial = keep(new THREE.LineDashedMaterial({color: palette.blocker, dashSize: .14, gapSize: .08}));
   const selectedMaterial = keep(new THREE.LineBasicMaterial({color: palette.blocker}));
+  const dangerMaterial = keep(new THREE.LineBasicMaterial({color: palette.danger}));
+  const validDropFill = keep(new THREE.MeshBasicMaterial({color: palette.stored, transparent: true, opacity: .28, depthWrite: false}));
+  const invalidDropFill = keep(new THREE.MeshBasicMaterial({color: palette.danger, transparent: true, opacity: .38, depthWrite: false}));
+  const validDropEdge = keep(new THREE.LineBasicMaterial({color: palette.stored}));
   const floorMaterial = keep(new THREE.MeshStandardMaterial({color: palette.floor, roughness: 1}));
   const gridMaterial = keep(new THREE.LineBasicMaterial({color: palette.line}));
   const markerMaterial = keep(new THREE.LineDashedMaterial({color:palette.blocker, dashSize:.12, gapSize:.07}));
   const locationMarker = new THREE.LineSegments(edges, markerMaterial);
   locationMarker.computeLineDistances(); locationMarker.scale.set(.94, .94, .94);
   locationMarker.visible = false; scene.add(locationMarker);
+  const dropPreview = new THREE.Group();
+  const dropFillMesh = new THREE.Mesh(cube, validDropFill);
+  const dropEdgeMesh = new THREE.LineSegments(edges, validDropEdge);
+  dropPreview.add(dropFillMesh, dropEdgeMesh);
+  dropPreview.visible = false;
+  scene.add(dropPreview);
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const planeHit = new THREE.Vector3();
   const models = new Map();
-  const activePointers = new Set();
   let selected = null, isolated = null, editable = false, fitted = false;
-  let disposed = false, failed = false, raf = 0, pointer = null, multiPointer = false,
-    draggedGizmo = false, revision = 0, renderRevision = 0;
+  let disposed = false, failed = false, raf = 0, revision = 0, renderRevision = 0;
   let width = 0, height = 0;
 
   function logicalPoint({x, y, z}) {
@@ -75,10 +255,60 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
   function invalidate() {
     if (!disposed && !failed && !raf) raf = requestAnimationFrame(draw);
   }
+  const nameplateWorldPos = new THREE.Vector3();
+  const nameplateProjected = new THREE.Vector3();
+  const NAMEPLATE_BASE_W = 0.96;
+  const NAMEPLATE_BASE_H = 0.36;
+
+  function updateNameplates() {
+    if (!models.size || !width || !height) return;
+    camera.updateMatrixWorld();
+    const tanHalfFov = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const items = [];
+    models.forEach((model, id) => {
+      if (!model.group.visible) {
+        model.nameplate.visible = false;
+        return;
+      }
+      model.group.updateMatrixWorld();
+      model.nameplate.getWorldPosition(nameplateWorldPos);
+      const dist = Math.max(0.2, camera.position.distanceTo(nameplateWorldPos));
+      nameplateProjected.copy(nameplateWorldPos).project(camera);
+      if (nameplateProjected.z < -1 || nameplateProjected.z > 1) {
+        model.nameplate.visible = false;
+        return;
+      }
+      const px = (nameplateProjected.x * 0.5 + 0.5) * width;
+      const py = (-nameplateProjected.y * 0.5 + 0.5) * height;
+      const pxPerWorld = height / (2 * dist * tanHalfFov);
+      const priority = id === selected ? 3 : model.role === 'target' ? 2 : model.role === 'blocker' ? 1 : 0;
+      items.push({
+        id,
+        x: px,
+        y: py,
+        width: Math.max(28, NAMEPLATE_BASE_W * pxPerWorld),
+        height: Math.max(14, NAMEPLATE_BASE_H * pxPerWorld),
+        priority,
+        depth: nameplateProjected.z,
+      });
+    });
+    const layout = layoutNameplates(items);
+    models.forEach((model, id) => {
+      const entry = layout.get(id);
+      if (!entry || !entry.visible) {
+        model.nameplate.visible = false;
+        return;
+      }
+      model.nameplate.visible = true;
+      model.nameplate.scale.set(NAMEPLATE_BASE_W * entry.scale, NAMEPLATE_BASE_H * entry.scale, 1);
+    });
+  }
+
   function draw() {
     raf = 0;
     if (disposed || failed) return;
     const changed = orbit.update();
+    updateNameplates();
     renderer.render(scene, camera);
     canvas.dataset.renderedPositions = JSON.stringify(Object.fromEntries([...models].map(([id, model]) =>
       [id, logicalPoint(model.group.position)])));
@@ -90,16 +320,6 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     invalidate();
   }
   orbit.addEventListener('change', cameraChanged);
-  transform.addEventListener('change', invalidate);
-  transform.addEventListener('dragging-changed', event => {
-    orbit.enabled = !event.value;
-    if (event.value) draggedGizmo = true;
-  });
-  transform.addEventListener('mouseUp', () => {
-    if (transform.object && editable) {
-      onTransform?.(transform.object.userData.id, logicalPoint(transform.object.position));
-    }
-  });
 
   function label(text, foreground, background) {
     const surface = document.createElement('canvas');
@@ -141,19 +361,92 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     scene.add(sign);
   });
 
+  function makeNameplate(text, {bg, fg, border}) {
+    const surface = document.createElement('canvas');
+    surface.width = 256; surface.height = 96;
+    const ctx = surface.getContext('2d');
+    const pad = 8, radius = 24, rw = surface.width - pad * 2, rh = surface.height - pad * 2;
+    ctx.beginPath();
+    ctx.moveTo(pad + radius, pad);
+    ctx.lineTo(pad + rw - radius, pad);
+    ctx.quadraticCurveTo(pad + rw, pad, pad + rw, pad + radius);
+    ctx.lineTo(pad + rw, pad + rh - radius);
+    ctx.quadraticCurveTo(pad + rw, pad + rh, pad + rw - radius, pad + rh);
+    ctx.lineTo(pad + radius, pad + rh);
+    ctx.quadraticCurveTo(pad, pad + rh, pad, pad + rh - radius);
+    ctx.lineTo(pad, pad + radius);
+    ctx.quadraticCurveTo(pad, pad, pad + radius, pad);
+    ctx.closePath();
+    ctx.fillStyle = bg;
+    ctx.fill();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = border;
+    ctx.stroke();
+    ctx.fillStyle = fg;
+    ctx.font = 'bold 52px "Segoe UI", "Malgun Gothic", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(text), surface.width / 2, surface.height / 2 + 2, rw - 20);
+    const texture = new THREE.CanvasTexture(surface);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.SpriteMaterial({map: texture, transparent: true, depthTest: false, depthWrite: false});
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(NAMEPLATE_BASE_W, NAMEPLATE_BASE_H, 1);
+    sprite.renderOrder = 10;
+    return {sprite, texture, material};
+  }
+
+  function makeRoleFrame(w, h, d, width, depth, role) {
+    if (role !== 'target' && role !== 'blocker') return null;
+    const t = 0.05;
+    const cx = width / 2, cy = h / 2 + 0.03, cz = depth / 2;
+    const hw = w / 2 + 0.015, hh = h / 2 + 0.015, hd = d / 2 + 0.015;
+    const bars = [
+      [cx, cy + hh, cz - hd, w + 0.04, t, t],
+      [cx, cy + hh, cz + hd, w + 0.04, t, t],
+      [cx - hw, cy + hh, cz, t, t, d + 0.04],
+      [cx + hw, cy + hh, cz, t, t, d + 0.04],
+      [cx, cy - hh, cz - hd, w + 0.04, t, t],
+      [cx, cy - hh, cz + hd, w + 0.04, t, t],
+      [cx - hw, cy - hh, cz, t, t, d + 0.04],
+      [cx + hw, cy - hh, cz, t, t, d + 0.04],
+      [cx - hw, cy, cz - hd, t, h + 0.03, t],
+      [cx + hw, cy, cz - hd, t, h + 0.03, t],
+      [cx - hw, cy, cz + hd, t, h + 0.03, t],
+      [cx + hw, cy, cz + hd, t, h + 0.03, t],
+    ];
+    const mesh = new THREE.InstancedMesh(cube, role === 'target' ? targetFrameMaterial : blockerFrameMaterial, bars.length);
+    const matrix = new THREE.Matrix4(), quaternion = new THREE.Quaternion();
+    bars.forEach(([x, y, z, sx, sy, sz], i) => {
+      matrix.compose(new THREE.Vector3(x, y, z), quaternion, new THREE.Vector3(sx, sy, sz));
+      mesh.setMatrixAt(i, matrix);
+    });
+    return mesh;
+  }
+
+  function boxSignature(box) {
+    return `${box.width}/${box.depth}/${box.role}/${box.color || ''}/${resolvePriorityTier(box)}`;
+  }
+
   function makeBox(box) {
     const group = new THREE.Group();
     group.userData.id = box.id;
     const w = box.width - .1, d = box.depth - .1, h = .82;
-    const material = materials[box.role] || materials.stored;
+    const colorKey = typeof box.color === 'string' ? box.color.trim().toLowerCase() : '';
+    const material = cargoMaterials[colorKey] || neutralMaterial;
     const body = new THREE.Mesh(cube, material);
     body.position.set(box.width / 2, h / 2 + .03, box.depth / 2);
     body.scale.set(w, h, d);
     body.castShadow = true; body.receiveShadow = true;
     group.add(body);
-    const outline = new THREE.LineSegments(edges, edgeMaterial);
+    const baseOutlineMaterial = box.role === 'target' ? targetOutlineMaterial
+      : box.role === 'blocker' ? blockerOutlineMaterial : edgeMaterial;
+    const outline = new THREE.LineSegments(edges, baseOutlineMaterial);
     outline.position.copy(body.position); outline.scale.copy(body.scale);
+    if (box.role === 'blocker') outline.computeLineDistances();
     group.add(outline);
+    const roleFrame = makeRoleFrame(w, h, d, box.width, box.depth, box.role);
+    if (roleFrame) group.add(roleFrame);
     const pieces = [];
     for (let x = .16; x < w; x += .16) {
       for (const z of [.045, box.depth - .045]) pieces.push([x + .05, h / 2 + .03, z, .035, h - .08, .035]);
@@ -176,83 +469,118 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
       posts.setMatrixAt(postIndex++, matrix);
     }
     group.add(posts);
-    const text = label(box.id, palette.white, palette[box.role] || palette.stored);
-    for (const face of ['front', 'back', 'top']) {
-      const top = face === 'top';
-      const sign = new THREE.Mesh(plane, text.material);
-      sign.scale.set(Math.min(w * .8, 1.2), Math.min(d * .5, .3), 1);
-      sign.position.set(box.width / 2, top ? h + .055 : .46,
-        top ? box.depth / 2 : face === 'front' ? box.depth - .018 : .018);
-      sign.rotation.set(top ? -Math.PI / 2 : 0, face === 'back' ? Math.PI : 0, 0);
-      group.add(sign);
-    }
+    const badge = makeNameplate(box.id, badgeColorsForBox(box, palette));
+    badge.sprite.position.set(box.width / 2, h + .30, box.depth / 2);
+    group.add(badge.sprite);
     scene.add(group);
-    return {group, body, outline, ribs, posts, text, signature: `${box.width}/${box.depth}/${box.role}`};
+    return {
+      group, body, outline, baseOutlineMaterial, roleFrame, ribs, posts,
+      nameplate: badge.sprite, badge, role: box.role,
+      displayWidth: box.width, displayDepth: box.depth,
+      signature: boxSignature(box),
+    };
   }
   function removeBox(model) {
     scene.remove(model.group);
     model.ribs.dispose(); model.posts.dispose();
-    model.text.texture.dispose(); model.text.material.dispose();
+    model.roleFrame?.dispose();
+    model.badge.texture.dispose(); model.badge.material.dispose();
+  }
+  function clearDragVisuals() {
+    dropPreview.visible = false;
+    delete canvas.dataset.dragging;
+    delete canvas.dataset.dropValid;
+    delete canvas.dataset.dropTarget;
   }
   function syncSelection() {
-    transform.detach();
     models.forEach((model, id) => {
       model.group.visible = isolated === null || id === isolated;
-      model.outline.material = id === selected ? selectedMaterial : edgeMaterial;
+      model.outline.material = id === selected ? selectedMaterial : model.baseOutlineMaterial;
     });
-    const model = models.get(selected);
-    if (editable && model?.group.visible) transform.attach(model.group);
     invalidate();
   }
   function setBoxes(boxes) {
     if (transpose) boxes = boxes.map(transposeBox);
     const ids = new Set(boxes.map(box => box.id));
-    transform.detach();
     models.forEach((model, id) => { if (!ids.has(id)) { removeBox(model); models.delete(id); } });
     boxes.forEach(box => {
       let model = models.get(box.id);
-      if (model && model.signature !== `${box.width}/${box.depth}/${box.role}`) {
+      if (model && model.signature !== boxSignature(box)) {
         removeBox(model); models.delete(box.id); model = null;
       }
       if (!model) { model = makeBox(box); models.set(box.id, model); }
       model.group.position.set(box.x, box.z, box.y);
+      const hasBoxAbove = boxes.some(other =>
+        other.id !== box.id &&
+        other.z > box.z &&
+        other.x < box.x + box.width && box.x < other.x + other.width &&
+        other.y < box.y + box.depth && box.y < other.y + other.depth
+      );
+      model.nameplate.position.set(model.displayWidth / 2, hasBoxAbove ? .46 : 1.12, model.displayDepth / 2);
     });
     canvas.dataset.boxCount = String(boxes.length);
     syncSelection();
     if (!fitted) { fit(); fitted = true; }
   }
-  function bounds(id) {
-    const result = new THREE.Box3();
-    if (id === '@location' && locationMarker.visible) result.expandByObject(locationMarker);
-    else if (id && models.has(id)) result.expandByObject(models.get(id).group);
-    else {
-      areas.forEach(a => {
-        result.expandByPoint(new THREE.Vector3(a.x, 0, a.y));
-        result.expandByPoint(new THREE.Vector3(a.x + a.columns, .5, a.y + a.rows + .8));
-      });
-      models.forEach(model => { if (model.group.visible) result.expandByObject(model.group); });
+  function fitPoints(id) {
+    const points = [];
+    if (id === '@location' && locationMarker.visible) {
+      const box = new THREE.Box3().expandByObject(locationMarker);
+      for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z])
+        points.push({x, y, z});
+      return points;
     }
-    if (result.isEmpty()) result.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, 1, 1));
-    return result;
+    if (id && models.has(id)) {
+      const box = new THREE.Box3().expandByObject(models.get(id).body);
+      for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z])
+        points.push({x, y, z});
+      return points;
+    }
+    areas.forEach(a => {
+      for (const x of [a.x, a.x + a.columns]) {
+        for (const z of [a.y, a.y + a.rows + .35]) {
+          points.push({x, y: 0, z});
+          points.push({x, y: .4, z});
+        }
+      }
+    });
+    models.forEach(model => {
+      if (!model.group.visible) return;
+      const gx = model.group.position.x, gy = model.group.position.y, gz = model.group.position.z;
+      for (const x of [gx, gx + model.displayWidth]) {
+        for (const y of [gy, gy + 1.05]) {
+          for (const z of [gz, gz + model.displayDepth]) {
+            points.push({x, y, z});
+          }
+        }
+      }
+    });
+    if (!points.length) {
+      points.push({x: 0, y: 0, z: 0}, {x: 1, y: 1, z: 1});
+    }
+    return points;
   }
   function fit(id) {
-    const box = bounds(id), center = box.getCenter(new THREE.Vector3());
+    const points = fitPoints(id);
+    const box = new THREE.Box3();
+    points.forEach(p => box.expandByPoint(new THREE.Vector3(p.x, p.y, p.z)));
+    const center = box.getCenter(new THREE.Vector3());
     const direction = camera.position.clone().sub(orbit.target).normalize();
     const right = new THREE.Vector3().crossVectors(camera.up, direction).normalize();
     const up = new THREE.Vector3().crossVectors(direction, right).normalize();
-    const tanY = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-    const tanX = tanY * camera.aspect;
-    let distance = orbit.minDistance;
-    // Fit each perspective corner; a bounding sphere wastes space on long yard slabs.
-    for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y])
-      for (const z of [box.min.z, box.max.z]) {
-        const corner = new THREE.Vector3(x, y, z).sub(center);
-        const depth = corner.dot(direction);
-        distance = Math.max(distance, depth + Math.abs(corner.dot(right)) * 1.12 / tanX,
-          depth + Math.abs(corner.dot(up)) * 1.12 / tanY, depth + camera.near * 2);
-      }
+    const distance = computeFitDistance(
+      points,
+      center,
+      direction,
+      right,
+      up,
+      camera.fov,
+      camera.aspect,
+      {padding: id ? FOCUS_FIT_PADDING : DEFAULT_FIT_PADDING, minDistance: orbit.minDistance, near: camera.near},
+    );
     orbit.target.copy(center);
     camera.position.copy(center).addScaledVector(direction, distance);
+    canvas.dataset.fitDistance = String(Number(distance.toFixed(3)));
     orbit.update(); cameraChanged();
   }
   function view(name) {
@@ -269,38 +597,71 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     camera.position.copy(orbit.target).add(offset); orbit.update(); cameraChanged();
   }
   const raycaster = new THREE.Raycaster();
-  function pointerDown(event) {
-    if (event.button !== 0) return;
-    activePointers.add(event.pointerId);
-    if (activePointers.size > 1) multiPointer = true;
-    if (multiPointer) { pointer = null; return; }
-    pointer = {x: event.clientX, y: event.clientY, id: event.pointerId, moved: false};
-    draggedGizmo = transform.dragging || !!transform.axis;
-  }
-  function pointerMove(event) {
-    if (pointer?.id === event.pointerId && Math.hypot(pointer.x - event.clientX, pointer.y - event.clientY) > 5)
-      pointer.moved = true;
-  }
-  function pointerCancel(event) {
-    activePointers.delete(event.pointerId);
-    if (!activePointers.size) multiPointer = false;
-    pointer = null;
-  }
-  function pointerUp(event) {
-    activePointers.delete(event.pointerId);
-    const suppressPick = multiPointer;
-    if (!activePointers.size) multiPointer = false;
-    if (suppressPick) { pointer = null; return; }
-    if (!pointer || pointer.id !== event.pointerId) return;
-    const start = pointer; pointer = null;
-    if (draggedGizmo || start.moved || Math.hypot(start.x - event.clientX, start.y - event.clientY) > 5) return;
+  function setRayFromEvent(event) {
     const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return false;
     raycaster.setFromCamera(new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1,
       -(event.clientY - rect.top) / rect.height * 2 + 1), camera);
+    return true;
+  }
+  function pickHitBox(event) {
+    if (!setRayFromEvent(event)) return null;
     const visible = [...models.values()].filter(m => m.group.visible).map(m => m.body);
     const hit = raycaster.intersectObjects(visible, false)[0];
-    onSelect?.(hit ? hit.object.parent.userData.id : null);
+    return hit ? hit.object.parent.userData.id : null;
   }
+  function updateDragPreview(id, event) {
+    if (!setRayFromEvent(event)) return undefined;
+    if (!raycaster.ray.intersectPlane(groundPlane, planeHit)) return undefined;
+    const model = models.get(id);
+    if (!model) return undefined;
+    const logical = logicalPoint(planeHit);
+    const target = onResolveDrop?.(id, logical) || null;
+    if (target) {
+      const shown = transpose
+        ? transposeBox({x: target.x, y: target.y, z: target.visualZ, width: target.width, depth: target.depth})
+        : {x: target.x, y: target.y, z: target.visualZ, width: target.width, depth: target.depth};
+      model.group.position.set(shown.x, shown.z, shown.y);
+      dropPreview.position.set(shown.x + shown.width / 2, shown.z + .44, shown.y + shown.depth / 2);
+      dropPreview.scale.set(shown.width, .88, shown.depth);
+      dropFillMesh.material = target.valid ? validDropFill : invalidDropFill;
+      dropEdgeMesh.material = target.valid ? validDropEdge : dangerMaterial;
+      model.outline.material = target.valid ? selectedMaterial : dangerMaterial;
+      dropPreview.visible = true;
+      canvas.dataset.dropValid = String(target.valid);
+      canvas.dataset.dropTarget = JSON.stringify(target.placement);
+    } else {
+      model.group.position.set(planeHit.x - model.displayWidth / 2, .15, planeHit.z - model.displayDepth / 2);
+      model.outline.material = dangerMaterial;
+      dropPreview.visible = false;
+      canvas.dataset.dropValid = 'false';
+      canvas.dataset.dropTarget = '';
+    }
+    invalidate();
+    return target;
+  }
+  const dragInteraction = bindDragInteraction({
+    canvas,
+    win: window,
+    orbit,
+    isEditable: () => editable,
+    getSelected: () => selected,
+    pickHitBox,
+    getStartPosition: id => models.get(id).group.position.clone(),
+    restorePosition: (id, pos) => {
+      const model = models.get(id);
+      if (model) model.group.position.copy(pos);
+    },
+    resetOutline: id => {
+      const model = models.get(id);
+      if (model) model.outline.material = id === selected ? selectedMaterial : model.baseOutlineMaterial;
+    },
+    updatePreview: updateDragPreview,
+    clearDragVisuals,
+    onSelect,
+    onDrop,
+    invalidate,
+  });
   function keyDown(event) {
     const directions = {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1]};
     if (directions[event.key]) {
@@ -326,9 +687,11 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
   function resize() {
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height || disposed || failed || (rect.width === width && rect.height === height)) return;
+    const wasHidden = width === 0 && height === 0;
     width = rect.width; height = rect.height;
     renderer.setSize(rect.width, rect.height, false);
     camera.aspect = rect.width / rect.height; camera.updateProjectionMatrix();
+    if (wasHidden && fitted) fit();
     // Resizing clears the drawing buffer; refill it before the browser paints.
     cancelAnimationFrame(raf); raf = 0;
     draw();
@@ -338,10 +701,6 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     cancelAnimationFrame(raf); raf = 0;
     onError?.(new Error('WebGL context lost'));
   }
-  canvas.addEventListener('pointerdown', pointerDown);
-  canvas.addEventListener('pointermove', pointerMove);
-  canvas.addEventListener('pointercancel', pointerCancel);
-  canvas.addEventListener('pointerup', pointerUp);
   canvas.addEventListener('keydown', keyDown);
   canvas.addEventListener('webglcontextlost', contextLost);
   const observer = new ResizeObserver(resize);
@@ -351,7 +710,7 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     setBoxes,
     select(id) { selected = id; syncSelection(); },
     setMode(mode) { orbit.mouseButtons.LEFT = mode === 'pan' ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE; },
-    setEditable(value) { editable = !!value; syncSelection(); },
+    setEditable(value) { editable = !!value; if (!editable) dragInteraction.endDrag(false); syncSelection(); },
     selectLocation(position) {
       const area = areas.find(area => area.id === position?.area);
       locationMarker.visible = Boolean(area);
@@ -366,14 +725,10 @@ export function createRenderer(canvas, areas, {onSelect, onTransform, onError, c
     resize,
     dispose() {
       if (disposed) return;
-      disposed = true; cancelAnimationFrame(raf); observer.disconnect();
-      canvas.removeEventListener('pointerdown', pointerDown);
-      canvas.removeEventListener('pointermove', pointerMove);
-      canvas.removeEventListener('pointercancel', pointerCancel);
-      canvas.removeEventListener('pointerup', pointerUp);
+      disposed = true; dragInteraction.dispose(); cancelAnimationFrame(raf); observer.disconnect();
       canvas.removeEventListener('keydown', keyDown);
       canvas.removeEventListener('webglcontextlost', contextLost);
-      orbit.dispose(); transform.dispose();
+      orbit.dispose();
       models.forEach(removeBox); models.clear();
       resources.forEach(resource => resource.dispose());
       light.shadow.dispose(); renderer.dispose();

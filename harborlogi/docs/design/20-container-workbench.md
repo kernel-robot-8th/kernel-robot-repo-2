@@ -2,7 +2,7 @@
 
 mode: Operate. 사용자 확정: 카메라 이동과 박스 배치 가상 편집 모두 제공한다. 기존 브랜드와 Django·관측/계획/실행 경계는 유지한다.
 
-Three.js의 로컬 고정 배포본으로 WebGL 모델·면/골·조명·그림자를 표현한다. OrbitControls는 회전/팬/확대, TransformControls는 선택 화물의 격자 이동 도구다. 외부 CDN을 실행 시 호출하지 않는다. 기본은 전체 맞춤이며 선택 맞춤·선택만 보기·각도 프리셋·전체화면·터치/키보드 대안을 제공한다. 카메라 이동은 재생 중 자동 framing에 의해 취소되지 않는다.
+Three.js의 로컬 고정 배포본으로 WebGL 모델·면/골·조명·그림자를 표현한다. OrbitControls는 회전/팬/확대, 가상 편집 모드의 바닥 평면 레이캐스트 자유 드래그는 선택 화물의 칸 단위 이동 도구다. 외부 CDN을 실행 시 호출하지 않는다. 기본은 전체 맞춤이며 선택 맞춤·선택만 보기·각도 프리셋·전체화면·터치/키보드 대안을 제공한다. 카메라 이동은 재생 중 자동 framing에 의해 취소되지 않는다.
 
 모듈은 DOM/업무를 모르는 scene/draft 모델, WebGL/카메라/선택 도구 렌더러, 페이지별 stage와 UI를 연결하는 controller로 나눈다. source scene은 불변 입력이고 renderer는 현재 boxes만 받는다. 숨김/재사용/종료 시 이벤트·GPU 자원을 정리한다. WebGL을 사용할 수 없으면 평면도와 원본 조회를 유지한다.
 
@@ -16,14 +16,14 @@ Three.js의 로컬 고정 배포본으로 WebGL 모델·면/골·조명·그림�
 
 | 모듈 | 호출자에게 제공하는 기능 | 소유하지 않는 것 |
 |---|---|---|
-| `yard-model.mjs` | `cloneBoxes`, `validatePlacement`, `moveBox`, `placementFromWorld`, `transit` | DOM·WebGL·업무 계획·네트워크 |
+| `yard-model.mjs` | `cloneBoxes`, `validatePlacement`, `moveBox`, `dropTargetFromWorld`, `transit` | DOM·WebGL·업무 계획·네트워크 |
 | `yard-renderer.js` | `createRenderer(canvas, areas, callbacks)` → `setBoxes/select/setMode/setEditable/fit/view/zoom/isolate/resize/dispose` | 페이지 route·계획 단계·가상 배치 승인 |
 | `yard-3d.js` | `mountYardViewer(figure)` → Promise의`destroy`; 공통 template 자동 mount, 단계·재생·로컬 편집 연결 | 저장·관측 producer·Fleet 실행 |
 
-`areas`와 `boxes`는 기존 `yard_scene.py`의 값이다. 논리 x는 열, y는 행, z는 층의0기준 anchor이며 Three 좌표로는 X/Y/Z=(x,z,y)로 표시한다. 실제 단위/좌표가 아니다. model은 source/반환값을 분리하며 방향과 width/depth·절대 anchor의 일관성을 검사한다. Renderer의 `onSelect(id)`는 선택만, `onTransform(id,{x,y,z})`는 핸들 이동의 raw anchor만 돌려준다. controller가 이를 격자로 변환해 model에 검증시킨 뒤 성공/복구된 boxes를 다시 그린다.
+`areas`와 `boxes`는 기존 `yard_scene.py`의 값이다. 논리 x는 열, y는 행, z는 층의0기준 anchor이며 Three 좌표로는 X/Y/Z=(x,z,y)로 표시한다. 실제 단위/좌표가 아니다. model은 source/반환값을 분리하며 방향과 width/depth·절대 anchor의 일관성을 검사한다. Renderer의 `onSelect(id)`는 선택만, 자유 드래그 중에는 `onResolveDrop(id,{x,y,z})`로 바닥 평면 좌표를 칸·맨 위 빈 단·유효성으로 판정해 미리보고, 놓을 때 `onDrop(id,target)`으로 controller에 전달한다. controller가 model에 검증시킨 뒤 성공/복구된 boxes를 다시 그린다.
 
 각 뷰어는 독립된 `data-yard-preview`와 공통 `yard_3d.html`을 사용한다. 같은 페이지에 여러 개를 놓으면 include에 서로 다른 `yard_scene_id`를 준다. `destroy`는 해당 DOM 인스턴스 종료용이다. 정상 BFcache 복귀에서는 인스턴스를 보존하고 크기만 갱신한다. WebGL2를 만들 수 없거나 컨텍스트가 끊기면 renderer를 종료하고 원래 평면도로 복구하며 전체 화면도 종료한다. 입력은 source로부터 만든 메모리 사본이며 새로고침/원본 복원으로 버린다.
 
 `resize`는 같은 크기에서 drawing buffer를 지우지 않는다. 실제 크기 변경에서는 카메라 aspect를 갱신하고 그 프레임에 다시 그려 전체 화면/패널 크기 변경 때 빈 캔버스가 노출되지 않게 한다. 카메라 위치·선택은 유지한다. 여러 pointer가 참여한 카메라 제스처는 마지막 pointer가 끝날 때까지 박스 선택으로 해석하지 않는다.
 
-엔진은 npm `three@0.186.1`을 SHA512로 확인한 로컬 사본이다. MIT license와 출처/수정한 import 두 줄을 vendor README에 보존한다. [OrbitControls 공식 문서](https://threejs.org/docs/pages/OrbitControls.html)와 [TransformControls 공식 문서](https://threejs.org/docs/pages/TransformControls.html)의 인터페이스를 사용한다. 모델이 있는 페이지에서만 renderer/engine을 동적으로 읽으며 CDN이나 실행 시 npm 설치를 요구하지 않는다.
+엔진은 npm `three@0.186.1`을 SHA512로 확인한 로컬 사본이다. MIT license와 출처/수정한 import 두 줄을 vendor README에 보존한다. [OrbitControls 공식 문서](https://threejs.org/docs/pages/OrbitControls.html) 인터페이스를 사용한다. 모델이 있는 페이지에서만 renderer/engine을 동적으로 읽으며 CDN이나 실행 시 npm 설치를 요구하지 않는다.

@@ -200,6 +200,22 @@
   color: var(--semantic-text-primary);
 }
 
+.yard-upcoming-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--primitive-space-1);
+  align-items: center;
+}
+
+.chip.tone-inbound {
+  background: var(--primitive-color-success-soft);
+  color: var(--primitive-color-success-ink);
+}
+
+.yard-3d canvas[data-dragging="true"] {
+  cursor: grabbing;
+}
+
 .yard-upcoming-main {
   display: grid;
   gap: var(--primitive-space-1);

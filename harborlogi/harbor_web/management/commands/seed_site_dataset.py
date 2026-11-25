@@ -1,4 +1,4 @@
-"""Seed a realistic 3x6x3 site-matched sample dataset (C-1..C-20, EPC tags, shippers, voyages, arrivals)."""
+"""Seed a realistic 3x6x3 site-matched sample dataset (C-1..C-22, physical colors, EPC tags, shippers, voyages, arrivals)."""
 from datetime import timedelta
 import json
 from pathlib import Path
@@ -19,34 +19,39 @@ from harbor_web.runtime_models import EvidenceProducerSetting
 
 SEED_CONTAINERS = [
     # Pre-arrived in yard (2 stacked columns creating realistic rehandling vs voyage cutoff trade-offs)
-    ('C-1', '부산행 냉동 컨테이너 1', '한진특송', 1, 'V-BUSAN-01', 2, (1, 1, 1), '3034257BF7194E4000000001'),
-    ('C-2', '도쿄행 정밀부품 컨테이너 2', '태평양무역', 3, 'V-LA-03', 18, (1, 1, 2), '3034257BF7194E4000000002'),
-    ('C-3', '부산행 긴급 선적 3', '대한물산', 2, 'V-BUSAN-01', 2, (1, 4, 1), '3034257BF7194E4000000003'),
-    ('C-4', '도쿄행 일반 화물 4', '대한물산', 2, 'V-TOKYO-02', 7, (1, 4, 2), '3034257BF7194E4000000004'),
+    # Physical colors from Confluence SP 41287681 (2026-11-25):
+    # C-1..C-5 pink (confirmed), C-6..C-13 orange (confirmed),
+    # C-14..C-17 sky (planned), C-18..C-20 yellow (planned), C-21..C-22 pink (planned).
+    ('C-1', '부산행 냉동 컨테이너 1', '한진특송', 1, 'V-BUSAN-01', 2, (1, 1, 1), '3034257BF7194E4000000001', 'pink', True),
+    ('C-2', '도쿄행 정밀부품 컨테이너 2', '태평양무역', 3, 'V-LA-03', 18, (1, 1, 2), '3034257BF7194E4000000002', 'pink', True),
+    ('C-3', '부산행 긴급 선적 3', '대한물산', 2, 'V-BUSAN-01', 2, (1, 4, 1), '3034257BF7194E4000000003', 'pink', True),
+    ('C-4', '도쿄행 일반 화물 4', '대한물산', 2, 'V-TOKYO-02', 7, (1, 4, 2), '3034257BF7194E4000000004', 'pink', True),
     # Sequential arrivals awaiting EPC/barcode scan & intake
-    ('C-5', '부산행 후속 입하 5', '한진특송', 1, 'V-BUSAN-01', 3, None, '3034257BF7194E4000000005'),
-    ('C-6', '도쿄행 후속 입하 6', '대한물산', 2, 'V-TOKYO-02', 8, None, '3034257BF7194E4000000006'),
-    ('C-7', 'LA행 일반 입하 7', '태평양무역', 3, 'V-LA-03', 20, None, '3034257BF7194E4000000007'),
-    ('C-8', '부산행 추가 입하 8', '한진특송', 1, 'V-BUSAN-01', 3, None, '3034257BF7194E4000000008'),
+    ('C-5', '부산행 후속 입하 5', '한진특송', 1, 'V-BUSAN-01', 3, None, '3034257BF7194E4000000005', 'pink', True),
+    ('C-6', '도쿄행 후속 입하 6', '대한물산', 2, 'V-TOKYO-02', 8, None, '3034257BF7194E4000000006', 'orange', True),
+    ('C-7', 'LA행 일반 입하 7', '태평양무역', 3, 'V-LA-03', 20, None, '3034257BF7194E4000000007', 'orange', True),
+    ('C-8', '부산행 추가 입하 8', '한진특송', 1, 'V-BUSAN-01', 3, None, '3034257BF7194E4000000008', 'orange', True),
     # More of the yard (12 of 18 places) so the board, yard and plans show a working shift, not one example.
-    ('C-9', 'LA행 일반 화물 9', '태평양무역', 3, 'V-LA-03', 22, (1, 1, 3), '3034257BF7194E4000000009'),
-    ('C-10', '도쿄행 일반 화물 10', '대한물산', 2, 'V-TOKYO-02', 9, (2, 1, 1), '3034257BF7194E4000000010'),
-    ('C-11', 'LA행 일반 화물 11', '태평양무역', 3, 'V-LA-03', 24, (2, 1, 2), '3034257BF7194E4000000011'),
-    ('C-12', '도쿄행 일반 화물 12', '대한물산', 2, 'V-TOKYO-02', 10, (2, 4, 1), '3034257BF7194E4000000012'),
-    ('C-13', 'LA행 일반 화물 13', '태평양무역', 3, 'V-LA-03', 26, (3, 1, 1), '3034257BF7194E4000000013'),
-    ('C-14', '부산행 일반 화물 14', '한진특송', 2, 'V-BUSAN-01', 4, (3, 1, 2), '3034257BF7194E4000000014'),
-    ('C-15', 'LA행 일반 화물 15', '태평양무역', 3, 'V-LA-03', 28, (3, 1, 3), '3034257BF7194E4000000015'),
-    ('C-16', '도쿄행 일반 화물 16', '대한물산', 2, 'V-TOKYO-02', 11, (3, 4, 1), '3034257BF7194E4000000016'),
+    ('C-9', 'LA행 일반 화물 9', '태평양무역', 3, 'V-LA-03', 22, (1, 1, 3), '3034257BF7194E4000000009', 'orange', True),
+    ('C-10', '도쿄행 일반 화물 10', '대한물산', 2, 'V-TOKYO-02', 9, (2, 1, 1), '3034257BF7194E4000000010', 'orange', True),
+    ('C-11', 'LA행 일반 화물 11', '태평양무역', 3, 'V-LA-03', 24, (2, 1, 2), '3034257BF7194E4000000011', 'orange', True),
+    ('C-12', '도쿄행 일반 화물 12', '대한물산', 2, 'V-TOKYO-02', 10, (2, 4, 1), '3034257BF7194E4000000012', 'orange', True),
+    ('C-13', 'LA행 일반 화물 13', '태평양무역', 3, 'V-LA-03', 26, (3, 1, 1), '3034257BF7194E4000000013', 'orange', True),
+    ('C-14', '부산행 일반 화물 14', '한진특송', 2, 'V-BUSAN-01', 4, (3, 1, 2), '3034257BF7194E4000000014', 'sky', False),
+    ('C-15', 'LA행 일반 화물 15', '태평양무역', 3, 'V-LA-03', 28, (3, 1, 3), '3034257BF7194E4000000015', 'sky', False),
+    ('C-16', '도쿄행 일반 화물 16', '대한물산', 2, 'V-TOKYO-02', 11, (3, 4, 1), '3034257BF7194E4000000016', 'sky', False),
     # More sequential arrivals (inbound examples).
-    ('C-17', '도쿄행 후속 입하 17', '대한물산', 2, 'V-TOKYO-02', 12, None, '3034257BF7194E4000000017'),
-    ('C-18', '부산행 긴급 입하 18', '한진특송', 1, 'V-BUSAN-01', 5, None, '3034257BF7194E4000000018'),
-    ('C-19', 'LA행 후속 입하 19', '태평양무역', 3, 'V-LA-03', 30, None, '3034257BF7194E4000000019'),
-    ('C-20', '부산행 후속 입하 20', '한진특송', 2, 'V-BUSAN-01', 6, None, '3034257BF7194E4000000020'),
+    ('C-17', '도쿄행 후속 입하 17', '대한물산', 2, 'V-TOKYO-02', 12, None, '3034257BF7194E4000000017', 'sky', False),
+    ('C-18', '부산행 긴급 입하 18', '한진특송', 1, 'V-BUSAN-01', 5, None, '3034257BF7194E4000000018', 'yellow', False),
+    ('C-19', 'LA행 후속 입하 19', '태평양무역', 3, 'V-LA-03', 30, None, '3034257BF7194E4000000019', 'yellow', False),
+    ('C-20', '부산행 후속 입하 20', '한진특송', 2, 'V-BUSAN-01', 6, None, '3034257BF7194E4000000020', 'yellow', False),
+    ('C-21', '도쿄행 추가 입하 21', '대한물산', 2, 'V-TOKYO-02', 14, None, '3034257BF7194E4000000021', 'pink', False),
+    ('C-22', 'LA행 추가 입하 22', '태평양무역', 3, 'V-LA-03', 32, None, '3034257BF7194E4000000022', 'pink', False),
 ]
 
 
 class Command(BaseCommand):
-    help = 'Seed realistic 3x6x3 Harbor sample dataset (C-1..C-20, EPC tags, shippers, voyages, sequential arrivals).'
+    help = 'Seed realistic 3x6x3 Harbor sample dataset (C-1..C-22, physical colors, EPC tags, shippers, voyages, sequential arrivals).'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -100,7 +105,9 @@ class Command(BaseCommand):
 
             now = timezone.now()
             placements = []
-            for code, name, shipper, s_tier, voyage, hours_until, slot, epc in SEED_CONTAINERS:
+            created_cargos = 0
+            created_inbound = 0
+            for code, name, shipper, s_tier, voyage, hours_until, slot, epc, color, color_confirmed in SEED_CONTAINERS:
                 cargo = Cargo.objects.filter(code=code).first()
                 if cargo is None:
                     cargo = services.register_cargo(
@@ -110,10 +117,13 @@ class Command(BaseCommand):
                         weight_kg=2,
                         volume_m3='0.012',
                         destination=f'{voyage} 선적',
+                        color=color,
+                        color_confirmed=color_confirmed,
                         shipper_name=shipper,
                         shipper_tier=s_tier,
                         length_cells=3,
                     )
+                    created_cargos += 1
                 if not CargoTag.objects.filter(tag_value=epc).exists():
                     tag_arrivals.bind_cargo_tag(op, cargo_id=cargo.pk, tag_value=epc, tag_kind='EPC')
                 footprint = CargoFootprint.objects.filter(cargo=cargo).order_by('-pk').first()
@@ -146,6 +156,7 @@ class Command(BaseCommand):
                             voyage_code=voyage, cutoff_at=cutoff,
                             note=f'{shipper} · 스캔 대기',
                         )
+                        created_inbound += 1
 
             seed_payload = dict(
                 schema='grid-placement-v1',
@@ -167,5 +178,6 @@ class Command(BaseCommand):
                     payload=seed_payload,
                 )
         self.stdout.write(self.style.SUCCESS(
-            f'Seeded {len(SEED_CONTAINERS)} containers (C-1..C-20) with {provenance} yard snapshot.'
+            f'Seeded {len(SEED_CONTAINERS)} containers (C-1..C-22) with {provenance} yard snapshot.'
         ))
+        self.stdout.write(f'새로 만든 화물 {created_cargos}개, 새 입고 요청 {created_inbound}건')
