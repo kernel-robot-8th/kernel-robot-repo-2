@@ -168,8 +168,8 @@ class FleetConnectionTests(TransactionTestCase):
                          io.BytesIO(json.dumps({'detail': {'code': code}}).encode()))
 
     def rest(self, code=None):
-        # workcell-observations, evidence, recheck, proposal, port-events, execution-profile probes; generic 404 = absent
-        return [self.missing(code) for _ in range(6)]
+        # workcell-observations, evidence, recheck, proposal, port-events, execution-profile, cell-plans probes; generic 404 = absent
+        return [self.missing(code) for _ in range(7)]
 
     def test_saved_connection_feeds_existing_execution_and_contains_no_token(self):
         self.save()
@@ -211,7 +211,7 @@ class FleetConnectionTests(TransactionTestCase):
                     result = bridge.check_connection(self.admin, expected_version=1)
                 self.assertEqual(result['reason'], expected)
                 self.assertNotEqual(result['status'], 'VERIFIED')
-                self.assertEqual(http.call_count, 8 if error else 1)
+                self.assertEqual(http.call_count, 9 if error else 1)
 
     def test_port_events_condition_shows_an_r_without_the_route(self):
         self.save()
@@ -221,7 +221,7 @@ class FleetConnectionTests(TransactionTestCase):
                                  (self.missing('PORT_EVENT_CURSOR_INVALID'), 'UNKNOWN'),
                                  ({'events': [], 'cursor': 'c', 'complete': True}, 'UNKNOWN')]:
             with self.subTest(expected=expected), patch('harbor.rosy_http.RosyClient._http', side_effect=[
-                    session, arm, *self.rest()[:4], answer, self.missing(None)]):
+                    session, arm, *self.rest()[:4], answer, self.missing(None), self.missing(None)]):
                 result = bridge.check_connection(self.admin, expected_version=1)
             self.assertEqual(result['conditions']['port_events'], expected)
         with self.assertRaises(ValidationError):
@@ -364,7 +364,7 @@ class FleetConnectionTests(TransactionTestCase):
         ]}]}
         with patch('harbor.rosy_http.RosyClient._http', side_effect=[
             {'principal_id': 'harbor-service', 'role': 'service'}, self.missing(),
-            held_snapshot, *[self.missing() for _ in range(5)],
+            held_snapshot, *[self.missing() for _ in range(6)],
         ]):
             result = bridge.check_connection(self.admin, expected_version=1)
         self.assertEqual(result['conditions']['arm_clear'], 'UNMET')

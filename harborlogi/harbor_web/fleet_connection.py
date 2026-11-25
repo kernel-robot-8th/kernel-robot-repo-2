@@ -7,12 +7,14 @@ import ssl
 import threading
 import time
 import uuid
+from datetime import timedelta
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from harbor.fleet_discovery import DiscoveryError, HOSTNAME
 from harbor.rosy_http import RosyClient, open_arm_incident_holds
@@ -276,7 +278,9 @@ def probe_conditions(client, result):
         # A cursor Harbor invented is refused with a coded 400 only where the route is installed; a real page would be 200.
         port_events=_probe(lambda: client.port_events(after=key, limit=1), 'PORT_EVENT_CURSOR_INVALID', 400),
         arm_clear=arm_clear,
-        **dict(zip(('arm_live', 'auto_producer'), _platform_signal(client))))
+        **dict(zip(('arm_live', 'auto_producer'), _platform_signal(client))),
+        # The cell-plan gate (ADR 0034): the request-key lookup answers a key Harbor invented with its own coded 404.
+        cell_plans=_probe(lambda: client.cell_plan_request(key), 'UNKNOWN_CELL_PLAN'))
 
 
 def check_connection(actor, *, expected_version):
@@ -284,6 +288,24 @@ def check_connection(actor, *, expected_version):
     config = connection_settings()
     if config['version'] != expected_version:
         raise ValidationError('CONNECTION_CHANGED')
+    return _check_connection(actor, config)
+
+
+SYSTEM_CHECK_AFTER = timedelta(minutes=5)  # Half of readiness.MAX_AGE, so automatic operation never sees a stale check.
+
+
+def refresh_check_as_system(*, now=None):
+    """The executor re-runs the same read-only check without a person once the stored one ages; None when not due."""
+    config = connection_settings()
+    if not (config['origin'] and config['principal'] and config['allowed'] and os.environ.get('HARBOR_FLEET_TOKEN')):
+        return None  # Nothing to check; the admin check records why.
+    last = last_check()
+    if last is not None and (now or timezone.now()) - last.created_at < SYSTEM_CHECK_AFTER:
+        return None
+    return _check_connection(None, config, source='system')
+
+
+def _check_connection(actor, config, *, source=None):
     original = fingerprint(config)
     result = dict(status='FAILED', session='NOT_CHECKED', arm='NOT_CHECKED', reason='CONNECTION_INCOMPLETE')
     token = os.environ.get('HARBOR_FLEET_TOKEN', '')
@@ -327,7 +349,7 @@ def check_connection(actor, *, expected_version):
         if original != fingerprint(connection_settings()):
             raise ValidationError('CONNECTION_CHANGED')
         Audit.objects.create(actor=actor, action='fleet.check', object_type='FleetConnection', object_id='1',
-                             detail=dict(result, fingerprint=original))
+                             detail=dict(result, fingerprint=original, **(dict(source=source) if source else {})))
     return result
 
 

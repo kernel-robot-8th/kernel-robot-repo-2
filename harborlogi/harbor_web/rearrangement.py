@@ -7,10 +7,11 @@ decision 4). Every violated condition leaves no Command and one recorded HOLD re
 """
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from harbor_web import commands
-from harbor_web.command_models import ACTIVE_COMMAND_STATES
+from harbor_web.command_models import ACTIVE_CELL_PLAN_DISPATCH_STATES, ACTIVE_COMMAND_STATES, CellPlanDispatch
 from harbor_web.coordination import serialized
 from harbor_web.models import Audit, CargoFootprint, Command, Observation, Order, Plan, RearrangeAuthorization
 from harbor_web.order_queue import queue_digest
@@ -105,15 +106,16 @@ def _record_hold(auth, reason):
 
 def _automatic_today(now):
     start = timezone.localtime(now).replace(hour=0, minute=0, second=0, microsecond=0)
-    plans = Plan.objects.filter(order__kind='REARRANGE', created_at__gte=start, command__isnull=False)
+    plans = Plan.objects.filter(Q(command__isnull=False) | Q(cell_plan_dispatches__isnull=False),
+                                order__kind='REARRANGE', created_at__gte=start).distinct()
     return sum(1 for plan in plans if plan.result.get('rearrangement', {}).get('automatic'))
 
 
 @serialized
 def auto_check(now=None):
-    """Create one REARRANGE Plan and Command when every condition holds, else record why not.
+    """Create one REARRANGE Plan and a Command (or, with the legacy gate closed, a cell-plan proposal) when every condition holds, else record why not.
 
-    Returns the Command or the HOLD reason text. Called from the executor's idle tick.
+    Returns the Command, the CellPlanDispatch or the HOLD reason text. Called from the executor's idle tick.
     """
     now = timezone.now() if now is None else now
     auth = current_authorization(now)
@@ -123,7 +125,8 @@ def auto_check(now=None):
         return _hold_with(auth, 'DAILY_LIMIT_REACHED')
     if outbound_pending():
         return _hold_with(auth, 'OUTBOUND_PENDING')
-    if Command.objects.filter(state__in=ACTIVE_COMMAND_STATES).exists():
+    if (Command.objects.filter(state__in=ACTIVE_COMMAND_STATES).exists()
+            or CellPlanDispatch.objects.filter(state__in=ACTIVE_CELL_PLAN_DISPATCH_STATES).exists()):
         return _hold_with(auth, 'OTHER_COMMAND_ACTIVE')
     observation = Observation.objects.select_related('condition').order_by('-pk').first()
     if observation is None or observation.payload.get('schema') != 'grid-placement-v1':
@@ -156,12 +159,39 @@ def _execute(auth, observation, options, now):
     # The revision must still be the newest right before the Plan is made and again before submission.
     if Observation.objects.filter(source_id=observation.source_id, pk__gt=observation.pk).exists():
         return _hold_with(auth, 'OBSERVATION_REVISION_CHANGED')
+    closed = _route_closed(observation)
+    if closed:
+        return _hold_with(auth, closed)  # no Plan while no route can take it, so a later open gate still plans
     plan = _create_plan(auth, observation, options, now)
     gate = commands.capability(plan)
     if not gate['enabled']:
-        return _hold_with(auth, gate['reason'])
+        return _propose_cell_plan(auth, plan)
     try:
         command = commands.prepare_command(auth.created_by, plan_id=plan.pk, expected_version=plan.order_version)
         return commands.submit_command(auth.created_by, command_id=command.pk, expected_version=command.version)
     except (ValidationError, Conflict, PermissionDenied):
         return _hold_with(auth, 'EXECUTION_INPUTS_UNAVAILABLE')
+
+
+def _route_closed(observation):
+    """Why no route can take an automatic rearrangement now, before a Plan is made; '' when one may."""
+    from harbor_web.command_binding import _config
+    try:
+        _config()
+        return ''  # the legacy Command route is configured; its full gate runs on the Plan
+    except Exception:
+        pass
+    from harbor_web.readiness import first_unmet_cell_plan
+    return first_unmet_cell_plan(observation)
+
+
+def _propose_cell_plan(auth, plan):
+    """A closed legacy Command gate (production ROSY has no arm-transfers) falls through to a cell-plan proposal (ADR 0034)."""
+    from harbor_web import cell_plan_dispatch
+    try:
+        row = cell_plan_dispatch.propose_automatically(plan)
+    except (ValidationError, Conflict) as error:
+        return _hold_with(auth, str(getattr(error, 'message', '') or error)[:192])
+    Audit.objects.create(actor=None, action='rearrange.cell_plan_proposed', object_type='CellPlanDispatch',
+                         object_id=str(row.pk), detail=dict(plan_id=plan.pk, authorization_id=auth.pk, automatic=True))
+    return row

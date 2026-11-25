@@ -75,6 +75,7 @@ def gate_text(code):
         'READINESS_ARM_EXECUTION_UNANNOUNCED': '플랫폼이 운영 프로필의 실물 ARM 실행을 아직 알리지 않았습니다.',
         'READINESS_EVIDENCE_PRODUCER_REQUIRED': '업무 완료 근거 생산자가 없습니다. 관리자가 사람 확인을 켜고 현장 확인자를 지정해야 합니다.',
         'READINESS_OBSERVATION_UNAUTHENTICATED': '수동·합성 관측은 운영 실행 근거가 아닙니다.',
+        'READINESS_CELL_PLAN_ROUTE_UNMET': 'R의 셀 계획 경로가 아직 응답하지 않습니다. 연동 점검표를 확인하세요.',
         'EXECUTION_INPUTS_UNAVAILABLE': '연결 기준을 읽을 수 없습니다. 설치 담당자와 원본을 확인하세요.',
         'BUSINESS_HOLD': '원래 실행을 찾았지만 업무 보류는 유지됩니다. 완료 근거를 확인하세요.',
         'CANCELLATION_REQUESTED': '취소를 요청했습니다. 실제 정지·점유 해제는 아직 확인되지 않았습니다.',
