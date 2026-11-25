@@ -19,7 +19,41 @@ from tools.integration.real_fleet_http import verify_checkout
 from tools.integration.rfid_intake import WORKCELL, sample_epc
 
 
-def run(platform, temp):
+def _complete_at_measured_slot(upstream, task, plan, evidence, *, named_camera):
+    """Drive normal Fleet admission/claim/release routes with a synthetic owner."""
+    base = "/api/fleet/pipeline"
+    owner = {"Authorization": "Bearer owner-test"}
+    operator = {"Authorization": "Bearer operator-test"}
+    def post(path, headers, body):
+        response = upstream.post(base + path, headers=headers, json=body)
+        assert response.is_success, (path, response.text)
+        return response.json()
+    ready = upstream.get(base + "/cells/cell_ab/readiness", headers=operator).raise_for_status().json()
+    post(f"/cell-plans/{plan['plan_id']}/admit", operator, dict(
+        expected_dispatch_generation=ready["dispatch_generation"], expected_stop_generation=ready["stop_generation"],
+        expected_readiness_digest=ready["readiness_digest"], expected_request_digest=plan["request_digest"]))
+    claimed = post("/cell-tasks/claim", owner, {"cell_id": "cell_ab", "task_id": task["task_id"]})
+    assert claimed["claimed"], claimed
+    h = claimed["handoff"]
+    lease = h["handoff_lease_id"]
+    place = dict(site=h["dst_site"], area=h["dst_area"], site_id=h["dst_site_id"], **h["dst_slot"])
+    measured = max(task["claimed_at"], datetime.now(timezone.utc).timestamp())
+    zone = dict(target=place, measured_at=measured, place_slot={"present": True}, z_gate={"verdict": "PASS"},
+                verified=True, basis="predefined_side_and_top_target_zones")
+    stage = dict(directive_id=task["task_id"], arm_id=h["arm_id"], task_verified=True, place=place, verification=zone,
+                 source_clearance={"site": "belt", "objects": 0},
+                 raw={"result": "placed", "attempts": [{"observed": 2 if named_camera else 1}]})
+    hardware = {"stop_event": {"ok": True, "folded": True, "state": [0] * 6}}
+    digest = "sha256:" + sha256(json.dumps(dict(task_id=task["task_id"], lease=lease, stage_result=stage,
+                                               hardware_telemetry=hardware), sort_keys=True).encode()).hexdigest()
+    receipt = dict(handoff_lease_id=lease, cell_id="cell_ab", stage_id=task["task_id"], phase="RELEASED",
+                   physical_completion=True, simulated_success=False, goal_evidence_digest=digest)
+    proof = dict(receipt=receipt, stage_result=stage, hardware_telemetry=hardware)
+    evidence[task["task_id"]] = proof
+    post(f"/cell-tasks/{task['task_id']}/complete", owner, dict(phase="RELEASED", goal_evidence_digest=digest, **proof))
+
+
+def run(platform, temp, *, named_camera=False):
     enable(platform)
     import tools
     tools.__path__.append(str(platform / "tools"))
@@ -63,8 +97,9 @@ def run(platform, temp):
                 holdings=[], placements=[])
     services.record_observation(actor, source_id="yard", source_revision="empty", observed_at=now,
                                 condition=condition, provenance="DECLARED", payload=yard)
-    principals = {sha256(token.encode()).hexdigest(): SitePrincipal(name, "service")
-                  for token, name in (("parent-test", "control-unit:R"), ("harbor-test", "harbor-test"))}
+    principals = {sha256(token.encode()).hexdigest(): SitePrincipal(name, role) for token, name, role in (
+        ("parent-test", "control-unit:R", "service"), ("harbor-test", "harbor-test", "service"),
+        ("owner-test", "omx-owner", "service"), ("operator-test", "approver", "operator"))}
     auth = build_authorize(None, principals, None)
     viewer, operator, _, proposer = build_role_guards(auth, principals)
     peer_headers = {"Authorization": "Bearer parent-test"}
@@ -95,12 +130,14 @@ def run(platform, temp):
     maps = SimpleNamespace(active=lambda: (1, site, graph, None), rules=SimpleNamespace(active_rules=lambda: None))
     root.state.operator_guard, root.state.proposer_guard = [Depends(operator)], [Depends(proposer)]
     root.state.pipeline_governance_db_path = ":memory:"
+    evidence = {}
     with patch("fleet.server.pipeline_routes._storage_dir", return_value=temp):
-        install_pipeline_routes(root, site_maps=maps, read_guard=[Depends(viewer)])
+        install_pipeline_routes(root, site_maps=maps, read_guard=[Depends(viewer)],
+                                omx_evidence_fn=lambda task: evidence.get(task["task_id"]))
     with patch.dict(os.environ, {"ROSY_PLACEMENT_CAMERA_SOURCE": "camera", "ROSY_PLACEMENT_CALIBRATION_REVISION": "test"}):
         install_cell_site_recognition_routes(root, service=Sensor(), require_viewer=viewer)
     parent = SimpleNamespace(unit_id="R", parent=None, resources=())
-    unit = SimpleNamespace(unit_id="A", parent="R", resources=("workcell:" + WORKCELL,))
+    unit = SimpleNamespace(unit_id="A", parent="R", resources=("workcell:arm_s", "observation-workcell:" + WORKCELL))
     child.state.control_unit = SimpleNamespace(unit=unit)
     with TestClient(child) as cell, TestClient(root) as upstream:
         class Peer:
@@ -163,23 +200,24 @@ def run(platform, temp):
         task, = [t for t in root.state.omx_cell_tasks.values() if t.get("plan_id") == dispatch.rosy_plan_id]
         assert task["intake_occurrence_id"] == occurrence and task["placement_attempt_id"] == dispatch.request_key
         requested = dispatch.request_payload["steps"][0]["dst_site"]
-        actual = "yard-r1-c4-l1" if requested != "yard-r1-c4-l1" else "yard-r1-c1-l1"
-        # The hardware owner and the camera are synthetic. Fleet plan creation and event processing above/below are real.
-        finished = datetime.now(timezone.utc)
-        task.update(status="COMPLETED", completed_at=finished.timestamp(), handoff_lease_id="placement-lease",
-                    receipt={"physical_completion": True, "simulated_success": False, "phase": "RELEASED",
-                             "stage_id": task["task_id"], "handoff_lease_id": "placement-lease"},
-                    stage_result={"task_verified": True})
-        frame = dict(schema="rosy.cell-site-recognition.v1", snapshot_id="test-frame", source_id="camera",
-                     calibration_revision="test", site_map_revision=list_canonical_sites()["revision"],
-                     observed_at=datetime.now(timezone.utc).isoformat(), sites=[dict(site_ref=actual, state="OCCUPIED",
-                     object_class=None, object_ref_read=cargo, confidence=1)])
+        with patch.dict(os.environ, {"ROSY_FLEET_CELL_OWNERS": "cell_ab=omx-owner;cell_s=omx-owner"}):
+            _complete_at_measured_slot(upstream, task, plan, evidence, named_camera=named_camera)
+        actual = requested
+        if named_camera:
+            project()
+            assert not ledger.occurrence_events()[-1].get("placement_attempt_id")
+            actual = "yard-r1-c4-l1" if requested != "yard-r1-c4-l1" else "yard-r1-c1-l1"
+            frame = dict(schema="rosy.cell-site-recognition.v1", snapshot_id="test-frame", source_id="camera",
+                         calibration_revision="test", site_map_revision=list_canonical_sites()["revision"],
+                         observed_at=datetime.now(timezone.utc).isoformat(), sites=[dict(site_ref=actual, state="OCCUPIED",
+                         object_class=None, object_ref_read=cargo, confidence=1)])
+            for _ in range(2):
+                upstream.post("/api/fleet/cell-site-recognition", json=frame,
+                              headers={sensor_header: "camera-test"}).raise_for_status()
         for _ in range(2):
-            upstream.post("/api/fleet/cell-site-recognition", json=frame,
-                          headers={sensor_header: "camera-test"}).raise_for_status()
             project()
         receipt.refresh_from_db()
-        assert (receipt.status, receipt.observed_slot) == ("SLOT_MISMATCH", actual)
+        assert (receipt.status, receipt.observed_slot) == ("SLOT_MISMATCH" if named_camera else "STORED", actual)
         assert Observation.objects.filter(provenance="PORT_EVENT").count() == 1
         assert len(ledger.occurrence_events()) == 2
         browser = Client(HTTP_HOST="localhost")
@@ -187,7 +225,8 @@ def run(platform, temp):
         inventory = browser.get("/inventory/")
         assert inventory.status_code == 200
         html = inventory.content.decode()
-        assert all(text in html for text in (occurrence, requested, actual, "요청·관측 위치 불일치"))
+        assert all(text in html for text in (occurrence, requested, actual))
+        assert ledger.occurrence_events()[-1]["identity"] == ("observed" if named_camera else "attested")
         print(f"PASS: {cargo}, one receipt, one proposal, requested {requested}, observed {actual}, replay idempotent")
 
 
@@ -195,6 +234,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform-root", type=Path, required=True)
     parser.add_argument("--platform-sha", required=True)
+    parser.add_argument("--named-camera", action="store_true", help="Test a separate camera identifying an alternative slot")
     args = parser.parse_args()
     if not __debug__:
         parser.error("assertions must be enabled")
@@ -208,7 +248,7 @@ if __name__ == "__main__":
             "ROSY_INTAKE_RFID_MANIFEST": "", "ROSY_INTAKE_RFID_ENCODED_WORKCELL": "", "ROSY_INTAKE_RFID_WORKCELL": "",
         }):
             try:
-                run(platform, Path(directory))
+                run(platform, Path(directory), named_camera=args.named_camera)
             finally:
                 from django.db import connections
                 connections.close_all()
