@@ -119,6 +119,72 @@ class TopviewProxyTests(TestCase):
         self.assertEqual(rejected.status_code, 404)
         self.camera.lease.assert_not_called()
 
+    def test_camera_allowlist_filters_unneeded_sources_and_orders_omx_overhead_first(self):
+        from django.test import RequestFactory
+        from harbor_web.topview_proxy import _camera_sources, topview_context
+
+        self.camera.sources.return_value = {
+            'sources': ['ceiling_north', 'arm_a_wrist', 'omx_overhead', 'side_cam'],
+        }
+        self.assertEqual(
+            _camera_sources('https://fleet.example', 'test-fleet-secret', None, timeout=2),
+            ['omx_overhead', 'ceiling_north'],
+        )
+        # Proxy rejects non-allowlisted cameras (e.g. arm_a_wrist) before leasing.
+        blocked = self.client.get(reverse('topview_frame', args=['arm_a_wrist']))
+        self.assertEqual(blocked.status_code, 404)
+        self.camera.lease.assert_not_called()
+
+        # Proxy serves allowlisted omx_overhead camera.
+        self.camera.lease.return_value = {
+            'source_id': 'omx_overhead', 'lease': 'test-lease-secret',
+            'frame_path': '/api/vision/sources/omx_overhead/frame',
+        }
+        allowed = self.client.get(reverse('topview_frame', args=['omx_overhead']) + '?view=raw')
+        self.assertEqual((allowed.status_code, allowed.content), (200, b'jpeg-test'))
+        self.camera.lease.assert_called_once_with('omx_overhead')
+
+        # topview_context selects omx_overhead first with default raw view mode and site pixels.
+        request = RequestFactory().get('/')
+        request.user = self.user
+        request.session = {}
+        ctx = topview_context(request)
+        self.assertEqual([s['source_id'] for s in ctx['sources']], ['omx_overhead', 'ceiling_north'])
+        self.assertEqual(ctx['default_source_id'], 'omx_overhead')
+        self.assertEqual(ctx['default_view_mode'], 'raw')
+        self.assertIsNotNone(ctx['site_pixels'])
+        self.assertEqual(ctx['site_pixels']['source_id'], 'omx_overhead')
+
+    def test_camera_allowlist_falls_back_to_all_valid_sources_when_none_match(self):
+        from django.test import RequestFactory
+        from harbor_web.topview_proxy import _camera_sources, topview_context
+
+        self.camera.sources.return_value = {'sources': ['lab_cam_b', 'lab_cam_a']}
+        self.assertEqual(
+            _camera_sources('https://fleet.example', 'test-fleet-secret', None, timeout=2),
+            ['lab_cam_b', 'lab_cam_a'],
+        )
+        request = RequestFactory().get('/')
+        request.user = self.user
+        request.session = {}
+        ctx = topview_context(request)
+        self.assertEqual([s['source_id'] for s in ctx['sources']], ['lab_cam_b', 'lab_cam_a'])
+        self.assertEqual(ctx['default_source_id'], 'lab_cam_b')
+        self.assertEqual(ctx['default_view_mode'], 'auto')
+
+    def test_topview_context_defaults_to_auto_mode_when_only_ceiling_north_present(self):
+        from django.test import RequestFactory
+        from harbor_web.topview_proxy import topview_context
+
+        self.camera.sources.return_value = {'sources': ['arm_a_wrist', 'ceiling_north']}
+        request = RequestFactory().get('/')
+        request.user = self.user
+        request.session = {}
+        ctx = topview_context(request)
+        self.assertEqual([s['source_id'] for s in ctx['sources']], ['ceiling_north'])
+        self.assertEqual(ctx['default_source_id'], 'ceiling_north')
+        self.assertEqual(ctx['default_view_mode'], 'auto')
+
     def test_falls_back_from_map_overlay_to_map_and_raw_and_supports_raw_query(self):
         self.camera.lease.side_effect = [
             RectificationUnsupportedError('422'),
