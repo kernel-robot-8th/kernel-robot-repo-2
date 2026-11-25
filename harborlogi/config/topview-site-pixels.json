@@ -9,7 +9,7 @@
   "assumptions": {
     "yard": "화면(180° 회전) 기준 야드 3열 왼→오 = r1·r2·r3, 위 칸 = s1, 아래 칸(컨베이어 쪽) = s2.",
     "temp": "화면 왼쪽 위 부채꼴 판 = temp_a(팔 A 쪽), 오른쪽 위 = temp_b. 레인 번호는 화면 왼→오 1·2·3로 가정.",
-    "stand": "반출대는 이 카메라 화면 밖이라 위치 미정.",
+    "stand": "반출대는 아직 실물이 없다(11/24 top 프레임에 보이지 않음). ROSY cell_area_zones STAND_TOP_ROI(410,30,570,125) 위치에 설치 예정 영역으로 표시.",
     "belt": "ROSY 이름 belt(site-points 키 belt_out) = 팔 A·B가 컨베이어에서 집는 끝. 반대쪽 belt-in은 공급암 S가 놓는 끝으로 이 카메라 밖."
   },
   "points": [
@@ -231,14 +231,19 @@
     },
     {
       "site": "stand:r1-s1",
-      "label": "반출대",
-      "short_label": "반출대",
+      "label": "반출대 stand-r1-c1-l1 (설치 예정, ROSY STAND_TOP_ROI)",
+      "short_label": "반출대(예정)",
       "zone": "stand",
       "kind": "slot",
       "wire_refs": [
         "stand-r1-c1-l1"
       ],
-      "roi": null
+      "roi": [
+        410,
+        30,
+        570,
+        125
+      ]
     },
     {
       "site": "belt",

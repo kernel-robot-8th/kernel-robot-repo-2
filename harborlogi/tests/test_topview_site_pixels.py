@@ -32,11 +32,11 @@ class TopviewSitePixelsTests(unittest.TestCase):
         all_refs = {ref for pt in loaded['points'] if pt['kind'] == 'slot' for ref in pt['wire_refs']}
         self.assertEqual(all_refs, canonical_cell_wire_refs())
 
-        # Both temp plates and the yard are in the live top frame; the stand is outside it (roi=None).
+        # Both temp plates and the yard are in the live top frame; the stand is drawn where ROSY plans it.
         for row in (1, 2, 3):
             self.assertEqual(len(points_by_site[f'temp_a:r{row}-s1']['roi']), 4)
             self.assertEqual(len(points_by_site[f'temp_b:r{row}-s1']['roi']), 4)
-        self.assertIsNone(points_by_site['stand:r1-s1']['roi'])
+        self.assertEqual(points_by_site['stand:r1-s1']['roi'], [410.0, 30.0, 570.0, 125.0])  # planned, not yet installed
         self.assertEqual(points_by_site['belt']['kind'], 'pick')
         self.assertEqual(points_by_site['belt']['point'], [349.0, 101.0])
 
