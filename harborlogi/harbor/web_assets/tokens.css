@@ -24,6 +24,10 @@
   --primitive-color-orange-dark: #b94d00;
   --primitive-color-cream: #fcf1d9;
   --primitive-color-navy-soft: #eaf1f6;
+  --primitive-color-cargo-orange: #e86c1f;
+  --primitive-color-cargo-pink: #d95b8c;
+  --primitive-color-cargo-yellow: #e3b522;
+  --primitive-color-cargo-sky: #3ea0d8;
   --primitive-font-ui: "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --primitive-font-caption: 0.75rem;
   --primitive-font-label: 0.875rem;
@@ -101,6 +105,10 @@
   --semantic-status-success-background: var(--primitive-color-success-soft);
   --semantic-status-unknown-foreground: var(--primitive-color-muted);
   --semantic-status-unknown-background: var(--primitive-color-unknown-soft);
+  --semantic-cargo-orange: var(--primitive-color-cargo-orange);
+  --semantic-cargo-pink: var(--primitive-color-cargo-pink);
+  --semantic-cargo-yellow: var(--primitive-color-cargo-yellow);
+  --semantic-cargo-sky: var(--primitive-color-cargo-sky);
   --semantic-type-family: var(--primitive-font-ui);
   --semantic-type-body: var(--primitive-font-body);
   --semantic-type-label: var(--primitive-font-label);

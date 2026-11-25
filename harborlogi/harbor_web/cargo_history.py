@@ -8,8 +8,9 @@ from django.core.exceptions import ValidationError
 from harbor_web import services
 from harbor_web.command_models import EvidenceSubmission
 from harbor_web.models import (
-    ArrivalEvent, CargoTag, Command, CommandFact, DepartureIntent, FieldConfirmation, FieldEpisode, Observation, Order, Plan,
+    ArrivalEvent, CargoFootprint, CargoTag, Command, CommandFact, DepartureIntent, FieldConfirmation, FieldEpisode, Observation, Order, Plan,
 )
+from harbor_web.order_queue import completed_order_ids
 from harbor_web.presentation import COMMAND_LABELS
 
 # shortcut: scans the newest 200 observations and plans; index by cargo when a yard keeps more history.
@@ -99,5 +100,13 @@ def cargo_history(cargo):
         first, last = sightings[0][0], sightings[-1][0]
         dwell = dict(first=first.observed_at, last=last.observed_at, span=last.observed_at - first.observed_at,
                      count=len(sightings))
+    done_ids = completed_order_ids()
+    open_orders = sorted(
+        [o for o in orders if o.pk not in done_ids],
+        key=lambda o: (o.priority_group, o.sequence, o.pk),
+    )
+    active_order = open_orders[0] if open_orders else (orders[-1] if orders else None)
+    current_footprint = CargoFootprint.objects.filter(cargo=cargo).order_by('-pk').first()
     return dict(events=events, dwell=dwell, unreadable=unreadable,
+                current_footprint=current_footprint, active_order=active_order,
                 open_episodes=FieldEpisode.objects.filter(order__in=orders, state='OPEN').count())

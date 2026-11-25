@@ -3,6 +3,7 @@ from datetime import datetime
 import math
 import re
 
+from harbor.cargo_colors import CARGO_COLORS
 from harbor.cell_site_map import WIRE_REF_RE
 
 SCHEMA_ID = 'rosy.cell-site-recognition.v1'
@@ -123,10 +124,11 @@ def site_ref_to_harbor_cells(site_ref):
                  for column in range(placement['column'], placement['column'] + 3))
 
 
-def compare_with_yard(snapshot, placements):
+def compare_with_yard(snapshot, placements, *, cargo_colors=None):
     """Return display/person-review results only; unreported sites imply nothing."""
     snapshot = parse_site_recognition(snapshot)
     cargo_by_ref = {}
+    color_by_ref = {}
     for placement in placements:
         if (not isinstance(placement, dict)
                 or not {'area', 'row', 'column', 'level', 'cargo_id'} <= set(placement)
@@ -136,6 +138,9 @@ def compare_with_yard(snapshot, placements):
         if ref in cargo_by_ref:
             raise ValueError('DUPLICATE_PLACEMENT: more than one cargo at the same anchor')
         cargo_by_ref[ref] = _text(placement['cargo_id'], field='cargo_id', code='INVALID_PLACEMENT')
+        raw_color = placement.get('color')
+        if isinstance(raw_color, str) and raw_color in CARGO_COLORS:
+            color_by_ref[ref] = raw_color
     results = []
     for site in snapshot['sites']:
         site_ref_to_placement(site['site_ref'])
@@ -150,5 +155,17 @@ def compare_with_yard(snapshot, placements):
             result = 'CLASS_MISMATCH'
         else:
             result = 'MATCH'
-        results.append({**site, 'harbor_cargo_id': cargo, 'result': result})
+        entry = {**site, 'harbor_cargo_id': cargo, 'result': result}
+        expected_color = color_by_ref.get(site['site_ref'])
+        if expected_color is None and cargo is not None and cargo_colors:
+            candidate = cargo_colors.get(cargo)
+            if isinstance(candidate, str) and candidate in CARGO_COLORS:
+                expected_color = candidate
+        observed_class = site['object_class']
+        if (site['state'] == 'OCCUPIED'
+                and expected_color is not None
+                and observed_class in CARGO_COLORS
+                and observed_class != expected_color):
+            entry['color_mismatch'] = True
+        results.append(entry)
     return results

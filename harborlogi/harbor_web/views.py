@@ -128,9 +128,13 @@ def cargo_list(request):
     tags_by_cargo = {}
     for tag in CargoTag.objects.filter(cargo_id__in=page_ids).order_by('pk'):
         tags_by_cargo.setdefault(tag.cargo_id, []).append(tag)
+    latest_orders = {}
+    for order in Order.objects.filter(cargo_id__in=page_ids).exclude(kind='REARRANGE').order_by('priority_group', 'sequence', 'pk'):
+        latest_orders.setdefault(order.cargo_id, order)
     for cargo in pagination['page']:
         cargo.current_footprint = footprints.get(cargo.pk)
         cargo.bound_tags = tags_by_cargo.get(cargo.pk, [])
+        cargo.primary_order = latest_orders.get(cargo.pk)
     sorts = {key: dict(active=sort.lstrip('-') == key and field is not None, descending=sort == f'-{key}',
                        next=key if sort == f'-{key}' else f'-{key}') for key in columns}
     return page(request, 'cargo.html', section='cargo', q=q, sort=sort if field else '', sorts=sorts, **pagination)
@@ -450,12 +454,12 @@ def inventory(request):
     if selected and all(item.pk != selected.pk for item in choices):
         choices.insert(0, selected)
     from harbor_web.yard_view import yard_view, spatial_yard_view
-    from harbor_web.yard_scene import present_stage, scene_for
+    from harbor_web.yard_scene import attach_cargo_metadata, present_stage, scene_for
     from harbor_web.map_config import map_scene
     view = (spatial_yard_view(services.spatial_snapshot(selected)) if selected.payload.get('schema') == 'grid-placement-v1'
             else yard_view(selected.payload['bays'], selected.condition.payload)) if selected else None
     stage = present_stage(dict(view, panel_id='inventory-yard', label='현재 야드 배치', index=0), condition.payload) if view else None
-    scene = scene_for([stage]) if stage else map_scene(condition.payload) if condition else None
+    scene = attach_cargo_metadata(scene_for([stage])) if stage else map_scene(condition.payload) if condition else None
     from harbor_web.yard_rows import place_context, placement_text, slot_key, spot_label
     labels, slot = place_context(condition.payload) if condition else ({}, None)
     definition_rows = []

@@ -543,10 +543,10 @@ class SeedScheduleValidateTests(TestCase):
 
     def test_mixed_schedule_infeasible_when_yard_fills_up_before_outbounds(self):
         # In seed_site_dataset: 3x6x3 yard = 18 places, 12 occupied (C-1..C-4, C-9..C-16), 6 empty.
-        # Putting all 8 inbounds ahead of all 12 outbounds fills the 6 empty places and blocks on the 7th inbound.
+        # Putting all 10 inbounds (C-5..C-8, C-17..C-22) ahead of all 12 outbounds fills the 6 empty places and blocks on the 7th inbound.
         inbounds = list(Order.objects.filter(kind='INBOUND').select_related('cargo').order_by('priority_group', 'sequence', 'pk'))
         outbounds = list(Order.objects.filter(kind='OUTBOUND').select_related('cargo').order_by('priority_group', 'sequence', 'pk'))
-        self.assertEqual((len(inbounds), len(outbounds)), (8, 12))
+        self.assertEqual((len(inbounds), len(outbounds)), (10, 12))
 
         before_plans = Plan.objects.count()
         lane1 = ','.join(f'{o.pk}:{o.version}' for o in inbounds)
@@ -676,7 +676,7 @@ class SeedScheduleValidateTests(TestCase):
         self.assertLessEqual(len(queries), 25)
 
         schedule = resp.context['schedule']
-        self.assertEqual(len(schedule), 20)
+        self.assertEqual(len(schedule), 22)  # seed C-1..C-22
         by_code = {row['order'].cargo.code: row for row in schedule}
 
         # Sequential destinations for the simulated window (first 8 items)
@@ -709,7 +709,7 @@ class SeedScheduleValidateTests(TestCase):
         self.assertNotIn('READY', body)
         self.assertNotIn('HOLD', body)
         self.assertIsNone(re.search(r'\sstyle=', html))
-        self.assertEqual(len(hub_ctx['schedule']), 20)
+        self.assertEqual(len(hub_ctx['schedule']), 22)  # seed C-1..C-22
 
     def test_work_hub_shows_short_hold_reason_and_uncomputed_after_hold(self):
         # Put all 8 inbounds ahead of all 12 outbounds so the 6 empty yard places fill up

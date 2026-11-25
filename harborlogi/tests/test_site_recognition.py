@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
+from harbor.cargo_colors import CARGO_COLORS
 from harbor.rosy_http import RosyClient, load_site_recognition
 from harbor.site_recognition import (
     compare_with_yard,
@@ -217,6 +218,42 @@ class SiteRecognitionComparisonTests(unittest.TestCase):
                            [{**placement, 'cargo_id': None}]):
             with self.subTest(placements=placements), self.assertRaises(ValueError):
                 compare_with_yard(payload(), placements)
+
+    def test_color_mismatch_uses_shared_colors_without_changing_validation_or_result(self):
+        self.assertEqual(CARGO_COLORS, ('orange', 'pink', 'yellow', 'sky'))
+        # parse_site_recognition still accepts arbitrary non-color object_class values from ROSY.
+        custom_doc = payload()
+        custom_doc['sites'] = [{**custom_doc['sites'][0], 'object_class': 'container_box'}]
+        self.assertEqual(parse_site_recognition(custom_doc)['sites'][0]['object_class'], 'container_box')
+
+        placements = [{'area': 'yard', 'row': 1, 'column': 1, 'level': 1, 'cargo_id': 'C-1', 'color': 'pink'}]
+        # Known ledger color (pink) vs different shared color (orange): keeps MATCH and adds color_mismatch=True.
+        doc = payload()
+        doc['sites'] = [{**doc['sites'][0], 'object_class': 'orange', 'object_ref_read': None}]
+        res = compare_with_yard(doc, placements)[0]
+        self.assertEqual(res['result'], 'MATCH')
+        self.assertIs(res.get('color_mismatch'), True)
+
+        # Also works when ledger color is supplied via cargo_colors mapping, and preserves CLASS_MISMATCH.
+        bare_placements = [{'area': 'yard', 'row': 1, 'column': 1, 'level': 1, 'cargo_id': 'C-1'}]
+        doc['sites'] = [{**doc['sites'][0], 'object_class': 'sky', 'object_ref_read': 'C-9'}]
+        res_cls = compare_with_yard(doc, bare_placements, cargo_colors={'C-1': 'pink'})[0]
+        self.assertEqual(res_cls['result'], 'CLASS_MISMATCH')
+        self.assertIs(res_cls.get('color_mismatch'), True)
+
+        # Matching color, non-color ROSY class, unknown ledger color, or UNREADABLE never set color_mismatch.
+        for state, obj_class, plc in (
+            ('OCCUPIED', 'pink', placements),
+            ('OCCUPIED', 'container_box', placements),
+            ('OCCUPIED', None, placements),
+            ('OCCUPIED', 'orange', bare_placements),
+            ('OCCUPIED', 'orange', [{**placements[0], 'color': ''}]),
+            ('UNREADABLE', 'orange', placements),
+        ):
+            doc['sites'] = [{**doc['sites'][0], 'state': state, 'object_class': obj_class, 'object_ref_read': None}]
+            with self.subTest(state=state, obj_class=obj_class, has_color=plc[0].get('color')):
+                entry = compare_with_yard(doc, plc)[0]
+                self.assertNotIn('color_mismatch', entry)
 
 
 class SiteRecognitionClientTests(unittest.TestCase):

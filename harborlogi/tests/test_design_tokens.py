@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import unittest
 
+from harbor.cargo_colors import CARGO_COLORS
 from tools.design_tokens import build_css
 
 
@@ -17,6 +18,7 @@ class DesignTokenTests(unittest.TestCase):
         self.assertEqual(self.source['meta']['status'], 'adopted')
         self.assertTrue(self.source['meta']['runtimeConsumer'])
         self.assertEqual(build_css(self.source), (ROOT / 'harbor/web_assets/tokens.css').read_text(encoding='utf-8'))
+        self.assertEqual(tuple(self.source['semantic']['cargo']), CARGO_COLORS)
 
     def test_unknown_reference_wrong_type_cycle_and_name_collision_fail(self):
         for value in ('{semantic.missing}', '{primitive.size.control}', '{component.button.background}'):

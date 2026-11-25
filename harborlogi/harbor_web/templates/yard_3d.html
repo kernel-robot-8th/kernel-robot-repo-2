@@ -3,7 +3,7 @@
 {{ yard_scene|json_script:scene_id }}
 <div class="yard-edit-tools" data-yard-edit-tools hidden aria-label="가상 배치 편집 도구">
   <div class="actions"><button type="button" data-scene-action="edit" aria-pressed="false">가상 배치 편집</button><button type="button" class="quiet" data-scene-load-plan>저장된 계획 결과로 편집</button><button type="button" class="quiet" data-scene-undo disabled>되돌리기</button><button type="button" class="quiet" data-scene-redo disabled>다시 실행</button></div>
-  <p data-scene-edit-help>화물을 선택하고 평면도의 목적 칸을 눌러 배치하세요. 저장된 계획 결과도 불러와 수정할 수 있습니다.</p>
+  <p data-scene-edit-help>화물을 고른 뒤 3D에서 끌어 놓거나 평면의 목적 칸을 누르세요.</p>
   <details><summary>조작 방법</summary><p class="helptext">{% if section == 'inventory' %}가상 배치는 이 화면에서만 유지됩니다. 실제 배치·확정 계획·실행 지시는 변경되지 않습니다.{% else %}가상 배치는 이 화면에서만 유지됩니다. 관측·확정 계획·실행 지시는 변경되지 않습니다.{% endif %}</p></details>
   <details data-scene-change-panel hidden><summary>변경 전후 위치 <span data-scene-change-count>0</span>개</summary><ul data-scene-changes></ul></details>
 </div>
@@ -14,6 +14,7 @@
   <div class="model-layout">
     <div class="model-viewport">
       <div class="model-tools" role="group" aria-label="카메라 도구"><button class="quiet" type="button" data-scene-action="orbit" aria-pressed="true">회전</button><button class="quiet" type="button" data-scene-action="pan" aria-pressed="false">화면 이동</button><button class="quiet" type="button" data-scene-action="fit">전체 맞춤</button></div>
+      <div class="scene-tier-legend" aria-label="이름표 단계 범례"><span>이름표</span><span class="tier-pill tier-urgent">긴급</span><span class="tier-pill tier-priority">우선</span><span class="tier-pill tier-normal">일반</span></div>
       <canvas tabindex="0" role="application" aria-roledescription="3D 모델 뷰어" aria-label="컨테이너 모델" aria-describedby="{{ scene_id }}-keys"></canvas>
       <div class="scene-toolbar"><div class="scene-camera" role="group" aria-label="보기 각도"><button class="quiet" type="button" data-scene-camera="iso">입체</button><button class="quiet" type="button" data-scene-camera="front">정면</button><button class="quiet" type="button" data-scene-camera="top">위에서</button></div><div role="group" aria-label="확대"><button class="quiet" type="button" data-scene-zoom="-0.15" aria-label="축소">−</button><button class="quiet" type="button" data-scene-zoom="0.15" aria-label="확대">+</button></div></div>
       <details><summary>조작 방법</summary><p class="model-gestures" id="{{ scene_id }}-keys">드래그: 회전 · 오른쪽 또는 Shift 드래그: 화면 이동 · 휠: 확대 · 터치 두 손가락: 이동·확대 · 키보드: 방향키 이동, Shift 방향키 회전, 더하기·빼기 확대, Home 전체 맞춤 · 아래 목록에서도 화물을 선택할 수 있습니다.</p></details>
@@ -27,7 +28,7 @@
         <label>구역<select name="area"></select></label>
         <div class="model-coordinates"><label>{% if yard_scene.slot_cells %}기준 셀 행{% else %}행{% endif %}<input type="number" name="row" min="1" step="1"></label><label>{% if yard_scene.slot_cells %}기준 셀 열{% else %}열{% endif %}<input type="number" name="column" min="1" step="1"></label><label>층<input type="number" name="level" min="1" step="1"></label></div>
         <label>방향<select name="orientation"><option value="0">0도</option><option value="90">90도</option></select></label><button type="submit">가상 배치 적용</button>
-        <details><summary>조작 방법</summary><p class="helptext">박스의 화살표 핸들로도 옮길 수 있습니다. {% if yard_scene.slot_cells %}입력은 자리 이름과 다른 셀 좌표입니다. 화면 가로(X)는 셀 행, 세로(Z)는 셀 열, 높이(Y)는 층입니다.{% else %}열(X)·층(Y)·행(Z) 방향입니다.{% endif %}</p></details>
+        <details><summary>조작 방법</summary><p class="helptext">3D에서 박스를 끌어 원하는 칸에 놓을 수 있습니다. {% if yard_scene.slot_cells %}입력은 자리 이름과 다른 셀 좌표입니다. 화면 가로(X)는 셀 행, 세로(Z)는 셀 열, 높이(Y)는 층입니다.{% else %}열(X)·층(Y)·행(Z) 방향입니다.{% endif %}</p></details>
       </fieldset></form><p class="model-error" data-scene-error role="alert"></p>
     </aside>
     </div>

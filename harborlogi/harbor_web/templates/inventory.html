@@ -64,13 +64,13 @@
   <aside class="panel yard-upcoming-panel" aria-labelledby="yard-upcoming-title">
     <div class="panel-h">
       <h2 id="yard-upcoming-title">남은 예정</h2>
-      <span class="scope">준비된 계획 {{ upcoming|length }}건</span>
+      <span class="scope">예정 {{ upcoming|length }}건</span>
     </div>
     <div class="panel-b">
       {% if outbound_chain %}
       <div class="yard-chain-action">
         <button type="button" class="yard-upcoming-btn yard-chain-btn" data-upcoming-plan="outbound-chain" data-upcoming-scene="upcoming-scene-outbound-chain" aria-pressed="false">
-          <span class="chip tone-info">{{ outbound_chain.kind_label }}</span>
+          <span class="yard-upcoming-chips"><span class="chip tone-info">{{ outbound_chain.kind_label }}</span></span>
           <span class="yard-upcoming-main"><strong>남은 반출 연쇄 3D</strong><small>{{ outbound_chain.summary }}</small></span>
         </button>
         {{ outbound_chain.scene|json_script:'upcoming-scene-outbound-chain' }}
@@ -82,21 +82,27 @@
         <li>
           {% if item.scene %}
             <button type="button" class="yard-upcoming-btn" data-upcoming-plan="{{ item.key }}" data-upcoming-scene="{{ item.scene_id }}" aria-pressed="false">
-              <span class="chip {% if item.kind == 'OUTBOUND' %}tone-info{% endif %}">{{ item.kind_label }}</span>
-              <span class="yard-upcoming-main"><strong>{{ item.title }}</strong><small>{{ item.summary }}</small></span>
+              <span class="yard-upcoming-chips">
+                <span class="chip {% if item.kind == 'OUTBOUND' %}tone-info{% elif item.kind == 'INBOUND' %}tone-inbound{% endif %}">{{ item.kind_label }}</span>
+                {% if item.active %}<span class="chip tone-new">진행 중</span>{% endif %}
+              </span>
+              <span class="yard-upcoming-main"><strong>{{ item.title }}</strong><small>{% if item.target_label %}{{ item.target_label }}{% endif %}{% if item.summary %}{% if item.target_label %} · {% endif %}{{ item.summary }}{% endif %}</small></span>
             </button>
             {{ item.scene|json_script:item.scene_id }}
           {% else %}
             <div class="yard-upcoming-item">
-              <span class="chip">{{ item.kind_label }}</span>
-              <span class="yard-upcoming-main"><strong>{{ item.title }}</strong><small>{% if item.target_label %}{{ item.target_label }}{% endif %}{% if item.summary %}{% if item.target_label %} · {% endif %}{{ item.summary }}{% endif %}</small></span>
+              <span class="yard-upcoming-chips">
+                <span class="chip {% if item.kind == 'OUTBOUND' %}tone-info{% elif item.kind == 'INBOUND' %}tone-inbound{% endif %}">{{ item.kind_label }}</span>
+                {% if item.active %}<span class="chip tone-new">진행 중</span>{% elif item.hold_reason %}<span class="chip tone-hold">보류</span>{% endif %}
+              </span>
+              <span class="yard-upcoming-main"><strong>{{ item.title }}</strong><small>{% if item.hold_reason %}{{ item.hold_reason }}{% else %}{% if item.target_label %}{{ item.target_label }}{% endif %}{% if item.summary %}{% if item.target_label %} · {% endif %}{{ item.summary }}{% endif %}{% endif %}</small></span>
             </div>
           {% endif %}
         </li>
         {% endfor %}
       </ul>
       {% elif not outbound_chain %}
-      <p class="helptext yard-upcoming-empty">준비된 남은 예정이 없습니다.</p>
+      <p class="helptext yard-upcoming-empty">남은 예정이 없습니다.</p>
       {% endif %}
     </div>
   </aside>
