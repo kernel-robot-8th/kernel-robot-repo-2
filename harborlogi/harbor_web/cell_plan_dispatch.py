@@ -22,6 +22,7 @@ from harbor.cell_plan import (
 from harbor_web import services
 from harbor_web.command_models import (ACTIVE_CELL_PLAN_DISPATCH_STATES, ACTIVE_COMMAND_STATES, CellPlanDispatch,
                                        Command)
+from harbor_web.coordination import serialized
 from harbor_web.fleet_connection import connection_settings, fleet_client
 from harbor_web.models import Audit, Observation, Order, Plan
 
@@ -82,6 +83,13 @@ def _default_client():
     return client
 
 
+class FleetOnlyRegistry:
+    """The executor registry without the legacy ledger or bindings: cell plans need only the Fleet client."""
+
+    def __init__(self, client=None):
+        self.client = client if client is not None else _default_client()
+
+
 def _http_error_code(error: HTTPError) -> str:
     try:
         raw = error.read()
@@ -132,7 +140,7 @@ def _failure_reason(parsed) -> str:
     return ''
 
 
-def _reject_blocked_order(order: Order, *, production: bool, plan: Plan | None = None) -> None:
+def _reject_blocked_order(order: Order, *, production: bool, observation: Observation) -> None:
     """P0 mutex: one live execution path per order; restored or unready deployments stay shut."""
     from harbor_web.runtime import execution_block_reason
     blocked = execution_block_reason()
@@ -143,8 +151,8 @@ def _reject_blocked_order(order: Order, *, production: bool, plan: Plan | None =
     if CellPlanDispatch.objects.filter(order=order, state__in=ACTIVE_CELL_PLAN_DISPATCH_STATES).exists():
         raise services.Conflict('ACTIVE_CELL_PLAN_DISPATCH')
     if production:  # A fake client is an explicit test/simulation bypass.
-        from harbor_web.readiness import first_unmet
-        unmet = first_unmet(plan)
+        from harbor_web.readiness import first_unmet_cell_plan
+        unmet = first_unmet_cell_plan(observation)
         if unmet:
             raise services.Conflict(unmet)
 
@@ -326,6 +334,7 @@ def preview_rosy_directive(
         raise ValidationError(str(error) or 'CELL_PLAN_DRY_RUN_FAILED') from error
 
 
+@serialized
 def dispatch_harbor_plan(actor, *, plan_id: int, robot_id: str | None = None, client=None) -> CellPlanDispatch:
     """Mode 1: send Harbor plan's explicit move sequence and slot coordinates to ROSY (order_source='harbor')."""
     services._role(actor, 'operator')
@@ -334,7 +343,7 @@ def dispatch_harbor_plan(actor, *, plan_id: int, robot_id: str | None = None, cl
 
 def _submit_harbor_plan(actor, *, plan_id: int, robot_id: str | None, client, production: bool) -> CellPlanDispatch:
     plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
-    _reject_blocked_order(plan.order, production=production, plan=plan)
+    _reject_blocked_order(plan.order, production=production, observation=plan.observation)
     try:
         payload = build_harbor_plan_request(
             plan.result,
@@ -362,6 +371,7 @@ def _submit_harbor_plan(actor, *, plan_id: int, robot_id: str | None, client, pr
     )
 
 
+@serialized
 def dispatch_rosy_directive(
     actor,
     *,
@@ -379,7 +389,7 @@ def dispatch_rosy_directive(
     order = Order.objects.select_related('cargo').get(pk=order_id)
     observation = Observation.objects.get(pk=observation_id)
     plan = Plan.objects.filter(pk=plan_id, order=order).first() if plan_id is not None else None
-    _reject_blocked_order(order, production=client is None, plan=plan)
+    _reject_blocked_order(order, production=client is None, observation=observation)
     cargo_code = order.cargo.code if order.cargo_id else None
     try:
         payload = build_rosy_directive_request(
@@ -546,6 +556,7 @@ def _automatic_actor():
     return user
 
 
+@serialized
 def auto_dispatch_next(*, client=None, production: bool = True) -> CellPlanDispatch | None:
     """ADR 0034 automatic operation: propose the next current READY plan to ROSY by site points (cell-plans).
 
@@ -578,6 +589,12 @@ def auto_dispatch_next(*, client=None, production: bool = True) -> CellPlanDispa
                              object_id=str(row.pk), detail=dict(plan_id=plan.pk, automatic=True))
         return row
     return None
+
+
+@serialized
+def propose_automatically(plan: Plan, *, client=None) -> CellPlanDispatch:
+    """Send one Harbor-made plan (e.g. an authorized rearrangement) as the automatic user, behind every cell-plan gate."""
+    return _submit_harbor_plan(_automatic_actor(), plan_id=plan.pk, robot_id=None, client=client, production=client is None)
 
 
 def tick(registry, *, now=None) -> dict[int, str]:

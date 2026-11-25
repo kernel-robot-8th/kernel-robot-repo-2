@@ -397,7 +397,7 @@ class CellPlanDispatchTests(TestCase):
         self.client.force_login(self.operator)
         with self.settings(ROOT_URLCONF='harbor_web.urls'):
             with patch.object(cell_plan_dispatch, '_default_client', return_value=client), patch(
-                    'harbor_web.readiness.first_unmet', return_value=''):
+                    'harbor_web.readiness.first_unmet_cell_plan', return_value=''):
                 r1 = self.client.post(f'/plans/{self.plan.pk}/', {'action': 'cell_plan_harbor'})
                 self.assertEqual(r1.status_code, 302)
                 # P0-2 mutex: the active first dispatch blocks a second dispatch for the same order.
@@ -430,7 +430,7 @@ class CellPlanDispatchTests(TestCase):
             with self.settings(ROOT_URLCONF='harbor_web.urls'), patch.dict(
                 os.environ, {'HARBOR_OUTBOUND_VEHICLES': 'pinky-01,pinky-02'}, clear=False
             ), patch.object(cell_plan_dispatch, '_default_client', return_value=client), patch(
-                'harbor_web.readiness.first_unmet', return_value=''
+                'harbor_web.readiness.first_unmet_cell_plan', return_value=''
             ), patch(
                 'harbor_web.commands.acquire_registry', return_value=_Reg()
             ):
@@ -495,7 +495,7 @@ class CellPlanDispatchTests(TestCase):
             with self.settings(ROOT_URLCONF='harbor_web.urls'), patch.dict(
                 os.environ, {'HARBOR_OUTBOUND_VEHICLES': 'pinky-01,pinky-02'}, clear=False
             ), patch.object(cell_plan_dispatch, '_default_client', return_value=client), patch(
-                'harbor_web.readiness.first_unmet', return_value=''
+                'harbor_web.readiness.first_unmet_cell_plan', return_value=''
             ), patch(
                 'harbor_web.commands.acquire_registry', return_value=_Reg()
             ):
@@ -567,7 +567,7 @@ class CellPlanDispatchTests(TestCase):
         self.assertEqual(str(restore_blocked.exception), 'RESTORE_RECONCILIATION_REQUIRED')
         self.assertEqual(CellPlanDispatch.objects.count(), 0)
 
-        with patch('harbor_web.readiness.first_unmet', return_value='READINESS_ARM_INCIDENT_UNMET'):
+        with patch('harbor_web.readiness.first_unmet_cell_plan', return_value='READINESS_ARM_INCIDENT_UNMET'):
             with self.assertRaises(services.Conflict) as readiness_blocked:
                 cell_plan_dispatch.dispatch_rosy_directive(
                     self.operator, order_id=self.order.pk, observation_id=self.observation.pk,

@@ -17,6 +17,7 @@ import math
 import os
 import threading
 
+from django.core.exceptions import ValidationError
 from django.db import close_old_connections
 from django.utils import timezone
 
@@ -82,15 +83,25 @@ def tick(*, evidence=None, now=None, registry=None):
     if blocked:
         return dict(ran=False, reason=blocked, results={})
     now = now or timezone.now()
+    sub_loops = _SUB_LOOPS
     if registry is None:
+        _refresh_connection_check(now)
         try:
             registry = commands.acquire_registry()
+        except ValidationError:
+            # Without legacy bindings Commands cannot advance, but cell plans need only the Fleet client.
+            registry = _fleet_only_registry()
+            if registry is None:
+                return dict(ran=False, reason='EXECUTION_CONFIGURATION_REQUIRED', results={})
+            sub_loops = tuple(loop for loop in _SUB_LOOPS if loop[0] in FLEET_ONLY_SUB_LOOPS)
         except Exception:
             return dict(ran=False, reason='EXECUTION_CONFIGURATION_REQUIRED', results={})
     batch = max(1, int(_setting('HARBOR_EXECUTOR_BATCH', 4)))
     interval = _setting('HARBOR_EXECUTOR_INTERVAL', 5.0)
     results = {}
-    active = list(commands.Command.objects.filter(state__in=ACTIVE_STATES).order_by('pk')[:batch])
+    from harbor_web.cell_plan_dispatch import FleetOnlyRegistry
+    legacy = not isinstance(registry, FleetOnlyRegistry)
+    active = list(commands.Command.objects.filter(state__in=ACTIVE_STATES).order_by('pk')[:batch]) if legacy else []
     for command in active:
         if not _eligible(command.pk, now):
             results[command.pk] = 'BACKOFF'
@@ -107,7 +118,7 @@ def tick(*, evidence=None, now=None, registry=None):
             _record(command.pk, True, interval)
     if not active:
         _rearrange_when_idle(now)
-    for loop_name, fn in _SUB_LOOPS:
+    for loop_name, fn in sub_loops:
         key = ('sub_loop', loop_name)
         if not _eligible(key, now):
             continue
@@ -145,6 +156,37 @@ _SUB_LOOPS = (
     ('cell_plan', _run_cell_plan_tick),
     ('outbound', _run_outbound_tick),
 )
+FLEET_ONLY_SUB_LOOPS = ('cell_plan',)  # intake and outbound write the legacy transport ledger
+_fleet_only_lease = None
+
+
+def _fleet_only_registry():
+    """A Fleet-only registry when only the bindings file is missing and this process owns the cell-plan lease, else None."""
+    global _fleet_only_lease
+    from harbor.ownership import WriterLease
+    from harbor_web.cell_plan_dispatch import FleetOnlyRegistry
+    from harbor_web.command_binding import _config
+    if os.environ.get('HARBOR_BINDINGS_PATH'):
+        return None  # bindings are configured, so the registry failed for another setting
+    try:
+        config = _config(bindings_required=False)  # every other execution setting must still validate
+        registry = FleetOnlyRegistry()
+        with _start_lock:
+            if _fleet_only_lease is None:
+                # Its own lock file, so installing bindings later lets the full registry take the ledger lease.
+                _fleet_only_lease = WriterLease(str(config['path']) + '.cell-plan').__enter__()
+    except Exception:
+        return None
+    return registry
+
+
+def _refresh_connection_check(now):
+    """Keep the stored read-only check fresh without an admin, so automatic proposals are not held as stale."""
+    from harbor_web.fleet_connection import refresh_check_as_system
+    try:
+        refresh_check_as_system(now=now)
+    except Exception as error:
+        logger.warning('System connection check failed (%s); the next tick retries', type(error).__name__)
 
 
 def _loop_evidence():
