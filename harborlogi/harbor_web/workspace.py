@@ -141,9 +141,10 @@ def workspace_context(order, plan=None, *, priority_form=None, plan_form=None, r
             initial=dict(expected_version=order.version, observation=review_observation.pk if review_observation else None))
     if priority_form is None:
         priority_form = forms.PriorityForm(initial=dict(expected_version=order.version, priority_group=order.priority_group,
-            sequence=order.sequence, tie_policy=order.tie_policy, note=order.note))
+            tie_policy=order.tie_policy, note=order.note))
+    from harbor_web.yard_scene import attach_cargo_metadata
     occupancy = occupancy_map(stages[0] if stages else None, moves)
-    scene = scene_for(stages)
+    scene = attach_cargo_metadata(scene_for(stages))
     if scene:
         scene['rehandle'] = occupancy['rehandle_cargo'] if occupancy else []  # Stored-plan cargo; the viewer never recomputes it.
     completion_plan = command.plan if command else plan

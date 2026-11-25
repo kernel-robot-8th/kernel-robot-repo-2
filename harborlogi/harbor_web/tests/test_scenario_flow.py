@@ -305,5 +305,68 @@ class SiteScenarioTests(TestCase):
         self.assertIn('「초기 배치」 2행: 칸은 1~2입니다.', errors)
         self.assertIn('「초기 배치」 K8: 2행 2칸 1층이 비어 있어 받칠 수 없습니다.', errors)
         template = read_xlsx(self.client.get('/scenarios/template.xlsx').content)
-        self.assertIn(['C4', '옆 자리 화물', '1', '2', '1'], template['초기 배치'])
+        self.assertIn(['C4', '옆 자리 화물', '1', '2', '1', 'sky'], template['초기 배치'])
         self.assertContains(self.client.get('/scenarios/'), '3행 × 한 행 2자리(칸) · 3층')
+
+    def test_scenario_import_validates_and_persists_container_colors(self):
+        from harbor_web.models import Cargo
+        dims = scenario_import.site_dims()
+        bad = workbook(
+            [['COL-1', '잘못된 색', '1', '1', '1', 'green']],
+            [['1', '입고', 'COL-2', '입고 잘못된 색', '일반', '', '보라']],
+        )
+        parsed, errors = scenario_import.parse_workbook(bad, dims)
+        self.assertIsNone(parsed)
+        self.assertTrue(any('「초기 배치」 2행: 색은' in err for err in errors))
+        self.assertTrue(any('「이벤트」 2행: 색은' in err for err in errors))
+
+        good = workbook(
+            [['COL-1', '분홍 화물', '1', '1', '1', 'pink'], ['COL-2', '주황 화물', '1', '2', '1', '주황']],
+            [['1', '입고', 'COL-3', '노랑 화물', '긴급', '', 'yellow'], ['2', '입고', 'COL-4', '하늘 화물', '우선', '', '하늘']],
+        )
+        response = self.client.post('/scenarios/', dict(name='S-COLOR', workbook=SimpleUploadedFile('c.xlsx', good)))
+        self.assertEqual(response.status_code, 302)
+        colors = {c.code: c.color for c in Cargo.objects.filter(code__startswith='COL-')}
+        self.assertEqual(colors, {'COL-1': 'pink', 'COL-2': 'orange', 'COL-3': 'yellow', 'COL-4': 'sky'})
+
+    def test_scenario_import_rejects_existing_cargo_color_mismatch_with_row_error(self):
+        services.register_cargo(
+            self.user, code='C-3', name='등록 분홍 화물', weight_kg=Decimal('2.000'), volume_m3=Decimal('0.0120'),
+            destination='부산', color='pink', length_cells=3,
+        )
+        # Direct _cargo call also refuses mismatched color.
+        with self.assertRaises(ValidationError) as direct:
+            scenario_import._cargo(self.user, 'C-3', '등록 분홍 화물', 'orange')
+        self.assertIn('C-3 색이 등록값(분홍)과 다름', direct.exception.messages[0])
+
+        # Layout row color mismatch rejects the whole scenario without creating observations or orders.
+        mismatched_layout = workbook(
+            [['C-3', '등록 분홍 화물', '1', '1', '1', 'orange']],
+            [['1', '반출', 'C-3', '', '우선', '', '']],
+        )
+        response = self.client.post('/scenarios/', dict(name='S-MISMATCH-L', workbook=SimpleUploadedFile('ml.xlsx', mismatched_layout)))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '「초기 배치」 2행: C-3 색이 등록값(분홍)과 다름')
+        self.assertFalse(Observation.objects.exists())
+        self.assertFalse(Order.objects.exists())
+
+        # Event row color mismatch also rejects the whole scenario with the event row error.
+        mismatched_event = workbook(
+            [['C-3', '등록 분홍 화물', '1', '1', '1', '']],
+            [['1', '반출', 'C-3', '', '우선', '', '주황']],
+        )
+        response = self.client.post('/scenarios/', dict(name='S-MISMATCH-E', workbook=SimpleUploadedFile('me.xlsx', mismatched_event)))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '「이벤트」 2행: C-3 색이 등록값(분홍)과 다름')
+        self.assertFalse(Observation.objects.exists())
+        self.assertFalse(Order.objects.exists())
+
+        # Matching color or blank color on an existing cargo still imports cleanly.
+        matching = workbook(
+            [['C-3', '등록 분홍 화물', '1', '1', '1', '분홍']],
+            [['1', '반출', 'C-3', '', '우선', '', '']],
+        )
+        response = self.client.post('/scenarios/', dict(name='S-MATCH', workbook=SimpleUploadedFile('ok.xlsx', matching)))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Observation.objects.count(), 1)
+        self.assertEqual(Order.objects.filter(cargo__code='C-3', kind='OUTBOUND').count(), 1)

@@ -1,6 +1,7 @@
 """Tests for site-matched seed dataset, EPC/barcode tag arrival scans, and shipper/voyage scheduling."""
 from datetime import timedelta
 from decimal import Decimal
+import io
 import json
 from unittest.mock import patch
 
@@ -26,23 +27,66 @@ class SeedTagSchedulingTests(TestCase):
         self.field.groups.add(Group.objects.get(name='field'), Group.objects.get(name='viewer'))
 
     def test_seed_site_dataset_declared_is_idempotent_and_live_forbids_synthetic(self):
-        call_command('seed_site_dataset', provenance='DECLARED', verbosity=0)
-        self.assertEqual(Cargo.objects.filter(code__startswith='C-').count(), 20)
-        self.assertEqual(CargoTag.objects.count(), 20)
+        first_out = io.StringIO()
+        call_command('seed_site_dataset', provenance='DECLARED', stdout=first_out)
+        self.assertIn('새로 만든 화물 22개, 새 입고 요청 10건', first_out.getvalue())
+        self.assertEqual(Cargo.objects.filter(code__startswith='C-').count(), 22)
+        self.assertEqual(CargoTag.objects.count(), 22)
         self.assertEqual(ArrivalEvent.objects.filter(match_status='MATCHED').count(), 12)
         self.assertEqual(Observation.objects.filter(provenance='DECLARED').count(), 1)
         self.assertEqual(Order.objects.filter(kind='OUTBOUND').count(), 12)
-        self.assertEqual(Order.objects.filter(kind='INBOUND').count(), 8)
+        self.assertEqual(Order.objects.filter(kind='INBOUND').count(), 10)
 
         # Second invocation stays idempotent without duplicating cargos, tags, arrivals, or orders.
-        call_command('seed_site_dataset', provenance='DECLARED', verbosity=0)
-        self.assertEqual(Cargo.objects.filter(code__startswith='C-').count(), 20)
-        self.assertEqual(CargoTag.objects.count(), 20)
+        second_out = io.StringIO()
+        call_command('seed_site_dataset', provenance='DECLARED', stdout=second_out)
+        self.assertIn('새로 만든 화물 0개, 새 입고 요청 0건', second_out.getvalue())
+        self.assertEqual(Cargo.objects.filter(code__startswith='C-').count(), 22)
+        self.assertEqual(CargoTag.objects.count(), 22)
         self.assertEqual(ArrivalEvent.objects.count(), 12)
         self.assertEqual(Order.objects.filter(kind='OUTBOUND').count(), 12)
+        self.assertEqual(Order.objects.filter(kind='INBOUND').count(), 10)
 
         with override_settings(MODE='live'), self.assertRaises(CommandError):
             call_command('seed_site_dataset', provenance='SYNTHETIC', verbosity=0)
+
+    def test_seed_reports_new_cargo_and_inbound_orders_without_modifying_existing_cargo(self):
+        # Existing C-1..C-20 (e.g. older seed) stay untouched; C-21 and C-22 add 2 cargos and 2 INBOUND orders.
+        for idx in range(1, 21):
+            cargo = services.register_cargo(
+                self.op, code=f'C-{idx}', name=f'기존 화물 {idx}', weight_kg=Decimal('2.000'),
+                volume_m3=Decimal('0.0120'), destination='기존 목적지', color='', length_cells=3,
+            )
+            kind = 'OUTBOUND' if idx in {1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15, 16} else 'INBOUND'
+            group, seq = services.back_of_tier(3, kind)
+            services.create_order(
+                self.op, cargo=cargo, kind=kind, priority_group=group, sequence=seq, tie_policy='FIXED',
+            )
+        out = io.StringIO()
+        call_command('seed_site_dataset', provenance='DECLARED', stdout=out)
+        self.assertIn('새로 만든 화물 2개, 새 입고 요청 2건', out.getvalue())
+        # Existing C-1 was not overwritten; C-21 and C-22 got their seeded colors and INBOUND orders.
+        self.assertEqual(Cargo.objects.get(code='C-1').color, '')
+        self.assertEqual(Cargo.objects.get(code='C-21').color, 'pink')
+        self.assertEqual(Cargo.objects.get(code='C-22').color, 'pink')
+        self.assertTrue(Order.objects.filter(cargo__code='C-21', kind='INBOUND').exists())
+        self.assertTrue(Order.objects.filter(cargo__code='C-22', kind='INBOUND').exists())
+
+    def test_seed_container_colors_and_confirmation_match_physical_record(self):
+        call_command('seed_site_dataset', provenance='DECLARED', verbosity=0)
+        by_code = {c.code: (c.color, c.color_confirmed) for c in Cargo.objects.filter(code__startswith='C-')}
+        self.assertEqual(len(by_code), 22)
+        for idx in range(1, 6):
+            self.assertEqual(by_code[f'C-{idx}'], ('pink', True))
+        for idx in range(6, 14):
+            self.assertEqual(by_code[f'C-{idx}'], ('orange', True))
+        for idx in range(14, 18):
+            self.assertEqual(by_code[f'C-{idx}'], ('sky', False))
+        for idx in range(18, 21):
+            self.assertEqual(by_code[f'C-{idx}'], ('yellow', False))
+        for idx in range(21, 23):
+            self.assertEqual(by_code[f'C-{idx}'], ('pink', False))
+        self.assertEqual({color for color, _ in by_code.values()}, {'pink', 'orange', 'sky', 'yellow'})
 
     def test_epc_barcode_tag_binding_and_sequential_arrival_scan_never_guesses_fifo(self):
         c1 = services.register_cargo(

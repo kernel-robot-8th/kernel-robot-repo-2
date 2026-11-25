@@ -3,7 +3,7 @@ from harbor_web import services
 from harbor_web.models import Plan
 from harbor_web.inbound_decision import placement_decision
 from harbor_web.yard_view import spatial_yard_view
-from harbor_web.yard_scene import present_stage, scene_for
+from harbor_web.yard_scene import attach_cargo_metadata, present_stage, scene_for
 
 
 def placement_context(plan):
@@ -36,5 +36,5 @@ def placement_context(plan):
     return dict(order=plan.order, plan=plan, decision=decision,
         decision_place=where(decision.detail['recommendation']) if decision else None, plan_reason=reason_text(plan.result['reason']), newer_plan=newer,
         recommendation_place=where(plan.result.get('recommendation')), alternatives=alternatives,
-        yard_stages=stages, observation_stage=stages[0], yard_scene=scene_for(stages), previous_plan=previous,
+        yard_stages=stages, observation_stage=stages[0], yard_scene=attach_cargo_metadata(scene_for(stages)), previous_plan=previous,
         plan_changes=plan_changes(plan.order, plan), plan_explanation=explain_plan(plan))

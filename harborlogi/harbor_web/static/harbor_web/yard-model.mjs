@@ -92,13 +92,51 @@ export function moveBox(areas, boxes, id, placement) {
   return result.valid ? {...result,boxes:draft} : reject(result.reason);
 }
 
-export function placementFromWorld(areas, box, {x,y,z}) {
-  if (![x,y,z].every(Number.isFinite)) return null;
-  for (const area of areas) {
-    const column=Math.round(x-area.x)+1, row=Math.round(y-area.y)+1;
-    if (column >= 1 && column <= area.columns && row >= 1 && row <= area.rows) {
-      return {area:area.id,row,column,level:Math.round(z)+1,orientation:box.orientation};
-    }
+/** Resolve a floor-plane drag coordinate into a snapped cell, top empty level, and validity. */
+export function dropTargetFromWorld(areas, boxes, id, point, {slotCells = 0} = {}) {
+  if (!point || ![point.x, point.y].every(Number.isFinite)) return null;
+  const box = boxes.find(item => item.id === id);
+  if (!box) return null;
+  const area = areas.find(a =>
+    point.x >= a.x && point.x < a.x + a.columns &&
+    point.y >= a.y && point.y < a.y + a.rows
+  );
+  if (!area) return null;
+  const rawRow = Math.floor(point.y - area.y - (box.depth - 1) / 2) + 1;
+  const row = area.rows >= box.depth
+    ? Math.min(area.rows - box.depth + 1, Math.max(1, rawRow))
+    : 1;
+  let column;
+  if (slotCells > 0 && box.orientation === 0 && box.width === slotCells) {
+    const slotIndex = Math.floor((point.x - area.x) / slotCells);
+    column = slotIndex * slotCells + 1;
+  } else {
+    const rawCol = Math.floor(point.x - area.x - (box.width - 1) / 2) + 1;
+    column = area.columns >= box.width
+      ? Math.min(area.columns - box.width + 1, Math.max(1, rawCol))
+      : 1;
   }
-  return null;
+  let top = 0;
+  for (const other of boxes) {
+    if (other.id === id || other.area !== area.id) continue;
+    const overlaps =
+      other.row < row + box.depth && row < other.row + other.depth &&
+      other.column < column + box.width && column < other.column + other.width;
+    if (overlaps && other.level > top) top = other.level;
+  }
+  const level = top + 1;
+  const placement = {area:area.id, row, column, level, orientation:box.orientation};
+  const result = moveBox(areas, boxes, id, placement);
+  return {
+    area: area.id,
+    placement,
+    valid: result.valid,
+    reason: result.reason,
+    x: area.x + column - 1,
+    y: area.y + row - 1,
+    z: level - 1,
+    visualZ: Math.min(level - 1, area.levels),
+    width: box.width,
+    depth: box.depth,
+  };
 }

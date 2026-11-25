@@ -128,9 +128,13 @@ def cargo_list(request):
     tags_by_cargo = {}
     for tag in CargoTag.objects.filter(cargo_id__in=page_ids).order_by('pk'):
         tags_by_cargo.setdefault(tag.cargo_id, []).append(tag)
+    latest_orders = {}
+    for order in Order.objects.filter(cargo_id__in=page_ids).exclude(kind='REARRANGE').order_by('priority_group', 'sequence', 'pk'):
+        latest_orders.setdefault(order.cargo_id, order)
     for cargo in pagination['page']:
         cargo.current_footprint = footprints.get(cargo.pk)
         cargo.bound_tags = tags_by_cargo.get(cargo.pk, [])
+        cargo.primary_order = latest_orders.get(cargo.pk)
     sorts = {key: dict(active=sort.lstrip('-') == key and field is not None, descending=sort == f'-{key}',
                        next=key if sort == f'-{key}' else f'-{key}') for key in columns}
     return page(request, 'cargo.html', section='cargo', q=q, sort=sort if field else '', sorts=sorts, **pagination)
@@ -284,15 +288,25 @@ def parse_lanes(values):
 @require_roles('operator')
 @require_http_methods(['POST'])
 def outbound_reorder(request):
+    from harbor_web.order_queue import reorder_schedule
     lanes = parse_lanes(request.POST.getlist('lane'))
     if lanes is None:
         return HttpResponseBadRequest('반출 순서 형식이 올바르지 않습니다.')
+    submitted_ids = [oid for lane in lanes for oid, _ in lane['orders']]
+    use_schedule = (
+        request.POST.get('scope') == 'schedule'
+        or Order.objects.filter(pk__in=submitted_ids, kind='INBOUND').exists()
+    )
     try:
-        changed = services.reorder_outbound(request.user, lanes=lanes)
+        changed = (
+            reorder_schedule(request.user, lanes=lanes)
+            if use_schedule
+            else services.reorder_outbound(request.user, lanes=lanes)
+        )
     except (services.Conflict, ValidationError):
-        return render(request, 'error.html', dict(heading='반출 대기열이 바뀌었습니다', reason='편집하는 동안 다른 변경이 있었습니다. 최신 순서를 다시 불러와 편집하세요.', return_url='/outbound/'), status=409)
-    messages.success(request, f'반출 순서를 저장했습니다. 순서가 바뀐 요청 {len(changed)}건은 새 revision이 되어 계획을 다시 검토해야 합니다.' if changed else '바뀐 순서가 없습니다.')
-    return redirect('/outbound/')
+        return render(request, 'error.html', dict(heading='대기열이 바뀌었습니다', reason='편집하는 동안 다른 변경이 있었습니다. 최신 순서를 다시 불러와 편집하세요.', return_url='/work/' if use_schedule else '/outbound/'), status=409)
+    messages.success(request, f'순서를 저장했습니다. 순서가 바뀐 요청 {len(changed)}건은 새 revision이 되어 계획을 다시 검토해야 합니다.' if changed else '바뀐 순서가 없습니다.')
+    return redirect('/work/' if use_schedule else '/outbound/')
 
 
 @require_roles('operator')
@@ -362,7 +376,7 @@ def order_detail(request, pk):
     suffix = f'?observation={observation.pk}' if observation else ''
     priority = forms.PriorityForm(initial=dict(
         expected_version=order.version, title=order.title, voyage_code=order.voyage_code,
-        cutoff_at=order.cutoff_at, priority_group=order.priority_group, sequence=order.sequence,
+        cutoff_at=order.cutoff_at, priority_group=order.priority_group,
         tie_policy=order.tie_policy, note=order.note,
     ))
     plan_form = forms.PlanForm(initial={'expected_version': order.version, 'observation': observation}, review_observation=observation)
@@ -387,9 +401,13 @@ def order_detail(request, pk):
                         data['voyage_code'] = None
                     if 'cutoff_at' in request.POST and data.get('cutoff_at') is None:
                         data['clear_cutoff'] = True
-                    if data.get('sequence') is None:  # same tier keeps its place; a new tier puts it last
-                        data['sequence'] = order.sequence if data['priority_group'] == order.priority_group else \
-                            services.back_of_tier(data['priority_group'], order.kind)[1]
+                    if data['priority_group'] != order.priority_group and (
+                        data.get('sequence') is None or data.get('sequence') == order.sequence
+                    ):
+                        # Tier changed without a new explicit sequence: reallocate atomically in update_order.
+                        data['sequence'] = None
+                    elif data.get('sequence') is None:
+                        data['sequence'] = order.sequence
                     services.update_order(request.user, order_id=pk, **data)
                 else:
                     data = active.cleaned_data
@@ -436,12 +454,12 @@ def inventory(request):
     if selected and all(item.pk != selected.pk for item in choices):
         choices.insert(0, selected)
     from harbor_web.yard_view import yard_view, spatial_yard_view
-    from harbor_web.yard_scene import present_stage, scene_for
+    from harbor_web.yard_scene import attach_cargo_metadata, present_stage, scene_for
     from harbor_web.map_config import map_scene
     view = (spatial_yard_view(services.spatial_snapshot(selected)) if selected.payload.get('schema') == 'grid-placement-v1'
             else yard_view(selected.payload['bays'], selected.condition.payload)) if selected else None
     stage = present_stage(dict(view, panel_id='inventory-yard', label='현재 야드 배치', index=0), condition.payload) if view else None
-    scene = scene_for([stage]) if stage else map_scene(condition.payload) if condition else None
+    scene = attach_cargo_metadata(scene_for([stage])) if stage else map_scene(condition.payload) if condition else None
     from harbor_web.yard_rows import place_context, placement_text, slot_key, spot_label
     labels, slot = place_context(condition.payload) if condition else ({}, None)
     definition_rows = []

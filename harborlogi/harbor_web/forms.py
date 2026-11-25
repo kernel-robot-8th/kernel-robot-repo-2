@@ -3,6 +3,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.utils.html import format_html
+from harbor.cargo_colors import CARGO_COLOR_CHOICES
 from harbor_web.models import Cargo, Condition, Measurement, Observation, Order
 
 
@@ -12,6 +13,10 @@ class FootprintForm(forms.Form):
 
 
 class CargoForm(forms.ModelForm):
+    color = forms.ChoiceField(
+        label='컨테이너 색', required=False,
+        choices=[('', '---------'), *CARGO_COLOR_CHOICES],
+    )
     length_cells = FootprintForm.base_fields['length_cells']
     tag_kind = forms.ChoiceField(
         label='태그 종류', required=False, initial='EPC',
@@ -30,9 +35,10 @@ class CargoForm(forms.ModelForm):
 
     class Meta:
         model = Cargo
-        fields = ['code', 'name', 'weight_kg', 'volume_m3', 'destination', 'shipper_name', 'shipper_tier']
+        fields = ['code', 'name', 'color', 'color_confirmed', 'weight_kg', 'volume_m3', 'destination', 'shipper_name', 'shipper_tier']
         labels = dict(
-            code='화물 ID', name='화물 이름', weight_kg='중량 (kg)', volume_m3='부피 (m³)',
+            code='화물 ID', name='화물 이름', color='컨테이너 색', color_confirmed='실물 색 확인',
+            weight_kg='중량 (kg)', volume_m3='부피 (m³)',
             destination='목적지', shipper_name='화주 이름', shipper_tier='화주 등급',
         )
         help_texts = dict(code='등록 뒤에도 원래 ID를 유지합니다. 실제 위치는 야드 현황으로 확인합니다.')

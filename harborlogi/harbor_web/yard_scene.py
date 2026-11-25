@@ -1,6 +1,7 @@
 """Read-only logical cuboids from the existing configured stage presentation."""
 from copy import deepcopy
 
+from harbor.cargo_colors import CARGO_COLORS, CARGO_COLOR_LABELS
 from harbor_web.yard_occupancy import AREA_LABELS
 
 
@@ -104,4 +105,104 @@ def scene_for(stages):
                 for cell in bay['cells'] if cell['code'])
         frames.append(dict(index=stage['index'], label=stage['label'], boxes=boxes, move=deepcopy(stage.get('move'))))
     return dict(areas=[{k: a[k] for k in ('id', 'label', 'rows', 'columns', 'levels', 'x', 'y', 'addresses')} for a in areas],
-        frames=frames, slot_cells=first.get('slot_cells'))
+        frames=frames, slot_cells=first.get('slot_cells'), cargo_colors=list(CARGO_COLORS))
+
+
+def _tier_info(priority_group, shipper_tier):
+    effective = priority_group if priority_group is not None else shipper_tier
+    if effective == 1:
+        return 'urgent', '긴급'
+    if effective == 2:
+        return 'priority', '우선'
+    if effective is not None and effective >= 3:
+        return 'normal', '일반'
+    return 'neutral', ''
+
+
+def cargo_scene_metadata(codes):
+    """Read-only lookup of container color, priority tier, and basic info for 3D scenes."""
+    unique = {code for code in codes if code}
+    if not unique:
+        return {}
+    from django.utils import timezone
+    from harbor_web.models import Cargo, Order
+    from harbor_web.order_queue import completed_order_ids
+
+    cargos = {c.code: c for c in Cargo.objects.filter(code__in=unique)}
+    if not cargos:
+        return {}
+    done_ids = completed_order_ids()
+    open_orders = {}
+    for order in (
+        Order.objects.filter(cargo__code__in=unique)
+        .exclude(kind='REARRANGE')
+        .exclude(pk__in=done_ids)
+        .select_related('cargo')
+        .order_by('priority_group', 'sequence', 'pk')
+    ):
+        open_orders.setdefault(order.cargo.code, order)
+    fallback_orders = {}
+    missing = unique - set(open_orders)
+    if missing:
+        for order in (
+            Order.objects.filter(cargo__code__in=missing)
+            .exclude(kind='REARRANGE')
+            .select_related('cargo')
+            .order_by('-pk')
+        ):
+            fallback_orders.setdefault(order.cargo.code, order)
+
+    meta = {}
+    for code, cargo in cargos.items():
+        open_order = open_orders.get(code)
+        info_order = open_order or fallback_orders.get(code)
+        priority_group = open_order.priority_group if open_order is not None else None
+        priority_tier, priority_label = _tier_info(priority_group, cargo.shipper_tier)
+        cutoff = ''
+        if info_order is not None and info_order.cutoff_at is not None:
+            local_cutoff = timezone.localtime(info_order.cutoff_at) if timezone.is_aware(info_order.cutoff_at) else info_order.cutoff_at
+            cutoff = f'{local_cutoff:%m-%d %H:%M}'
+        meta[code] = dict(
+            color=cargo.color,
+            color_label=CARGO_COLOR_LABELS.get(cargo.color, '') if cargo.color else '',
+            color_confirmed=bool(cargo.color_confirmed),
+            priority_group=priority_group,
+            shipper_tier=cargo.shipper_tier,
+            priority_tier=priority_tier,
+            priority_label=priority_label,
+            cargo_name=cargo.name,
+            shipper=cargo.shipper_name,
+            destination=cargo.destination,
+            voyage=info_order.voyage_code if info_order is not None else '',
+            cutoff=cutoff,
+        )
+    return meta
+
+
+def attach_cargo_metadata(scene, metadata=None):
+    """Attach read-only color, priority tier, and basic cargo metadata onto every box in a scene."""
+    if not scene or not scene.get('frames'):
+        return scene
+    scene.setdefault('cargo_colors', list(CARGO_COLORS))
+    if metadata is None:
+        codes = {box['id'] for frame in scene['frames'] for box in frame.get('boxes', []) if box.get('id')}
+        metadata = cargo_scene_metadata(codes)
+    for frame in scene['frames']:
+        for box in frame.get('boxes', []):
+            info = metadata.get(box.get('id'))
+            if info:
+                box.update(info)
+            else:
+                box.setdefault('color', '')
+                box.setdefault('color_label', '')
+                box.setdefault('color_confirmed', False)
+                box.setdefault('priority_group', None)
+                box.setdefault('shipper_tier', None)
+                box.setdefault('priority_tier', 'neutral')
+                box.setdefault('priority_label', '')
+                box.setdefault('cargo_name', '')
+                box.setdefault('shipper', '')
+                box.setdefault('destination', '')
+                box.setdefault('voyage', '')
+                box.setdefault('cutoff', '')
+    return scene

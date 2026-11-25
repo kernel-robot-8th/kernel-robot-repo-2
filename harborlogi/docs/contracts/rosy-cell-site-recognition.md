@@ -15,7 +15,7 @@ Rosy D-1075(ROSY #735 운영 배포)의 필드 이름과 확정 경로를 따르
 | `sites` | 최대 512개 자리, 빈 목록·부분 스냅샷 허용 |
 | `sites[].site_ref` | `<area>-r<row>-c<슬롯 첫 열>-l<tier>`, 최대 96자 |
 | `sites[].state` | `EMPTY`, `OCCUPIED`, `UNREADABLE` |
-| `sites[].object_class` | 종류/색 문자열 또는 null, 화물 신원으로 사용하지 않음 |
+| `sites[].object_class` | 종류/색 문자열 또는 null(`object_class`는 `orange`/`pink`/`yellow`/`sky` 낱말을 기대, 다른 값도 허용하며 화물 신원으로 사용하지 않음) |
 | `sites[].object_ref_read` | 실제 판독한 화물 코드 문자열 또는 null |
 | `sites[].confidence` | 0~1 유한수, bool 불가 |
 
@@ -35,6 +35,7 @@ UTC가 아닌/잘못된 시각, 잘못된 타입·범위는 `ValueError(코드: 
 `harbor_cargo_id`, `result`를 반환한다. 결과는 `MATCH`, `ROSY_EMPTY_HARBOR_OCCUPIED`,
 `ROSY_OCCUPIED_HARBOR_EMPTY`, `UNREADABLE`, `CLASS_MISMATCH`다.
 `CLASS_MISMATCH`는 OCCUPIED 자리의 실제 `object_ref_read`와 장부 화물 코드가 다를 때만이다.
+`object_class`는 `orange`/`pink`/`yellow`/`sky` 낱말을 기대한다(`harbor/cargo_colors.py`의 `CARGO_COLORS` 공유). 장부 화물 색을 알 때 OCCUPIED 자리의 `object_class`가 그 낱말 중 하나이고 다르면 기존 `result`는 그대로 두고 `color_mismatch: true`만 추가한다.
 못 읽음은 사람 확인 대기이며, 응답에 없는 자리는 빈 자리로 추정하지 않는다.
 이 결과는 ADR 0036의 표시·사람 확인 보류용이다. 사진 판정·장부 자동 수정은 하지 않는다.
 

@@ -10,9 +10,42 @@ from datetime import datetime
 from itertools import permutations
 
 from harbor.model import OutboundRequest
-from harbor.spatial import SpatialMove, SpatialPolicy, SpatialSnapshot, plan_spatial
+from harbor.placement import plan_placement
+from harbor.spatial import CargoShape, Placement, SpatialMove, SpatialPolicy, SpatialSnapshot, plan_spatial
 
 EXACT_LIMIT = 4  # 4! = 24 complete simulations per tier
+
+
+@dataclass(frozen=True)
+class ScheduleEntry:
+    kind: str  # 'OUTBOUND' or 'INBOUND'
+    cargo_id: str
+    shape: CargoShape | None = None
+    reserved_cells: frozenset[tuple[str, int, int, int]] = frozenset()
+
+
+@dataclass(frozen=True)
+class ScheduleStep:
+    cargo_id: str
+    kind: str
+    status: str
+    reason: str
+    move_count: int = 0
+    rehandle_count: int = 0
+    moves: tuple[SpatialMove, ...] = field(default=(), compare=False, repr=False)
+    recommendation: Placement | None = None
+    search_complete: bool | None = field(default=None, compare=False, repr=False)
+    budget_reason: str | None = field(default=None, compare=False, repr=False)
+
+
+@dataclass(frozen=True)
+class ScheduleScenario:
+    entries: tuple[ScheduleEntry, ...]
+    feasible: bool
+    total_moves: int
+    rehandles: int
+    steps: tuple[ScheduleStep, ...]
+    final: SpatialSnapshot | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -109,6 +142,101 @@ def evaluate_order(snapshot: SpatialSnapshot, policy: SpatialPolicy, order: tupl
     if len(set(codes)) != len(codes):
         raise ValueError('Retrieval order must not contain duplicate cargo')
     return _play(snapshot, policy, codes, now=now, schedule=dict(schedule or {}), group=group, exhaustive=False)
+
+
+def _placement_cells(placement: Placement, length_cells: int) -> frozenset[tuple[str, int, int, int]]:
+    return frozenset(
+        (
+            placement.area_id,
+            placement.row + (n if placement.orientation == 90 else 0),
+            placement.column + (n if placement.orientation == 0 else 0),
+            placement.level,
+        )
+        for n in range(length_cells)
+    )
+
+
+def evaluate_schedule(snapshot: SpatialSnapshot, policy: SpatialPolicy,
+                      entries: tuple[ScheduleEntry, ...] | list[ScheduleEntry], *,
+                      now: datetime, schedule: dict[str, tuple[int, int | None]] | None = None,
+                      reserved_cells: frozenset[tuple[str, int, int, int]] = frozenset()) -> ScheduleScenario:
+    """Simulate a mixed inbound/outbound schedule sequentially using the domain planners without mutating state."""
+    seq = tuple(entries)
+    current = snapshot
+    ranks = dict(schedule or {})
+    steps: list[ScheduleStep] = []
+    base_reserved = frozenset(reserved_cells)
+    prior_inbound_cells: dict[str, frozenset[tuple[str, int, int, int]]] = {}
+    inbound_lengths: dict[str, int] = {}
+    for entry in seq:
+        if entry.kind == 'OUTBOUND':
+            step, after = _retrieve(current, policy, entry.cargo_id, now=now, ranks=ranks)
+            steps.append(ScheduleStep(
+                cargo_id=step.cargo_id,
+                kind='OUTBOUND',
+                status=step.status,
+                reason=step.reason,
+                move_count=step.move_count,
+                rehandle_count=step.rehandle_count,
+                moves=step.moves,
+                search_complete=step.search_complete,
+                budget_reason=step.budget_reason,
+            ))
+            if after is None:
+                return ScheduleScenario(
+                    seq, False, sum(s.move_count for s in steps), sum(s.rehandle_count for s in steps), tuple(steps)
+                )
+            for move in step.moves:
+                if move.cargo_id in prior_inbound_cells:
+                    prior_inbound_cells[move.cargo_id] = _placement_cells(
+                        move.destination_placement, inbound_lengths[move.cargo_id]
+                    )
+            prior_inbound_cells.pop(entry.cargo_id, None)
+            inbound_lengths.pop(entry.cargo_id, None)
+            current = after
+            ranks.pop(entry.cargo_id, None)
+        elif entry.kind == 'INBOUND':
+            if entry.shape is None:
+                steps.append(ScheduleStep(entry.cargo_id, 'INBOUND', 'HOLD', 'INCOMING_FOOTPRINT_REQUIRED'))
+                return ScheduleScenario(
+                    seq, False, sum(s.move_count for s in steps), sum(s.rehandle_count for s in steps), tuple(steps)
+                )
+            step_reserved = base_reserved | entry.reserved_cells
+            if prior_inbound_cells:
+                step_reserved = step_reserved.union(*prior_inbound_cells.values())
+            proposal = plan_placement(current, entry.shape, policy, ranks, now=now, reserved_cells=step_reserved)
+            if proposal.status != 'READY' or proposal.recommendation is None:
+                steps.append(ScheduleStep(entry.cargo_id, 'INBOUND', proposal.status, proposal.reason))
+                return ScheduleScenario(
+                    seq, False, sum(s.move_count for s in steps), sum(s.rehandle_count for s in steps), tuple(steps)
+                )
+            rec = proposal.recommendation
+            if rec.area_id not in policy.storage_areas:
+                steps.append(ScheduleStep(entry.cargo_id, 'INBOUND', 'HOLD', 'NO_LEGAL_PLACEMENT'))
+                return ScheduleScenario(
+                    seq, False, sum(s.move_count for s in steps), sum(s.rehandle_count for s in steps), tuple(steps)
+                )
+            steps.append(ScheduleStep(
+                cargo_id=entry.cargo_id,
+                kind='INBOUND',
+                status='READY',
+                reason=proposal.reason,
+                move_count=len(proposal.moves),
+                rehandle_count=0,
+                recommendation=rec,
+            ))
+            prior_inbound_cells[entry.cargo_id] = _placement_cells(rec, entry.shape.length_cells)
+            inbound_lengths[entry.cargo_id] = entry.shape.length_cells
+            current = replace(
+                current,
+                shapes=current.shapes + (entry.shape,),
+                placements=current.placements + (rec,),
+            )
+        else:
+            raise ValueError(f'Unsupported schedule entry kind: {entry.kind}')
+    return ScheduleScenario(
+        seq, True, sum(s.move_count for s in steps), sum(s.rehandle_count for s in steps), tuple(steps), current
+    )
 
 
 def rank_retrieval_orders(snapshot: SpatialSnapshot, policy: SpatialPolicy, codes: tuple[str, ...], *, now: datetime,

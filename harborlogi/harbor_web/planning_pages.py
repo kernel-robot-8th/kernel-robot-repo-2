@@ -222,9 +222,10 @@ def plan_detail(request, pk):
     display_moves = [dict(move, source=placement_text(move['source_placement'], labels, slot),
                           destination=placement_text(move['destination_placement'], labels, slot)) if move.get('source_placement') else move
                      for move in (plan.result.get('moves', []) if plan.order.kind == 'REARRANGE' else [])]
+    from harbor_web.yard_scene import attach_cargo_metadata
     return page(request, 'plan.html', section='inventory', plan=plan, display_moves=display_moves, gate=gate,
                 gate_reason=gate_text(gate['reason']), plan_reason=reason_text(plan.result['reason']), command=None,
-                observation_stage=observation_stage, yard_scene=scene_for([observation_stage]) if observation_stage else None,
+                observation_stage=observation_stage, yard_scene=attach_cargo_metadata(scene_for([observation_stage])) if observation_stage else None,
                 cell_plan_dispatches=cell_plan_dispatch.dispatch_views_for_order(plan.order),
                 cell_plan_preview=preview_result,
                 can_confirm_outbound_load=has_role(request.user, 'field', 'operator'),
@@ -238,7 +239,7 @@ def plan_detail(request, pk):
 def candidate_preview(request, pk, rank):
     from harbor_web.recommendation_view import candidate_details
     from harbor_web.workspace import spatial_stages, plan_changes
-    from harbor_web.yard_scene import scene_for
+    from harbor_web.yard_scene import attach_cargo_metadata, scene_for
     plan = get_object_or_404(Plan.objects.select_related('order__cargo', 'observation__condition', 'condition'), pk=pk)
     details = candidate_details(plan.result, rank)
     if details is None or not isinstance(plan.observation.payload, dict) or plan.observation.payload.get('schema') != 'grid-placement-v1':
@@ -251,7 +252,7 @@ def candidate_preview(request, pk, rank):
         is_recommended=rank == 1, score_rows=details['score_rows'],
         optimization_quality=details['quality_label'], search_complete=details['search_complete'],
         candidate_ranks=range(1, details['candidate_count'] + 1), plan_changes=plan_changes(plan.order, plan),
-        yard_stages=stages, display_moves=moves, yard_scene=scene_for(stages))
+        yard_stages=stages, display_moves=moves, yard_scene=attach_cargo_metadata(scene_for(stages)))
 
 
 @require_roles('viewer', 'operator', 'admin')

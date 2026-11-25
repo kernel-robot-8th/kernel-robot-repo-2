@@ -51,7 +51,8 @@ def _preview(observation, progress, now):
         yard_stages, display_moves = spatial_stages(
             Order(pk=0, kind='REARRANGE'), observation, raw_moves, snapshot=projected,
         )
-        yard_scene = scene_for(yard_stages)
+        from harbor_web.yard_scene import attach_cargo_metadata
+        yard_scene = attach_cargo_metadata(scene_for(yard_stages))
         if yard_scene:
             occupancy = occupancy_map(yard_stages[0] if yard_stages else None, display_moves)
             yard_scene['rehandle'] = occupancy['rehandle_cargo'] if occupancy else []

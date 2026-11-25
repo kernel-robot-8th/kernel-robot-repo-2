@@ -43,15 +43,17 @@ class WorkHubTests(TestCase):
         self.client.force_login(self.operator)
         return self.client.get('/work/')
 
-    def test_empty_hub_has_four_sections_and_no_estimates_or_actions(self):
+    def test_empty_hub_has_unified_schedule_and_no_estimates_or_actions(self):
         response = self.get_hub()
-        for text in ('<h1>작업</h1>', '오늘 시간표', '반출 순서', '입고 자리', '자동 재배치',
+        for text in ('<h1>작업</h1>', '오늘 시간표', '입고 자리', '자동 재배치',
                      '등록된 작업이 없습니다',
                      '<a href="/rearrangement/">자동 재배치 상세</a>'):
             self.assertContains(response, text)
         body = response.content.decode().split('<main', 1)[1]
-        for text in ('type="submit"', 'draggable=', '예정 시각', '희망 시각', '진행률', 'READY', 'HOLD', '#번호'):
+        for text in ('입고·반출 순서', 'work-outbound', 'work-timeline',
+                     'type="submit"', 'draggable=', '예정 시각', '희망 시각', '진행률', 'READY', 'HOLD', '#번호'):
             self.assertNotIn(text, body)
+        self.assertEqual(body.count('<h2 id="work-today">오늘 시간표</h2>'), 1)
         self.assertRegex(body, r'<details[^>]*>\s*<summary>자동 재배치')
 
     def test_today_uses_first_completion_per_order_and_local_midnight(self):
@@ -135,14 +137,14 @@ class WorkHubTests(TestCase):
         from harbor_web.work_hub import hub_context
         first = self.order('FIRST')
         self.plan(first)
-        with self.assertNumQueries(4):
+        with self.assertNumQueries(5):
             hub_context()
         for number in range(2, 8):
             order = self.order(f'C{number}', sequence=number)
             self.plan(order)
             self.plan(order)
             self.command(order, 'PREPARED')
-        with self.assertNumQueries(4):
+        with self.assertNumQueries(5):
             context = hub_context()
         self.assertEqual(len(context['timeline']), 7)
 
