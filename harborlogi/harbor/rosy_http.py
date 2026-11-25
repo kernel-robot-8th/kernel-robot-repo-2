@@ -17,6 +17,21 @@ from harbor.site_recognition import parse_site_recognition
 SITE_RECOGNITION_PATH_PROPOSED = '/api/fleet/cell-site-recognition'
 
 
+def validate_console_url(value):
+    if not value:
+        return None
+    parsed = urlsplit(value)
+    try:
+        local = parsed.hostname == 'localhost' or ipaddress.ip_address(parsed.hostname).is_loopback
+    except ValueError:
+        local = False
+    if (not parsed.hostname or parsed.username is not None or '?' in value or '#' in value
+            or parsed.scheme not in {'https', 'http'} or parsed.scheme == 'http' and not local
+            or any(c.isspace() or ord(c) <= 32 for c in value) or '\\' in value or parsed.port == 0):
+        raise ValueError('Expected a console HTTPS URL or loopback HTTP URL without credentials or query')
+    return value
+
+
 class FleetIdentityError(ValueError):
     """The configured app identity was not authenticated; no operation was sent."""
 

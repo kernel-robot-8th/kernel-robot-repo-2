@@ -2,7 +2,7 @@
 import os
 from urllib.parse import urlencode, urlsplit
 
-from harbor.rosy_http import RosyClient
+from harbor.rosy_http import RosyClient, validate_console_url
 from harbor.execution import execution_phase
 from harbor_web.presentation import COMMAND_LABELS
 
@@ -14,7 +14,7 @@ JOB_LABELS = {
 }
 
 
-def fleet_links(origin, mission_id=None, robot_id=None, arm_console_enabled=False):
+def fleet_links(origin, mission_id=None, robot_id=None, arm_console_enabled=False, *, console_url=None):
     links = dict(console=None, arm=None, robot=None)
     try:
         if not isinstance(origin, str) or any(c.isspace() or ord(c) < 32 for c in origin):
@@ -23,7 +23,11 @@ def fleet_links(origin, mission_id=None, robot_id=None, arm_console_enabled=Fals
         urlsplit(origin).port
     except (ValueError, TypeError):
         return links
-    base = origin.rstrip('/') + '/console?'
+    try:
+        console_url = validate_console_url(console_url)
+    except ValueError:
+        console_url = None
+    base = (console_url or origin.rstrip('/') + '/console') + '?'
     links['console'] = base + 'view=work'
     if mission_id and arm_console_enabled:
         links['arm'] = base + urlencode(dict(view='work', arm_transfer=mission_id))
@@ -36,7 +40,8 @@ def connection_summary():
     from harbor_web.fleet_connection import connection_settings, last_check
     config = connection_settings()
     check = last_check()
-    links = fleet_links(config['origin'])
+    console_url = os.environ.get('HARBOR_FLEET_CONSOLE_URL') if config['source'] == 'deployment' else None
+    links = fleet_links(config['origin'], console_url=console_url)
     declared = config['arm_console_enabled']
     configured = bool(links['console']) and config['allowed'] and bool(config['principal']) and all(
         os.environ.get('HARBOR_' + key) for key in ('LEDGER_PATH', 'FLEET_TOKEN', 'BINDINGS_PATH'))
@@ -60,11 +65,12 @@ def pipeline_for(order, plan=None, command=None, detail=None, *, cell_plan_dispa
     job, receipt, ledger = detail.get('job') or {}, detail.get('receipt'), detail.get('ledger') or {}
     from harbor_web.fleet_connection import connection_settings
     config = connection_settings()
+    console_url = os.environ.get('HARBOR_FLEET_CONSOLE_URL') if config['source'] == 'deployment' else None
     if command is None and cell_plan_dispatch is not None:
         from harbor_web.work_state import work_state
         cp = cell_plan_dispatch
         cp_work = work_state(cell_plan_dispatch=cp)
-        links = fleet_links(config['origin']) if (config['origin'] and config['allowed']) else fleet_links(None)
+        links = fleet_links(config['origin'] if config['allowed'] else None, console_url=console_url)
         submitted = bool(cp.rosy_plan_id and cp.state not in ('SUBMITTING', 'NOT_FOUND'))
         approved = cp.state in ('QUEUED', 'COMPLETED') or cp_work in ('진행 중', '완료')
         executed = cp_work == '완료'
@@ -95,7 +101,8 @@ def pipeline_for(order, plan=None, command=None, detail=None, *, cell_plan_dispa
     status = execution_phase(job) if job else ''
     uncertain = state in {'UNKNOWN', 'DISPATCHING', 'CANCEL_PENDING'} or bool(detail.get('reason') == 'LEDGER_UNAVAILABLE')
     links = fleet_links(command.fleet_origin, command.mission_id,
-        arm_console_enabled=config['arm_console_enabled'] and (not config['origin'] or config['origin'] == command.fleet_origin)) if command else fleet_links(None)
+        arm_console_enabled=config['arm_console_enabled'] and (not config['origin'] or config['origin'] == command.fleet_origin),
+        console_url=console_url if config['origin'] == command.fleet_origin else None) if command else fleet_links(None)
     submitted = bool(command and command.mission_id and state != 'PREPARED')
     approved = status in {'awaiting_execution', 'executing', 'awaiting_physical_evidence', 'physical_confirmed'}
     executed = status in {'awaiting_physical_evidence', 'physical_confirmed'}
