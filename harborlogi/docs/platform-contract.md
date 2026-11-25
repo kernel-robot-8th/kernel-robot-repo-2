@@ -23,11 +23,11 @@ A와 C는 주소가 서로 다를 수 있다. Fleet 주소는 `HARBOR_FLEET_ORIG
 전송과 신뢰
 
 1. Harbor가 R과 Account를 부를 때는 https만 쓴다. 평문 http는 같은 PC 안의 시험(loopback)에서만 허용한다. redirect는 따라가지 않는다.
-2. 인증서와 호스트 이름 검증을 끄지 않는다. 주소는 인증서에 적힌 이름으로 설정하고 IP 주소로 적지 않는다. 사설 CA는 `SSL_CERT_FILE`로만 더한다.
+2. 인증서와 호스트 이름 검증을 끄지 않는다. 주소는 인증서에 적힌 이름으로 설정하고 IP 주소로 적지 않는다. 사설 CA는 `SSL_CERT_FILE` 또는 `HARBOR_FLEET_CA_FILE`로 더한다.
 
 기계 신원(경로 A)
 
-3. Harbor 서버는 R이 발급한 service principal 하나(96자 이하)의 Bearer 토큰만 쓴다. 토큰은 서버 환경 변수에만 두고 DB·화면·기록에 남기지 않는다. 사람의 로그인 토큰으로 R을 부르지 않는다.
+3. Harbor 서버는 R이 발급한 service principal 하나(96자 이하)의 Bearer 토큰만 쓴다. 토큰은 서버 환경 변수에만 두고 DB·화면·기록에 남기지 않는다. 실행·제안 경로는 사람의 로그인 토큰으로 R을 부르지 않는다(단, 읽기 전용 탑뷰 프록시는 ADR 0037에 따라 로그인한 사용자의 Rosy 계정 토큰을 서버에서 전달하며 브라우저에 노출하지 않는다).
 4. 실행 경로는 R을 부를 때마다 먼저 `GET /api/fleet/session`으로 `principal_id`가 설정값과 같고 `role`이 `service`인지 확인한다. 다르면 요청을 보내지 않는다.
 5. Harbor는 작업을 제안하고 결과를 읽기만 한다. 승인(admission)은 ROSY가 하고, 셀 API는 직접 부르지 않는다.
 
@@ -80,6 +80,10 @@ ROSY 정본(`shared/web/cell-site-map.json`, 37셀·13슬롯)과 Harbor `Conditi
 - **사전 검증 및 라이브 대시보드**:
   - `harbor.cell_site_map`(`canonical_cell_wire_refs`, `canonical_cell_slot_specs`, `validate_canonical_cell_placement`, `validate_canonical_wire_ref`)과 `harbor.cell_plan`(`observation_site_state`, `build_harbor_plan_spec`, `build_rosy_directive_spec`)은 비정규 좌표·슬롯 비시작 열(`c2`/`c3`/`c5`/`c6`)·구역 담당 암 불일치·13개 `slot_id` 외 `goal` 키·최대 단수(`max_tier`) 초과를 송신 전 차단한다.
   - `/inventory/`는 활성 `Condition`이 없거나 ROSY 정본(`cell_zones`, `outbound_handoffs`)과 어긋날 때 `compare_condition_with_rosy` 결과를 표시한다.
+- **셀 부지 인식(`rosy.cell-site-recognition.v1`) · 반출 적재 이벤트 · S3 ARM 복구**:
+  - `GET/POST /api/fleet/cell-site-recognition`: workcell 관측 토큰 또는 운영자/서비스 권한으로 `rosy.cell-site-recognition.v1` 스냅샷을 검증·저장하고, Harbor는 `GET` 조회(`RosyClient.site_recognition`)만 사용한다.
+  - `container.loaded_for_outbound`: ROSY `PortEvent` 확장 이벤트(`object_ref`, `vehicle_id`, `identity`)를 Harbor `IntakeLedger`가 수신하면 `outbound_loop.tick`이 `PICKUP_ARRIVED` 반출 배차를 `LOADED`로 자동 전이하고 Leg 2(`S_EXIT`)를 준비한다.
+  - S3 `BUSINESS_HOLD` 복구 요청: Harbor는 `GET/POST /api/fleet/arm-transfers/jobs/{mission_id}/recovery`(`RosyClient.arm_recovery_preview` · `arm_recovery_request`)로 복구 요청만 제출하며, 최종 승인은 ROSY 기명 운영자에게 남는다.
 
 
 ### 규칙별 확인 방법

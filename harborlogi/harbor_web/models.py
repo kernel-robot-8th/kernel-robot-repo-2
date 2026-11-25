@@ -15,12 +15,58 @@ class Cargo(Immutable):
     weight_kg = models.DecimalField(max_digits=12, decimal_places=3, validators=[MinValueValidator(Decimal('0.001'))])
     volume_m3 = models.DecimalField(max_digits=12, decimal_places=4, validators=[MinValueValidator(Decimal('0.0001'))])
     destination = models.CharField(max_length=160)
+    shipper_name = models.CharField(max_length=96, blank=True, default='')
+    shipper_tier = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        choices=[(1, '긴급 화주'), (2, '우선 화주'), (3, '일반 화주')],
+        validators=[MinValueValidator(1), MaxValueValidator(3)],
+    )
 
     class Meta:
         constraints = [models.CheckConstraint(condition=models.Q(weight_kg__gt=0, volume_m3__gt=0), name='cargo_positive_dimensions')]
 
     def __str__(self):
         return self.code
+
+
+class CargoTag(Immutable):
+    """Append-only EPC/barcode/QR binding to one immutable Cargo (never stores ROSY marker_id)."""
+
+    cargo = models.ForeignKey(Cargo, on_delete=models.PROTECT, related_name='tags')
+    tag_kind = models.CharField(
+        max_length=16,
+        default='EPC',
+        choices=[('EPC', 'EPC'), ('BARCODE', '바코드'), ('QR', 'QR')],
+    )
+    tag_value = models.CharField(max_length=128, unique=True)
+
+    def __str__(self):
+        return f'{self.tag_kind}:{self.tag_value} -> {self.cargo.code}'
+
+
+class ArrivalEvent(Immutable):
+    """Append-only sequential physical arrival scan record at gate/conveyor."""
+
+    cargo = models.ForeignKey(Cargo, null=True, blank=True, on_delete=models.PROTECT, related_name='arrivals')
+    tag_value = models.CharField(max_length=128)
+    tag_kind = models.CharField(
+        max_length=16,
+        default='EPC',
+        choices=[('EPC', 'EPC'), ('BARCODE', '바코드'), ('QR', 'QR'), ('CODE', '화물 ID')],
+    )
+    match_status = models.CharField(
+        max_length=16,
+        default='MATCHED',
+        choices=[('MATCHED', '매칭 완료'), ('UNREGISTERED', '미등록 태그'), ('MISMATCH', '불일치')],
+    )
+    intake_point = models.CharField(max_length=64, blank=True, default='S1')
+    vehicle_id = models.CharField(max_length=64, blank=True, default='')
+    observed_at = models.DateTimeField()
+    note = models.CharField(max_length=192, blank=True, default='')
+
+    class Meta:
+        ordering = ['id']
 
 
 class CargoFootprint(Immutable):
@@ -75,6 +121,8 @@ class Order(Authored):
     # Display name. queue_digest leaves the column out, so adding it kept stored plan digests intact; editing a
     # title still bumps the order version like any instruction change, which marks plans for review (#34).
     title = models.CharField(max_length=80, blank=True, default='')
+    voyage_code = models.CharField(max_length=64, blank=True, default='')
+    cutoff_at = models.DateTimeField(null=True, blank=True)
     note = models.CharField(max_length=500, blank=True)
     version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
     updated_at = models.DateTimeField(auto_now=True)

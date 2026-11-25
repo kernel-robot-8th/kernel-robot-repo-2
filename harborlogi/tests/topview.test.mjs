@@ -1,5 +1,15 @@
 import assert from 'node:assert/strict';
-import {pollDelay, frameStatus, mountTopview} from '../harbor_web/static/harbor_web/topview.mjs';
+import {
+  pollDelay,
+  frameStatus,
+  mountTopview,
+  resolveRotationDeg,
+  displayRotationDeg,
+  projectPoint,
+  projectRoi,
+  shouldShowOverlay,
+  buildOverlayItems,
+} from '../harbor_web/static/harbor_web/topview.mjs';
 
 assert.equal(pollDelay(200, false), 1000);
 for (const status of [0, 404, 502, 503]) {
@@ -17,6 +27,9 @@ const capturedEpoch = capturedDate.getTime() / 1000;
 assert.equal(frameStatus(200, captured), '찍은 시각 09:08:07');
 assert.equal(frameStatus(200, String(capturedEpoch)), '찍은 시각 09:08:07');
 assert.equal(frameStatus(200, `${capturedEpoch}.410025`), '찍은 시각 09:08:07');
+assert.equal(frameStatus(200, captured, 'map-overlay'), '실제 환경 + 좌표 · 찍은 시각 09:08:07');
+assert.equal(frameStatus(200, null, 'map-overlay'), '실제 환경 + 좌표');
+assert.equal(frameStatus(200, captured, 'map'), '버드뷰 평면 · 찍은 시각 09:08:07');
 assert.equal(frameStatus(502, captured), 'ROSY 연결 안 됨');
 console.log('Topview: normal polling, retry, visibility pause and status text passed');
 
@@ -121,6 +134,28 @@ try {
   window.dispatchEvent(new Event('pagehide'));
   assert.equal(timers.size, 0);
   assert.equal(image.hidden, true);
+
+  const autoSelect = new EventTarget();
+  autoSelect.options = ['offline', 'live', 'manual'].map(id => ({value: `/topview/${id}/frame/`}));
+  autoSelect.selectedIndex = 0;
+  Object.defineProperty(autoSelect, 'value', {get: () => autoSelect.options[autoSelect.selectedIndex].value});
+  const autoNodes = {...nodes, '[data-topview-source]': autoSelect};
+  respond = () => Promise.resolve(calls.at(-1).url.includes('/live/')
+    ? new Response('jpeg', {headers: {'Content-Type': 'image/jpeg'}})
+    : new Response('frame unavailable', {status: 404}));
+  const cleanAuto = mountTopview({querySelector: selector => autoNodes[selector], dataset: {}});
+  await settle();
+  assert.equal(autoSelect.selectedIndex, 0, 'a cold stream gets another request');
+  tick(); await settle();
+  assert.equal(autoSelect.selectedIndex, 1, 'the next camera is shown if the default has no fresh frame');
+  assert.equal(image.hidden, false);
+  autoSelect.selectedIndex = 0;
+  autoSelect.dispatchEvent(new Event('change'));
+  await settle();
+  tick(); await settle();
+  assert.equal(autoSelect.selectedIndex, 0, 'an explicit choice stays selected while unavailable');
+  assert.equal(image.hidden, true);
+  cleanAuto();
 
   // Offscreen Image.decode() atomic frame swap, mid-decode abort, corrupt JPEG rejection, and full cleanup.
   let hiddenState = true;
@@ -233,8 +268,161 @@ try {
   assert.equal(calls.length, callsBeforeCleanup);
   assert.equal(removedAttrs.length, removedAfterCleanup);
   assert.equal(timers.size, 0);
+
+  // Mode selector switches between default map_overlay ('auto') and explicit raw ('?view=raw').
+  timers.clear();
+  calls.length = 0;
+  const modeImage = {hidden: true, style: {}, removeAttribute() {}};
+  const modeStatus = {textContent: ''};
+  const modeOrientation = {textContent: '기본 방향 안내'};
+  const modeSelect = new EventTarget();
+  modeSelect.value = 'auto';
+  const modeNodes = {
+    '[data-topview-image]': modeImage,
+    '[data-topview-status]': modeStatus,
+    '[data-topview-mode]': modeSelect,
+    '[data-topview-orientation]': modeOrientation,
+  };
+  decodeBehavior = () => Promise.resolve();
+  respond = () => Promise.resolve(new Response('overlay-jpeg', {
+    headers: {
+      'Content-Type': 'image/jpeg',
+      'X-Frame-Rectified': 'map-overlay',
+      'X-Frame-Captured-At': captured,
+    },
+  }));
+  const modeCleanup = mountTopview({
+    querySelector: selector => modeNodes[selector],
+    dataset: {topviewUrl: '/topview/cam-one/frame/'},
+  });
+  await settle();
+  assert.equal(calls.at(-1).url, '/topview/cam-one/frame/');
+  assert.equal(modeStatus.textContent, '실제 환경 + 좌표 · 찍은 시각 09:08:07');
+  assert.equal(modeOrientation.textContent, '버드뷰 실제 환경 + 좌표 (지도 +X 오른쪽 · +Y 위)');
+
+  modeSelect.value = 'raw';
+  respond = () => Promise.resolve(new Response('raw-jpeg', {
+    headers: {'Content-Type': 'image/jpeg', 'X-Frame-Captured-At': captured},
+  }));
+  modeSelect.dispatchEvent(new Event('change'));
+  await settle();
+  assert.equal(calls.at(-1).url, '/topview/cam-one/frame/?view=raw');
+  assert.equal(modeStatus.textContent, '찍은 시각 09:08:07');
+  assert.equal(modeOrientation.textContent, '기본 방향 안내');
+  modeCleanup();
+
+  // Overlay coordinate projection: scaling (640x480 -> 320x240) and 0/180-degree rotation alignment.
+  assert.equal(resolveRotationDeg(null), 180);
+  assert.equal(resolveRotationDeg('invalid'), 180);
+  assert.equal(resolveRotationDeg('0'), 0);
+  assert.equal(resolveRotationDeg('180'), 180);
+
+  // Belt point [341, 112] on 640x480 rotated 180° -> (299, 368); scaled to 320x240 -> (149.5, 184).
+  const belt180 = projectPoint([341, 112], [640, 480], [320, 240], 180);
+  assert.equal(belt180.x, 149.5);
+  assert.equal(belt180.y, 184);
+  const belt0 = projectPoint([341, 112], [640, 480], [320, 240], 0);
+  assert.equal(belt0.x, 170.5);
+  assert.equal(belt0.y, 56);
+
+  // Stand ROI [410, 30, 570, 125] on 640x480 rotated 180° -> [70, 355, 230, 450]; scaled to 320x240 -> x=35, y=177.5, w=80, h=47.5.
+  const stand180 = projectRoi([410, 30, 570, 125], [640, 480], [320, 240], 180);
+  assert.deepEqual(stand180, {x: 35, y: 177.5, width: 80, height: 47.5, cx: 75, cy: 201.25});
+
+  const sampleSitePixels = {
+    source_id: 'omx_overhead',
+    image: [640, 480],
+    status: 'planned_unverified',
+    points: [
+      {site: 'yard:r1-s1', label: '야드 1행 1', short_label: 'Y r1·s1', zone: 'yard', kind: 'slot', roi: [425, 271, 480, 380]},
+      {site: 'temp_a:r1-s1', label: '임시 A 1레인', short_label: 'A1', zone: 'temp_a', kind: 'slot', roi: null},
+      {site: 'belt', label: '컨베이어(집기)', short_label: '컨베이어', zone: 'belt', kind: 'pick', point: [341, 112]},
+    ],
+  };
+  const items = buildOverlayItems(sampleSitePixels, [320, 240], 180);
+  assert.equal(items.slots.length, 1);
+  assert.equal(items.slots[0].rect.x, 80);
+  assert.equal(items.slots[0].rect.y, 50);
+  assert.equal(items.picks.length, 1);
+  assert.equal(items.picks[0].point.x, 149.5);
+  assert.equal(items.pending.length, 1);
+  assert.equal(items.pending[0].shortLabel, 'A1');
+
+  // Visibility predicate: only omx_overhead + raw + unrectified + toggle enabled + image visible.
+  assert.equal(shouldShowOverlay({
+    sitePixels: sampleSitePixels, cameraId: 'omx_overhead', viewMode: 'raw', rectified: null, enabled: true, imageVisible: true,
+  }), true);
+  assert.equal(shouldShowOverlay({
+    sitePixels: sampleSitePixels, cameraId: 'omx_overhead', viewMode: 'auto', rectified: null, enabled: true, imageVisible: true,
+  }), false);
+  assert.equal(shouldShowOverlay({
+    sitePixels: sampleSitePixels, cameraId: 'omx_overhead', viewMode: 'raw', rectified: 'map-overlay', enabled: true, imageVisible: true,
+  }), false);
+  assert.equal(shouldShowOverlay({
+    sitePixels: sampleSitePixels, cameraId: 'ceiling_north', viewMode: 'raw', rectified: null, enabled: true, imageVisible: true,
+  }), false);
+  assert.equal(shouldShowOverlay({
+    sitePixels: sampleSitePixels, cameraId: 'omx_overhead', viewMode: 'raw', rectified: null, enabled: false, imageVisible: true,
+  }), false);
+
+  // SVG overlay element uses toggleAttribute('hidden') because SVGElement has no HTMLElement.hidden reflection.
+  timers.clear();
+  calls.length = 0;
+  const ovImage = {hidden: true, style: {}, clientWidth: 640, clientHeight: 480, removeAttribute() {}};
+  const ovStatus = {textContent: ''};
+  const ovMode = new EventTarget();
+  ovMode.value = 'raw';
+  const ovToggle = new EventTarget();
+  ovToggle.checked = true;
+  const ovControl = {hidden: false};
+  const ovMeta = {hidden: false};
+  const svgAttrs = new Map([['hidden', '']]);
+  const ovSvg = {
+    toggleAttribute(name, force) {
+      if (force) svgAttrs.set(name, '');
+      else svgAttrs.delete(name);
+    },
+    replaceChildren() {},
+  };
+  const ovNodes = {
+    '[data-topview-image]': ovImage,
+    '[data-topview-status]': ovStatus,
+    '[data-topview-mode]': ovMode,
+    '[data-topview-overlay]': ovSvg,
+    '[data-topview-points-control]': ovControl,
+    '[data-topview-points-toggle]': ovToggle,
+    '[data-topview-points-meta]': ovMeta,
+  };
+  decodeBehavior = () => Promise.resolve();
+  respond = () => Promise.resolve(new Response('raw-jpeg', {
+    headers: {'Content-Type': 'image/jpeg', 'X-Frame-Captured-At': captured},
+  }));
+  const ovCleanup = mountTopview({
+    querySelector: selector => ovNodes[selector],
+    dataset: {
+      topviewUrl: '/topview/omx_overhead/frame/',
+      topviewCamera: 'omx_overhead',
+      topviewPoints: JSON.stringify(sampleSitePixels),
+    },
+  });
+  await settle();
+  assert.equal(calls.at(-1).url, '/topview/omx_overhead/frame/?view=raw');
+  assert.equal(svgAttrs.has('hidden'), false, 'SVG overlay hidden attribute must be removed when visible');
+  assert.equal(ovMeta.hidden, false);
+  ovToggle.checked = false;
+  ovToggle.dispatchEvent(new Event('change'));
+  assert.equal(svgAttrs.has('hidden'), true, 'SVG overlay hidden attribute must be set when toggled off');
+  assert.equal(ovMeta.hidden, true);
+  ovCleanup();
 } finally {
   Object.assign(globalThis, saved);
   URL.revokeObjectURL = revoke;
 }
-console.log('Topview lifecycle: image release, retries, in-flight abort, resume and camera change passed');
+console.log('Topview lifecycle and overlay projection tests passed');
+
+// Deployed omx_overhead sends X-Frame-Rotation-Deg: 0; Harbor still shows the yard turned 180° (conveyor at the bottom).
+assert.equal(displayRotationDeg('0', 'omx_overhead'), 180);
+assert.equal(displayRotationDeg('0', 'top'), 180);
+assert.equal(displayRotationDeg('90', 'top'), 270);
+assert.equal(displayRotationDeg('0', 'ceiling_north'), 0);
+assert.equal(displayRotationDeg(null, 'omx_overhead'), 180);

@@ -6,7 +6,9 @@ ROSY ``intake_transfer`` never treats outbound trips as supply-to-cell intake.
 """
 import logging
 import os
+from pathlib import Path
 import re
+from urllib.error import HTTPError, URLError
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -73,7 +75,52 @@ def reserved_vehicles(*, exclude_dispatch_id=None):
     return set(qs.values_list('assigned_vehicle_id', flat=True))
 
 
-def available_vehicles(candidates=None):
+def _active_inbound_vehicles():
+    from harbor_web.models import DepartureIntent
+    ledger_path = os.environ.get('HARBOR_LEDGER_PATH', '').strip()
+    if not ledger_path or not Path(ledger_path).is_file():
+        return set()
+    from harbor.port_events import IntakeLedger
+    intake = IntakeLedger(ledger_path)
+    busy = set()
+    for dep in DepartureIntent.objects.select_related('cargo').only('vehicle_id', 'cargo__code'):
+        row = intake.read(dep.cargo.code)
+        if not row or row.get('state') != 'COMPLETED':
+            busy.add(dep.vehicle_id)
+    return busy
+
+
+def _fleet_unavailable_vehicles(fleet_state):
+    if not isinstance(fleet_state, dict) or not isinstance(fleet_state.get('robots'), list):
+        return set()
+    unavailable = set()
+    for robot in fleet_state['robots']:
+        if not isinstance(robot, dict) or not robot.get('robot_id'):
+            continue
+        rid = robot['robot_id']
+        if robot.get('online') is not True:
+            unavailable.add(rid)
+            continue
+        state = robot.get('state') if isinstance(robot.get('state'), dict) else {}
+        safety = state.get('safety') if isinstance(state.get('safety'), dict) else {}
+        if safety.get('estop') is True:
+            unavailable.add(rid)
+            continue
+        ph = robot.get('power_health') if isinstance(robot.get('power_health'), dict) else {}
+        ph_bat = ph.get('battery') if isinstance(ph.get('battery'), dict) else {}
+        if ph_bat.get('evidence') == 'fresh':
+            if (ph_bat.get('level') in ('critical', 'deep')
+                    or ph_bat.get('charging_state') == 'confirmed'
+                    or ph_bat.get('charging_latched') is True):
+                unavailable.add(rid)
+            continue
+        st_bat = state.get('battery_status') if isinstance(state.get('battery_status'), dict) else {}
+        if st_bat.get('level') in ('critical', 'deep') or st_bat.get('charging') is True:
+            unavailable.add(rid)
+    return unavailable
+
+
+def available_vehicles(candidates=None, *, fleet_state=None):
     pool = tuple(candidates) if candidates is not None else configured_vehicles()
     if not pool or len(pool) > 8:
         raise ValidationError('OUTBOUND_VEHICLES_UNCONFIGURED')
@@ -83,7 +130,7 @@ def available_vehicles(candidates=None):
         raise ValidationError('OUTBOUND_VEHICLES_INVALID') from exc
     if any(not _ROBOT_RE.fullmatch(robot_id) for robot_id in pool):
         raise ValidationError('OUTBOUND_VEHICLES_INVALID')
-    reserved = reserved_vehicles()
+    reserved = reserved_vehicles() | _active_inbound_vehicles() | _fleet_unavailable_vehicles(fleet_state)
     free = tuple(robot_id for robot_id in pool if robot_id not in reserved)
     if not free:
         raise ValidationError('OUTBOUND_VEHICLES_BUSY')
@@ -161,7 +208,9 @@ def _create_outbound_dispatch(
             raise
         raise ValidationError('SITE_PLACES_UNAVAILABLE') from exc
 
-    pool = available_vehicles(candidates)
+    from harbor_web.fleet_connection import cached_fleet_state
+    live_fleet_state = cached_fleet_state()
+    pool = available_vehicles(candidates, fleet_state=live_fleet_state)
     transport = _transport_for(registry)
 
     try:
@@ -244,10 +293,11 @@ def prepare_outbound_dispatch_from_cell_plan(
         for step in row.planned_steps
     ):
         raise ValidationError('CELL_PLAN_DOES_NOT_TARGET_STAND')
+    stand_zone_id = os.environ.get('HARBOR_OUTBOUND_STAND', '').strip() or 'stand'
     return _create_outbound_dispatch(
         actor,
         cargo=row.order.cargo,
-        stand_zone_id='stand',
+        stand_zone_id=stand_zone_id,
         candidates=candidates,
         places=places,
         registry=registry,
@@ -409,12 +459,73 @@ def _advance_leg(dispatch, transport, client):
     return next_state
 
 
+def _apply_outbound_loaded_events(transport, *, now=None):
+    """Transition PICKUP_ARRIVED dispatches to LOADED when `container.loaded_for_outbound` matches."""
+    ledger_path = os.environ.get('HARBOR_LEDGER_PATH', '').strip()
+    if not ledger_path or not Path(ledger_path).is_file():
+        return []
+    waiting = list(
+        OutboundDispatch.objects.select_related('cargo', 'actor')
+        .filter(state='PICKUP_ARRIVED')
+        .exclude(assigned_vehicle_id='')
+        .order_by('pk')
+    )
+    if not waiting:
+        return []
+    from harbor.port_events import IntakeLedger
+    events = IntakeLedger(ledger_path).outbound_loaded_events()
+    if not events:
+        return []
+    by_pair = {}
+    for ev in events:
+        key = (ev.get('object_ref'), ev.get('vehicle_id'))
+        if key not in by_pair:
+            by_pair[key] = ev
+    transitioned = []
+    stamp = now or timezone.now()
+    for dispatch in waiting:
+        matched = by_pair.get((dispatch.cargo.code, dispatch.assigned_vehicle_id))
+        if not matched:
+            continue
+        with transaction.atomic():
+            updated = OutboundDispatch.objects.filter(
+                pk=dispatch.pk,
+                version=dispatch.version,
+                state='PICKUP_ARRIVED',
+            ).update(
+                state='LOADED',
+                reason='',
+                loaded_by=None,
+                loaded_at=stamp,
+                loaded_event_id=matched['event_id'][:64],
+                version=dispatch.version + 1,
+                updated_at=stamp,
+            )
+            if updated != 1:
+                continue
+            dispatch.refresh_from_db()
+            Audit.objects.create(
+                actor=dispatch.actor,
+                action='outbound.loaded_from_port_event',
+                object_type='OutboundDispatch',
+                object_id=str(dispatch.pk),
+                detail={
+                    'vehicle_id': dispatch.assigned_vehicle_id,
+                    'event_id': matched['event_id'],
+                    'exit_stop_id': dispatch.exit_stop_id,
+                },
+            )
+        transport.prepare(_leg2_intent(dispatch))
+        transitioned.append(dispatch.pk)
+    return transitioned
+
+
 def tick(registry, *, now=None):
     """Advance active OutboundDispatch records without touching PICKUP_ARRIVED until load confirmation."""
-    del now
     transport = _transport_for(registry)
     client = registry.client
     results = {}
+    _apply_outbound_loaded_events(transport, now=now)
     active = list(
         OutboundDispatch.objects.filter(
             state__in=('PICKUP_PLANNED', 'PICKUP_PROPOSED', 'LOADED', 'EXIT_PROPOSED', 'HOLD')

@@ -4,11 +4,11 @@ import json
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Exists, Max, OuterRef
 from django.utils import timezone
 
 from harbor_web.coordination import serialized
-from harbor_web.models import Audit, Command, Order
+from harbor_web.models import Audit, CellPlanDispatch, Command, Order
 from harbor_web.service_common import Conflict, _role
 
 
@@ -34,7 +34,9 @@ def _queue_policy(order):
 def request_snapshot(order):
     return dict(id=order.pk, cargo_id=order.cargo_id, cargo_code=order.cargo.code if order.cargo_id else None, kind=order.kind,
         priority_group=order.priority_group, sequence=order.sequence, tie_policy=order.tie_policy,
-        title=order.title, note=order.note, version=order.version)
+        title=order.title, voyage_code=order.voyage_code,
+        cutoff_at=order.cutoff_at.isoformat() if order.cutoff_at else None,
+        note=order.note, version=order.version)
 
 
 def queue_snapshot():
@@ -43,10 +45,11 @@ def queue_snapshot():
 
 @serialized
 @transaction.atomic
-def create_order(actor, *, cargo, kind, priority_group, sequence, tie_policy, note='', title=''):
+def create_order(actor, *, cargo, kind, priority_group, sequence, tie_policy, note='', title='', voyage_code='', cutoff_at=None):
     _role(actor, 'operator')
     obj = Order(created_by=actor, cargo=cargo, kind=kind, priority_group=priority_group,
-                sequence=sequence, tie_policy=tie_policy, note=note, title=title)
+                sequence=sequence, tie_policy=tie_policy, note=note, title=title,
+                voyage_code=voyage_code or '', cutoff_at=cutoff_at)
     _queue_policy(obj)
     obj.full_clean()
     obj.save()
@@ -59,7 +62,8 @@ def create_order(actor, *, cargo, kind, priority_group, sequence, tie_policy, no
 
 @serialized
 @transaction.atomic
-def update_order(actor, *, order_id, expected_version, priority_group, sequence, tie_policy, note='', title=None):
+def update_order(actor, *, order_id, expected_version, priority_group, sequence, tie_policy, note='', title=None,
+                 voyage_code=None, cutoff_at=None, clear_cutoff=False):
     _role(actor, 'operator')
     obj = Order.objects.get(pk=order_id)
     if obj.version != expected_version:
@@ -69,12 +73,19 @@ def update_order(actor, *, order_id, expected_version, priority_group, sequence,
         setattr(obj, key, value)
     if title is not None:  # None keeps the current title for callers that predate titles
         obj.title = title
+    if voyage_code is not None:
+        obj.voyage_code = voyage_code
+    if clear_cutoff:
+        obj.cutoff_at = None
+    elif cutoff_at is not None:
+        obj.cutoff_at = cutoff_at
     obj.version += 1
     obj.full_clean()
     _queue_policy(obj)
     updated = Order.objects.filter(pk=order_id, version=expected_version).update(
         priority_group=obj.priority_group, sequence=obj.sequence, tie_policy=obj.tie_policy,
-        title=obj.title, note=obj.note, version=obj.version, updated_at=timezone.now())
+        title=obj.title, voyage_code=obj.voyage_code, cutoff_at=obj.cutoff_at,
+        note=obj.note, version=obj.version, updated_at=timezone.now())
     if not updated:
         raise Conflict('Order changed; reload before editing.')
     Audit.objects.create(actor=actor, action='order.update', object_type='Order', object_id=str(obj.pk),
@@ -194,8 +205,11 @@ def apply_tier_order(actor, *, group, orders):
 
 
 def completed_order_ids():
-    """Orders have no close state: a ledger-completed Command is what closes one."""
-    return Command.objects.filter(state='COMPLETED').values('order_id')
+    """Orders have no close state: a ledger-completed Command or CellPlanDispatch closes one."""
+    return Order.objects.filter(
+        Exists(Command.objects.filter(order_id=OuterRef('pk'), state='COMPLETED'))
+        | Exists(CellPlanDispatch.objects.filter(order_id=OuterRef('pk'), state='COMPLETED'))
+    ).values('pk')
 
 
 def open_outbound_orders():
@@ -205,8 +219,11 @@ def open_outbound_orders():
 def queue_digest():
     # REARRANGE orders are not queue entries: they must not invalidate other plans.
     rows = list(Order.objects.exclude(kind='REARRANGE').order_by('pk').values('id', 'cargo_id', 'kind', 'priority_group', 'sequence', 'tie_policy', 'note', 'version'))
-    closed = sorted(set(Command.objects.filter(state='COMPLETED').exclude(order__kind='REARRANGE')
-                        .values_list('order_id', flat=True)))
+    closed = sorted(
+        Order.objects.exclude(kind='REARRANGE')
+        .filter(pk__in=completed_order_ids())
+        .values_list('pk', flat=True)
+    )
     # A completion leaves the queue, so plans made before it must be reviewed; the digest is unchanged until one exists.
     payload = dict(rows=rows, closed=closed) if closed else rows
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()

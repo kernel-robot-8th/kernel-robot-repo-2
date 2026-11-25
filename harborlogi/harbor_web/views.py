@@ -11,7 +11,7 @@ from harbor_web.cargo_history import cargo_history as build_history
 from harbor_web.order_timeline import order_timeline as build_timeline
 from harbor_web.page_helpers import form_error, form_page, page, paginate, selected_observation
 from harbor_web.topview_proxy import topview_context
-from harbor_web.models import Audit, Cargo, CargoFootprint, Command, Condition, FieldEpisode, Observation, Order, Plan
+from harbor_web.models import Audit, Cargo, CargoFootprint, CargoTag, Command, Condition, FieldEpisode, Observation, Order, Plan
 
 
 @require_roles('viewer', 'operator', 'admin', 'field')
@@ -114,14 +114,44 @@ def cargo_list(request):
     columns = {'weight': 'weight_kg', 'volume': 'volume_m3'}
     field = columns.get(sort.lstrip('-'))
     order = (f'-{field}' if sort.startswith('-') else field, '-id') if field else ('-id',)
-    items = Cargo.objects.filter(Q(code__icontains=q) | Q(name__icontains=q) | Q(destination__icontains=q)).order_by(*order)
+    items = Cargo.objects.all()
+    if q:
+        items = items.filter(
+            Q(code__icontains=q) | Q(name__icontains=q) | Q(destination__icontains=q)
+            | Q(shipper_name__icontains=q) | Q(tags__tag_value__icontains=q)
+        ).distinct()
+    items = items.order_by(*order)
     pagination = paginate(request, items)
-    footprints = {f.cargo_id: f for f in CargoFootprint.objects.filter(cargo_id__in=[c.pk for c in pagination['page']]).order_by('pk')}
+    page_ids = [c.pk for c in pagination['page']]
+    footprints = {f.cargo_id: f for f in CargoFootprint.objects.filter(cargo_id__in=page_ids).order_by('pk')}
+    tags_by_cargo = {}
+    for tag in CargoTag.objects.filter(cargo_id__in=page_ids).order_by('pk'):
+        tags_by_cargo.setdefault(tag.cargo_id, []).append(tag)
     for cargo in pagination['page']:
         cargo.current_footprint = footprints.get(cargo.pk)
+        cargo.bound_tags = tags_by_cargo.get(cargo.pk, [])
     sorts = {key: dict(active=sort.lstrip('-') == key and field is not None, descending=sort == f'-{key}',
                        next=key if sort == f'-{key}' else f'-{key}') for key in columns}
     return page(request, 'cargo.html', section='cargo', q=q, sort=sort if field else '', sorts=sorts, **pagination)
+
+
+@require_roles('operator')
+@require_http_methods(['POST'])
+def cargo_tag_bind(request, pk):
+    from harbor_web import tag_arrivals
+    cargo = get_object_or_404(Cargo, pk=pk)
+    try:
+        tag = tag_arrivals.bind_cargo_tag(
+            request.user,
+            cargo_id=cargo.pk,
+            tag_value=request.POST.get('tag_value', ''),
+            tag_kind=request.POST.get('tag_kind', 'EPC'),
+        )
+    except ValidationError as error:
+        messages.error(request, error.messages[0] if error.messages else '태그를 연결할 수 없습니다.')
+    else:
+        messages.success(request, f'{cargo.code}에 {tag.tag_kind} 태그 {tag.tag_value}를 연결했습니다.')
+    return redirect(f'/cargo/?q={cargo.code}')
 
 
 @require_roles('viewer', 'operator', 'admin')
@@ -170,7 +200,13 @@ def cargo_new(request):
 def order_list(request):
     observation = selected_observation(request)
     q, kind = request.GET.get('q', '')[:200], request.GET.get('kind', '')
-    items = Order.objects.select_related('cargo').filter(Q(cargo__code__icontains=q) | Q(cargo__name__icontains=q) | Q(title__icontains=q)).order_by('priority_group', 'sequence', 'id')
+    items = Order.objects.select_related('cargo').prefetch_related('cargo__tags')
+    if q:
+        items = items.filter(
+            Q(cargo__code__icontains=q) | Q(cargo__name__icontains=q) | Q(title__icontains=q)
+            | Q(voyage_code__icontains=q) | Q(cargo__shipper_name__icontains=q) | Q(cargo__tags__tag_value__icontains=q)
+        ).distinct()
+    items = items.order_by('priority_group', 'sequence', 'id')
     if kind in {'INBOUND', 'OUTBOUND'}:
         items = items.filter(kind=kind)
     return page(request, 'requests.html', section='cargo', q=q, kind=kind, review_observation=observation,
@@ -181,12 +217,17 @@ def order_list(request):
 @require_http_methods(['GET'])
 def outbound_queue(request):
     from harbor_web.presentation import COMMAND_LABELS
+    from harbor_web.scheduling import propose_outbound_schedule
     from harbor_web.workspace import plan_changes
     observation = selected_observation(request)
     q = request.GET.get('q', '')[:200]
-    items = Order.objects.filter(kind='OUTBOUND').select_related('cargo').filter(
-        Q(cargo__code__icontains=q) | Q(cargo__name__icontains=q) | Q(note__icontains=q) | Q(title__icontains=q)
-    ).order_by('priority_group', 'sequence', 'id')
+    items = Order.objects.filter(kind='OUTBOUND').select_related('cargo')
+    if q:
+        items = items.filter(
+            Q(cargo__code__icontains=q) | Q(cargo__name__icontains=q) | Q(note__icontains=q)
+            | Q(title__icontains=q) | Q(voyage_code__icontains=q) | Q(cargo__shipper_name__icontains=q)
+        )
+    items = items.order_by('priority_group', 'sequence', 'id')
     pagination = paginate(request, items)
     orders = list(pagination['page'])
     ids = [o.pk for o in orders]
@@ -202,14 +243,16 @@ def outbound_queue(request):
             status=command.state if command else 'HOLD' if changes else plan.result['status'] if plan else '',
             reason='원래 실행의 상태와 업무 근거를 대조하세요.' if command else '계획을 짠 뒤 순서나 야드가 바뀌었습니다.' if changes else reason_text(plan.result['reason']) if plan else '야드 현황을 골라 재취급·반출·복귀를 검토하세요.'))
     lanes = services.outbound_lanes() if not q else []
+    schedule_proposal = None
     if lanes:
         from harbor_web.tier_simulation import tier_recommendations
         simulated_on = observation or Observation.objects.select_related('condition').order_by('-pk').first()
         recommendations = tier_recommendations(simulated_on, lanes)
         for lane in lanes:
             lane['recommendation'] = recommendations.get(lane['group'])
+        schedule_proposal = propose_outbound_schedule(observation=simulated_on)
     return page(request, 'outbound_queue.html', section='outbound', rows=rows, q=q,
-                observation=observation, lanes=lanes, **pagination)
+                observation=observation, lanes=lanes, schedule_proposal=schedule_proposal, **pagination)
 
 
 def parse_entries(members):
@@ -268,6 +311,22 @@ def outbound_tier_apply(request):
 
 
 @require_roles('operator')
+@require_http_methods(['POST'])
+def outbound_schedule_apply(request):
+    from harbor_web.scheduling import apply_proposed_schedule
+    observation = selected_observation(request)
+    try:
+        changed, _ = apply_proposed_schedule(request.user, observation=observation)
+    except (services.Conflict, ValidationError):
+        return render(request, 'error.html', dict(heading='반출 대기열이 바뀌었습니다', reason='일정을 계산하는 동안 다른 변경이 있었습니다. 다시 불러와 확인하세요.', return_url='/outbound/'), status=409)
+    messages.success(
+        request,
+        f'화주·배편 기준으로 반출 순서 {len(changed)}건을 정리했습니다.' if changed else '이미 화주·배편 기준 순서와 일치합니다.',
+    )
+    return redirect('/outbound/#queue-editor')
+
+
+@require_roles('operator')
 @require_http_methods(['GET', 'POST'])
 def order_new(request):
     observation = selected_observation(request)
@@ -300,7 +359,11 @@ def order_detail(request, pk):
     order = get_object_or_404(Order.objects.select_related('cargo'), pk=pk)
     observation = selected_observation(request, default_latest=True)
     suffix = f'?observation={observation.pk}' if observation else ''
-    priority = forms.PriorityForm(initial=dict(expected_version=order.version, title=order.title, priority_group=order.priority_group, sequence=order.sequence, tie_policy=order.tie_policy, note=order.note))
+    priority = forms.PriorityForm(initial=dict(
+        expected_version=order.version, title=order.title, voyage_code=order.voyage_code,
+        cutoff_at=order.cutoff_at, priority_group=order.priority_group, sequence=order.sequence,
+        tie_policy=order.tie_policy, note=order.note,
+    ))
     plan_form = forms.PlanForm(initial={'expected_version': order.version, 'observation': observation}, review_observation=observation)
     if request.method == 'POST':
         if not has_role(request.user, 'operator'):
@@ -319,6 +382,10 @@ def order_detail(request, pk):
                     data = dict(active.cleaned_data)
                     if 'title' not in request.POST:  # older clients without the field keep the title
                         data['title'] = None
+                    if 'voyage_code' not in request.POST:
+                        data['voyage_code'] = None
+                    if 'cutoff_at' in request.POST and data.get('cutoff_at') is None:
+                        data['clear_cutoff'] = True
                     if data.get('sequence') is None:  # same tier keeps its place; a new tier puts it last
                         data['sequence'] = order.sequence if data['priority_group'] == order.priority_group else \
                             services.back_of_tier(data['priority_group'], order.kind)[1]

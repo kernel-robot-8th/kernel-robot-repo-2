@@ -111,6 +111,8 @@ class ExecutorTests(TestCase):
     order = fixtures.ServicesTests.order
 
     def setUp(self):
+        executor.clear_backoff()
+        self.addCleanup(executor.clear_backoff)
         fixtures.ServicesTests.setUp(self)
         from harbor_web.runtime_models import DeploymentState
         from django.conf import settings

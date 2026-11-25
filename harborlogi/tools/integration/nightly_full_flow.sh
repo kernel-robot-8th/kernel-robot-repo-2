@@ -5,7 +5,7 @@ set -euo pipefail
 WORK=${1:?work dir}
 HARBOR_REF=${2:-main}
 PLATFORM_REF=${3:-main}
-HARBOR_URL=${HARBOR_URL:-https://github.com/kernel-robot-8th/kernel-robot-repo-2}
+HARBOR_URL=${HARBOR_URL:-https://github.com/robotics-team-1213/harborlogi}
 PLATFORM_URL=${PLATFORM_URL:-https://github.com/robotics-team-1213/rosy-platform}
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 RUN=$WORK/run-$STAMP

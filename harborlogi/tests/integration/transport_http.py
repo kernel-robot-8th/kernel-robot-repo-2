@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from harbor.cell_plan import build_harbor_plan_request, build_rosy_directive_request, validate_cell_plan_response
-from harbor.cell_site_map import normalize_cell_site_map
+from harbor.cell_site_map import compare_condition_with_rosy, normalize_cell_site_map
 from harbor.port_events import IntakeLedger, parse_slot_ref
 from harbor.rosy_http import RosyClient
 from harbor.site_places import (
@@ -285,8 +285,21 @@ class TransportHttpTests(unittest.TestCase):
         self.assertEqual((sess.principal_id, sess.role), ('cell-app-service', 'service'))
         places_typed = service.site_places_typed()
         self.assertEqual(places_typed.schema, 'rosy.port-site-places.v1')
+        sites_raw = service.cell_sites()
         sites_typed = service.cell_sites_typed()
         self.assertEqual(len(sites_typed.sites), 37)
+        alignment_report = compare_condition_with_rosy(
+            None,
+            cell_site_map=normalize_cell_site_map(sites_raw),
+            site_places=places_typed,
+        )
+        self.assertIn('aligned', alignment_report)
+        req_id_probe = Request(origin + '/api/fleet/session', headers={
+            'Authorization': 'Bearer ' + config['service'],
+            'X-Request-Id': 'harbor-e2e-trace-1',
+        })
+        with urlopen(req_id_probe, timeout=10) as resp:
+            self.assertEqual(resp.headers.get('X-Request-Id'), 'harbor-e2e-trace-1')
 
         # Rule 8 capability probe: unknown request_key returns coded 404 UNKNOWN_CELL_PLAN.
         with self.assertRaises(HTTPError) as missing_probe:
@@ -342,7 +355,25 @@ class TransportHttpTests(unittest.TestCase):
         self.assertEqual(blocked.exception.code, 422)
         self.assertEqual(json.loads(blocked.exception.read())['detail']['code'], 'BLOCKED_SOURCE_CARGO')
 
-        admit_plan_tasks(res1['tasks'])
+        # Batch plan admission via POST /api/fleet/pipeline/cell-plans/{plan_id}/admit.
+        req_rdy = Request(origin + '/api/fleet/pipeline/cells/cell_ab/readiness', headers={'Authorization': 'Bearer ' + config['operator']})
+        with urlopen(req_rdy, timeout=10) as resp:
+            rdy = json.loads(resp.read().decode('utf-8'))
+        req_batch = Request(
+            origin + f"/api/fleet/pipeline/cell-plans/{res1['plan']['plan_id']}/admit",
+            data=json.dumps({
+                'expected_dispatch_generation': rdy['dispatch_generation'],
+                'expected_stop_generation': rdy['stop_generation'],
+                'expected_readiness_digest': rdy['readiness_digest'],
+            }).encode('utf-8'),
+            method='POST',
+            headers={'Authorization': 'Bearer ' + config['operator'], 'Content-Type': 'application/json'},
+        )
+        with urlopen(req_batch, timeout=10) as resp:
+            self.assertEqual(resp.status, 200)
+            batch_res = json.loads(resp.read().decode('utf-8'))
+        self.assertEqual(batch_res['plan']['status'], 'QUEUED')
+        self.assertEqual(len(batch_res['admitted_task_ids']), 3)
         self.assertEqual(operator.cell_plan(res1['plan']['plan_id'])['plan']['status'], 'QUEUED')
 
         # Path 2: Harbor sends simple high-level directive without steps -> ROSY plans autonomously (order_source='rosy_r')
@@ -366,9 +397,21 @@ class TransportHttpTests(unittest.TestCase):
         admit_plan_tasks(res2['tasks'])
         self.assertEqual(operator.cell_plan(res2['plan']['plan_id'])['plan']['status'], 'QUEUED')
 
-        # Dry-run typed preview (leaves ledger clean) + plan-level cancel (enforces proposer isolation).
+        # Dry-run typed preview (service caller redacts cargo_id / final_state) + goal mode preview.
         dry = service.preview_cell_plan_typed(rosy_req, expected_order_source='rosy_r')
         self.assertEqual(len(dry.moves), 3)
+        self.assertEqual(dry.final_state, ())
+        dry_raw = service.preview_cell_plan(rosy_req)
+        self.assertIsNone(dry_raw['final_state'])
+        self.assertTrue(all('cargo_id' not in m for m in dry_raw['moves']))
+        goal_req = build_rosy_directive_request(
+            mode='goal',
+            observation_payload=observation_payload,
+            goal={'yard:r1-s2': ['C1', 'C2']},
+        )
+        goal_dry = operator.preview_cell_plan_typed(goal_req, expected_order_source='rosy_r')
+        self.assertGreaterEqual(len(goal_dry.moves), 2)
+        self.assertIsNotNone(goal_dry.final_state)
         op_plan = operator.propose_cell_plan_typed(
             {**harbor_req, 'propose': True},
             request_key='harbor-op-cancel-' + uuid4().hex,

@@ -12,6 +12,7 @@ RosyClient._http는 JSON 전용이므로 바꾸지 않는다. 여기서는 같�
 """
 import http.client
 import json
+import uuid
 from urllib.error import HTTPError
 from urllib.parse import quote, urljoin, urlsplit
 from urllib.request import Request
@@ -27,6 +28,7 @@ FRAME_HEADERS = (
     'X-Frame-Plane', 'X-Frame-Calibration', 'X-Frame-Observed-Fraction',
 )
 MAP_RECTIFICATION = {'mode': 'map'}
+MAP_OVERLAY_RECTIFICATION = {'mode': 'map_overlay'}
 
 
 class StaleFrameError(Exception):
@@ -35,6 +37,10 @@ class StaleFrameError(Exception):
 
 class PlaneUnavailableError(Exception):
     """버드뷰 지도 평면 보정 불가 (409 + X-Frame-State: plane-unavailable)."""
+
+
+class RectificationUnsupportedError(Exception):
+    """ROSY Fleet이 요청한 rectification 모드를 지원하지 않음 (422)."""
 
 
 class VisionClient(RosyClient):
@@ -50,7 +56,9 @@ class VisionClient(RosyClient):
     def _open(self, method, url, headers, *, max_bytes, data=None):
         if self._transport is not None:
             return self._transport(method, url, headers, data)
-        request = Request(url, data=data, method=method, headers=headers)
+        req_headers = dict(headers)
+        req_headers.setdefault('X-Request-Id', uuid.uuid4().hex)
+        request = Request(url, data=data, method=method, headers=req_headers)
         opener = self._opener
         if self._discover:
             from harbor.fleet_discovery import discovery_opener
@@ -63,11 +71,19 @@ class VisionClient(RosyClient):
 
     def _json_call(self, method, path, body):
         if self._transport is None:
-            return super()._http(method, path, body)
+            try:
+                return super()._http(method, path, body)
+            except HTTPError as error:
+                if error.code == 422 and path == '/api/fleet/vision/lease':
+                    error.close()
+                    raise RectificationUnsupportedError('rectification mode unsupported') from error
+                raise
         data = json.dumps(body, allow_nan=False).encode() if body is not None else None
         status, headers, raw = self._open(method, self._origin + path, {
             'Authorization': 'Bearer ' + self._token, 'Content-Type': 'application/json',
         }, max_bytes=_MAX_JSON_BYTES, data=data)
+        if status == 422 and path == '/api/fleet/vision/lease':
+            raise RectificationUnsupportedError('rectification mode unsupported')
         if status != 200 or len(raw) > _MAX_JSON_BYTES:
             raise ValueError('Invalid Fleet JSON response')
         value = json.loads(raw)

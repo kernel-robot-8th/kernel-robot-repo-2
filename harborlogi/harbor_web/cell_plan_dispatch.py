@@ -22,12 +22,32 @@ from harbor.cell_plan import (
 from harbor_web import services
 from harbor_web.command_models import (ACTIVE_CELL_PLAN_DISPATCH_STATES, ACTIVE_COMMAND_STATES, CellPlanDispatch,
                                        Command)
+from harbor_web.coordination import serialized
 from harbor_web.fleet_connection import connection_settings, fleet_client
 from harbor_web.models import Audit, Observation, Order, Plan
 
 logger = logging.getLogger(__name__)
 
 ACTIVE_CELL_PLAN_STATES = ACTIVE_CELL_PLAN_DISPATCH_STATES
+CANCELLABLE_CELL_PLAN_STATES = ('PROPOSED', 'PARTIALLY_ADMITTED', 'QUEUED', 'RUNNING', 'PAUSED_HUMAN')
+
+
+def _default_robot_id() -> str:
+    return os.environ.get('HARBOR_CELL_PLAN_ROBOT_ID', '').strip() or 'rosy_01'
+
+
+def _default_outbound_stand() -> str:
+    return os.environ.get('HARBOR_OUTBOUND_STAND', '').strip() or 'stand'
+
+
+def _record_completed_audit(row: CellPlanDispatch, actor=None) -> None:
+    Audit.objects.create(
+        actor=actor or row.created_by,
+        action='cell_plan.completed',
+        object_type='CellPlanDispatch',
+        object_id=str(row.pk),
+        detail={'order_id': row.order_id, 'rosy_plan_id': row.rosy_plan_id},
+    )
 
 _STATE_LABELS = {
     'SUBMITTING': '전송 준비 중',
@@ -61,6 +81,13 @@ def _default_client():
         client.expected_principal = conn['principal']
     client.expected_role = 'service'
     return client
+
+
+class FleetOnlyRegistry:
+    """The executor registry without the legacy ledger or bindings: cell plans need only the Fleet client."""
+
+    def __init__(self, client=None):
+        self.client = client if client is not None else _default_client()
 
 
 def _http_error_code(error: HTTPError) -> str:
@@ -113,7 +140,7 @@ def _failure_reason(parsed) -> str:
     return ''
 
 
-def _reject_blocked_order(order: Order, *, production: bool, plan: Plan | None = None) -> None:
+def _reject_blocked_order(order: Order, *, production: bool, observation: Observation) -> None:
     """P0 mutex: one live execution path per order; restored or unready deployments stay shut."""
     from harbor_web.runtime import execution_block_reason
     blocked = execution_block_reason()
@@ -124,8 +151,8 @@ def _reject_blocked_order(order: Order, *, production: bool, plan: Plan | None =
     if CellPlanDispatch.objects.filter(order=order, state__in=ACTIVE_CELL_PLAN_DISPATCH_STATES).exists():
         raise services.Conflict('ACTIVE_CELL_PLAN_DISPATCH')
     if production:  # A fake client is an explicit test/simulation bypass.
-        from harbor_web.readiness import first_unmet
-        unmet = first_unmet(plan)
+        from harbor_web.readiness import first_unmet_cell_plan
+        unmet = first_unmet_cell_plan(observation)
         if unmet:
             raise services.Conflict(unmet)
 
@@ -241,10 +268,12 @@ def _create_and_submit(
             object_id=str(row.pk),
             detail={'mode': dispatch_mode, 'order_source': row.order_source, 'rosy_plan_id': row.rosy_plan_id, 'steps': len(parsed.tasks)},
         )
+        if row.state == 'COMPLETED':
+            _record_completed_audit(row, actor=actor)
     return row
 
 
-def preview_harbor_plan(actor, *, plan_id: int, robot_id: str = 'rosy_01', client=None) -> CellPlanDryRunResponse:
+def preview_harbor_plan(actor, *, plan_id: int, robot_id: str | None = None, client=None) -> CellPlanDryRunResponse:
     """Read-only simulation preview for Mode 1 Harbor plan without persisting ROSY tasks."""
     services._role(actor, 'operator')
     plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
@@ -252,7 +281,7 @@ def preview_harbor_plan(actor, *, plan_id: int, robot_id: str = 'rosy_01', clien
         payload = build_harbor_plan_request(
             plan.result,
             observation_payload=plan.observation.payload,
-            robot_id=robot_id,
+            robot_id=robot_id or _default_robot_id(),
             cargo_id=plan.order.cargo.code if plan.order.cargo_id else None,
         )
     except ValueError as error:
@@ -274,9 +303,9 @@ def preview_rosy_directive(
     order_id: int,
     observation_id: int,
     directive_mode: str = 'outbound',
-    destination: str = 'stand',
+    destination: str | None = None,
     goal: dict[str, list[str]] | None = None,
-    robot_id: str = 'rosy_01',
+    robot_id: str | None = None,
     client=None,
 ) -> CellPlanDryRunResponse:
     """Read-only simulation preview for Mode 2 autonomous ROSY directive."""
@@ -288,9 +317,9 @@ def preview_rosy_directive(
             mode=directive_mode,
             observation_payload=observation.payload,
             cargo_id=order.cargo.code if order.cargo_id else None,
-            destination=destination,
+            destination=destination or _default_outbound_stand(),
             goal=goal,
-            robot_id=robot_id,
+            robot_id=robot_id or _default_robot_id(),
         )
     except ValueError as error:
         raise ValidationError(str(error)) from error
@@ -305,16 +334,21 @@ def preview_rosy_directive(
         raise ValidationError(str(error) or 'CELL_PLAN_DRY_RUN_FAILED') from error
 
 
-def dispatch_harbor_plan(actor, *, plan_id: int, robot_id: str = 'rosy_01', client=None) -> CellPlanDispatch:
+@serialized
+def dispatch_harbor_plan(actor, *, plan_id: int, robot_id: str | None = None, client=None) -> CellPlanDispatch:
     """Mode 1: send Harbor plan's explicit move sequence and slot coordinates to ROSY (order_source='harbor')."""
     services._role(actor, 'operator')
+    return _submit_harbor_plan(actor, plan_id=plan_id, robot_id=robot_id, client=client, production=client is None)
+
+
+def _submit_harbor_plan(actor, *, plan_id: int, robot_id: str | None, client, production: bool) -> CellPlanDispatch:
     plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
-    _reject_blocked_order(plan.order, production=client is None, plan=plan)
+    _reject_blocked_order(plan.order, production=production, observation=plan.observation)
     try:
         payload = build_harbor_plan_request(
             plan.result,
             observation_payload=plan.observation.payload,
-            robot_id=robot_id,
+            robot_id=robot_id or _default_robot_id(),
             cargo_id=plan.order.cargo.code if plan.order.cargo_id else None,
         )
     except ValueError as error:
@@ -337,16 +371,17 @@ def dispatch_harbor_plan(actor, *, plan_id: int, robot_id: str = 'rosy_01', clie
     )
 
 
+@serialized
 def dispatch_rosy_directive(
     actor,
     *,
     order_id: int,
     observation_id: int,
     directive_mode: str = 'outbound',
-    destination: str = 'stand',
+    destination: str | None = None,
     goal: dict[str, list[str]] | None = None,
     plan_id: int | None = None,
-    robot_id: str = 'rosy_01',
+    robot_id: str | None = None,
     client=None,
 ) -> CellPlanDispatch:
     """Mode 2: send a high-level directive and let ROSY compute the move order and coords (order_source='rosy_r')."""
@@ -354,16 +389,16 @@ def dispatch_rosy_directive(
     order = Order.objects.select_related('cargo').get(pk=order_id)
     observation = Observation.objects.get(pk=observation_id)
     plan = Plan.objects.filter(pk=plan_id, order=order).first() if plan_id is not None else None
-    _reject_blocked_order(order, production=client is None, plan=plan)
+    _reject_blocked_order(order, production=client is None, observation=observation)
     cargo_code = order.cargo.code if order.cargo_id else None
     try:
         payload = build_rosy_directive_request(
             mode=directive_mode,
             observation_payload=observation.payload,
             cargo_id=cargo_code,
-            destination=destination,
+            destination=destination or _default_outbound_stand(),
             goal=goal,
-            robot_id=robot_id,
+            robot_id=robot_id or _default_robot_id(),
         )
     except ValueError as error:
         raise ValidationError(str(error)) from error
@@ -419,6 +454,7 @@ def reconcile_cell_plan_dispatch(dispatch_id: int, *, client=None) -> CellPlanDi
     )
     rosy_plan = parsed.plan
     with transaction.atomic():
+        prev_state = row.state
         row.rosy_plan_id = rosy_plan.plan_id
         row.state = rosy_plan.status
         if not row.planned_steps:
@@ -433,6 +469,8 @@ def reconcile_cell_plan_dispatch(dispatch_id: int, *, client=None) -> CellPlanDi
             object_id=str(row.pk),
             detail={'request_key': row.request_key, 'rosy_plan_id': row.rosy_plan_id, 'state': row.state},
         )
+        if prev_state != 'COMPLETED' and row.state == 'COMPLETED':
+            _record_completed_audit(row)
     return row
 
 
@@ -451,24 +489,28 @@ def sync_cell_plan_dispatch(dispatch_id: int, *, client=None) -> CellPlanDispatc
         expected_plan_id=row.rosy_plan_id,
     )
     new_state = parsed.plan.status
-    new_reason = _failure_reason(parsed) if new_state in ('PAUSED_HUMAN', 'ABORTED', 'CANCELLED') else _failure_reason(parsed)
+    new_reason = '' if new_state == 'COMPLETED' else _failure_reason(parsed)
     update_fields: list[str] = []
+    prev_state = row.state
     if new_state != row.state:
         row.state = new_state
         update_fields.append('state')
     if new_reason != row.reason and (new_reason or new_state == 'COMPLETED'):
-        row.reason = '' if new_state == 'COMPLETED' else new_reason
+        row.reason = new_reason
         update_fields.append('reason')
     if update_fields:
-        row.save(update_fields=[*update_fields, 'updated_at'])
+        with transaction.atomic():
+            row.save(update_fields=[*update_fields, 'updated_at'])
+            if prev_state != 'COMPLETED' and row.state == 'COMPLETED':
+                _record_completed_audit(row)
     return row
 
 
 def cancel_cell_plan_dispatch(actor, *, dispatch_id: int, reason: str, client=None) -> CellPlanDispatch:
-    """Cancel pending PROPOSED/QUEUED steps for one CellPlanDispatch via POST /cell-plans/{plan_id}/cancel."""
+    """Cancel pending PROPOSED/QUEUED/RUNNING/PAUSED_HUMAN steps via POST /cell-plans/{plan_id}/cancel."""
     services._role(actor, 'operator')
     row = CellPlanDispatch.objects.select_related('order').get(pk=dispatch_id)
-    if not row.rosy_plan_id or row.state not in ('PROPOSED', 'PARTIALLY_ADMITTED', 'QUEUED'):
+    if not row.rosy_plan_id or row.state not in CANCELLABLE_CELL_PLAN_STATES:
         raise services.Conflict('Cell plan dispatch cannot be cancelled in its current state.')
     rosy_client = client if client is not None else _default_client()
     try:
@@ -500,6 +542,61 @@ def cancel_cell_plan_dispatch(actor, *, dispatch_id: int, reason: str, client=No
     return row
 
 
+AUTO_DISPATCH_USERNAME = 'harbor-automatic'
+_auto_hold_reason: dict[int, str] = {}
+
+
+def _automatic_actor():
+    """A system user that never logs in, so automatic proposals stay apart from named people (ADR 0034 point 6)."""
+    from django.contrib.auth import get_user_model
+    user, created = get_user_model().objects.get_or_create(username=AUTO_DISPATCH_USERNAME, defaults={'is_active': False})
+    if created:
+        user.set_unusable_password()
+        user.save(update_fields=['password'])
+    return user
+
+
+@serialized
+def auto_dispatch_next(*, client=None, production: bool = True) -> CellPlanDispatch | None:
+    """ADR 0034 automatic operation: propose the next current READY plan to ROSY by site points (cell-plans).
+
+    One cell job at a time; a plan that was already sent is never resent automatically (ADR 0034 point 3).
+    ROSY still approves and admits every step. Returns the new dispatch or None.
+    """
+    from harbor_web.order_queue import completed_order_ids
+    if (Command.objects.filter(state__in=ACTIVE_COMMAND_STATES).exists()
+            or CellPlanDispatch.objects.filter(state__in=ACTIVE_CELL_PLAN_DISPATCH_STATES).exists()):
+        return None
+    sent = set(CellPlanDispatch.objects.exclude(plan__isnull=True).values_list('plan_id', flat=True))
+    orders = (Order.objects.filter(kind__in=('INBOUND', 'OUTBOUND')).exclude(pk__in=completed_order_ids())
+              .select_related('cargo').order_by('priority_group', 'sequence', 'pk'))
+    for order in orders:
+        plan = Plan.objects.filter(order=order).order_by('-pk').first()
+        if (plan is None or plan.pk in sent or plan.result.get('status') != 'READY'
+                or plan.order_version != order.version):
+            continue
+        try:
+            row = _submit_harbor_plan(_automatic_actor(), plan_id=plan.pk, robot_id=None, client=client, production=production)
+        except (services.Conflict, ValidationError) as error:
+            reason = str(getattr(error, 'message', '') or error)
+            if _auto_hold_reason.get(plan.pk) != reason:  # record each reason once, not every tick
+                _auto_hold_reason[plan.pk] = reason
+                Audit.objects.create(actor=None, action='cell_plan.auto_hold', object_type='Plan', object_id=str(plan.pk),
+                                     detail=dict(reason=reason, automatic=True))
+            return None
+        _auto_hold_reason.pop(plan.pk, None)
+        Audit.objects.create(actor=None, action='cell_plan.auto_proposed', object_type='CellPlanDispatch',
+                             object_id=str(row.pk), detail=dict(plan_id=plan.pk, automatic=True))
+        return row
+    return None
+
+
+@serialized
+def propose_automatically(plan: Plan, *, client=None) -> CellPlanDispatch:
+    """Send one Harbor-made plan (e.g. an authorized rearrangement) as the automatic user, behind every cell-plan gate."""
+    return _submit_harbor_plan(_automatic_actor(), plan_id=plan.pk, robot_id=None, client=client, production=client is None)
+
+
 def tick(registry, *, now=None) -> dict[int, str]:
     """Bounded executor pass: reconcile uncertain dispatches, sync status, and auto-trigger Pinky S_OUT when completed."""
     del now
@@ -520,7 +617,23 @@ def tick(registry, *, now=None) -> dict[int, str]:
         except Exception as exc:
             logger.exception('CellPlanDispatch #%s sync failed; will retry on next tick', row.pk)
             results[row.pk] = f'ERROR: {type(exc).__name__}'
+    if not active:
+        # The executor only ticks in automatic operation (HARBOR_EXECUTOR_ENABLED=1); a fake test client skips site readiness.
+        try:
+            proposed = auto_dispatch_next(client=None if production_client(registry) else client,
+                                          production=production_client(registry))
+        except Exception as exc:
+            logger.exception('Automatic cell-plan proposal failed; will retry on next tick')
+            results['auto'] = f'ERROR: {type(exc).__name__}'
+        else:
+            if proposed is not None:
+                results[proposed.pk] = proposed.state
     return results
+
+
+def production_client(registry) -> bool:
+    """Real deployments build their own ROSY client; tests hand the executor a fake one."""
+    return bool(getattr(registry, 'production', True))
 
 
 def dispatch_views_for_order(order: Order) -> list[dict]:
@@ -565,7 +678,7 @@ def dispatch_views_for_order(order: Order) -> list[dict]:
             'planned_steps': row.planned_steps,
             'created_at': row.created_at,
             'can_sync': row.state in ACTIVE_CELL_PLAN_STATES,
-            'can_cancel': row.state in ('PROPOSED', 'PARTIALLY_ADMITTED', 'QUEUED') and bool(row.rosy_plan_id),
+            'can_cancel': row.state in CANCELLABLE_CELL_PLAN_STATES and bool(row.rosy_plan_id),
             'can_start_outbound': row.state == 'COMPLETED' and _targets_stand(row) and od is None,
             'outbound': outbound_view,
         })

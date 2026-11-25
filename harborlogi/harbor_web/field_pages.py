@@ -11,7 +11,7 @@ from django.views.decorators.http import require_http_methods
 
 from harbor_web import forms, services
 from harbor_web.auth import has_role, require_roles
-from harbor_web.models import DepartureIntent, FieldConfirmation, FieldEpisode, Order
+from harbor_web.models import ArrivalEvent, DepartureIntent, FieldConfirmation, FieldEpisode, Order, OutboundDispatch
 from harbor_web.page_helpers import form_error, form_page, page, paginate
 
 
@@ -60,7 +60,48 @@ def field_list(request):
     state = request.GET.get('state', '')
     if state in {'OPEN', 'CONFIRMED', 'MISMATCH', 'UNABLE', 'REASSIGNED'}:
         items = items.filter(state=state)
-    return page(request, 'field.html', section='field', state=state, **paginate(request, items))
+    pickups = []
+    for od in OutboundDispatch.objects.filter(state='PICKUP_ARRIVED').select_related(
+        'cargo', 'command', 'cell_plan_dispatch'
+    ).order_by('-pk'):
+        href = (
+            f'/work/{od.command_id}/'
+            if od.command_id
+            else (f'/plans/{od.cell_plan_dispatch.plan_id}/' if (od.cell_plan_dispatch and od.cell_plan_dispatch.plan_id)
+                  else f'/requests/{od.cell_plan_dispatch.order_id}/')
+        )
+        pickups.append(dict(
+            id=od.pk,
+            vehicle_id=od.assigned_vehicle_id,
+            cargo_code=od.cargo.code,
+            pickup_stop_id=od.pickup_stop_id,
+            href=href,
+        ))
+    arrival_events = list(ArrivalEvent.objects.select_related('cargo').order_by('-pk')[:30])
+    return page(request, 'field.html', section='field', state=state, outbound_pickups=pickups,
+                arrival_events=arrival_events, **paginate(request, items))
+
+
+@require_roles('operator', 'field')
+@require_http_methods(['POST'])
+def field_scan(request):
+    from harbor_web import tag_arrivals
+    try:
+        event, cargo = tag_arrivals.record_arrival_scan(
+            request.user,
+            raw_scan=request.POST.get('raw_scan', ''),
+            intake_point=request.POST.get('intake_point', 'S1'),
+            vehicle_id=request.POST.get('vehicle_id', ''),
+            note=request.POST.get('note', ''),
+        )
+    except ValidationError as error:
+        messages.error(request, error.messages[0] if error.messages else '도착 스캔을 기록하지 못했습니다.')
+    else:
+        if cargo is not None:
+            messages.success(request, f'도착 순번 {event.pk}: {cargo.code} ({event.tag_value}) 매칭을 기록했습니다.')
+        else:
+            messages.warning(request, f'도착 순번 {event.pk}: 미등록 태그 {event.tag_value} 스캔을 기록했습니다.')
+    return redirect('/field/')
 
 
 @require_roles('operator')

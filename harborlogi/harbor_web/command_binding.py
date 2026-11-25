@@ -15,7 +15,7 @@ def _digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
-def _config():
+def _config(*, bindings_required=True):
     from harbor_web.fleet_connection import connection_settings
     from harbor_web.evidence import configured_sources
     connection = connection_settings()
@@ -23,7 +23,7 @@ def _config():
         raise ValidationError('ORIGIN_NOT_ALLOWED')
     values = [os.environ.get('HARBOR_LEDGER_PATH', ''), connection['origin'],
         os.environ.get('HARBOR_FLEET_TOKEN', ''), connection['principal'], os.environ.get('HARBOR_BINDINGS_PATH', '')]
-    if not all(values):
+    if not all(values[:4]) or (bindings_required and not values[4]):
         raise ValidationError('EXECUTION_CONFIGURATION_REQUIRED')
     path, origin, token, principal, bindings = values
     RosyClient(origin, token)

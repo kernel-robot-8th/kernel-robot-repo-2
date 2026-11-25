@@ -29,6 +29,10 @@ class RearrangementExecutionTests(TestCase):
 
     def setUp(self):
         self.base_setup()
+        # These tests cover planning and holds with an execution route available; the closed route has its own test.
+        route = patch('harbor_web.rearrangement._route_closed', return_value='')
+        route.start()
+        self.addCleanup(route.stop)
         self.early, self.late = self.cargo('early', 1), self.cargo('late', 1)
         self.condition_row = self.condition()
         self.finish_outbound(self.early, 1)
