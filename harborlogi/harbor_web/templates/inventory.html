@@ -131,7 +131,7 @@
     <td>{{ row.target|default:"계획 대기" }}</td><td>{{ row.sent|default:"미제출" }}</td>
     <td>{{ row.state }}</td>
     <td>{{ row.receipt.observed_slot|default:"관측 대기" }}</td><td>{{ row.receipt.get_result_identity_display|default:"—" }}</td>
-    <td>{{ row.receipt.get_status_display }}</td><td>{% if row.local_reason %}Harbor · {{ row.local_reason }}{% endif %}
+    <td>{% if row.receipt.status == 'PLANNING' %}적재 결과 대기{% else %}{{ row.receipt.get_status_display }}{% endif %}</td><td>{% if row.local_reason %}Harbor · {{ row.local_reason }}{% endif %}
     {% if row.reason %}ROSY · {% if row.action %}{{ row.action }} · {% endif %}{{ row.reason }}{% elif not row.local_reason %}—{% endif %}</td>
   </tr>{% endfor %}</tbody></table>
 </section>

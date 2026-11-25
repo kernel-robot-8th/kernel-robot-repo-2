@@ -119,6 +119,7 @@ class PortEventProjectionTests(TestCase):
         target = '{area_id}-r{row}-c{column}-l{level}'.format(**rec)
         self.assertContains(page, target)
         self.assertContains(page, 'READINESS_WORKCELL_INCIDENT_HOLD')
+        self.assertContains(page, '적재 결과 대기')
         self.assertContains(page, '관측 대기')
         self.assertFalse(fleet.calls)
         dispatch = auto_dispatch_next(client=fleet, production=False)
