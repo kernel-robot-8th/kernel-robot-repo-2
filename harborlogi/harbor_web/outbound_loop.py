@@ -6,6 +6,7 @@ ROSY ``intake_transfer`` never treats outbound trips as supply-to-cell intake.
 """
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 import re
 from urllib.error import HTTPError, URLError
@@ -459,6 +460,16 @@ def _advance_leg(dispatch, transport, client):
     return next_state
 
 
+def _observed_at(event):
+    """Parse one stored port event's `observed_at` into an aware datetime; None when unparseable."""
+    text = event.get('observed_at')
+    try:
+        when = datetime.fromisoformat(text.replace('Z', '+00:00')) if isinstance(text, str) else None
+    except ValueError:
+        when = None
+    return when if when is not None and when.utcoffset() is not None else None
+
+
 def _apply_outbound_loaded_events(transport, *, now=None):
     """Transition PICKUP_ARRIVED dispatches to LOADED when `container.loaded_for_outbound` matches."""
     ledger_path = os.environ.get('HARBOR_LEDGER_PATH', '').strip()
@@ -478,14 +489,26 @@ def _apply_outbound_loaded_events(transport, *, now=None):
         return []
     by_pair = {}
     for ev in events:
-        key = (ev.get('object_ref'), ev.get('vehicle_id'))
-        if key not in by_pair:
-            by_pair[key] = ev
+        by_pair.setdefault((ev.get('object_ref'), ev.get('vehicle_id')), []).append(ev)
+    # An event_id proves one physical load: it must never advance a second dispatch, whether a
+    # past (closed) dispatch already claimed it or a sibling dispatch matched it in this same tick.
+    claimed = set(
+        OutboundDispatch.objects.exclude(loaded_event_id='').values_list('loaded_event_id', flat=True)
+    )
     transitioned = []
     stamp = now or timezone.now()
     for dispatch in waiting:
-        matched = by_pair.get((dispatch.cargo.code, dispatch.assigned_vehicle_id))
-        if not matched:
+        candidates = by_pair.get((dispatch.cargo.code, dispatch.assigned_vehicle_id), ())
+        matched = None
+        for ev in candidates:  # ledger rowid order, so the first hit is the earliest event
+            if ev.get('event_id') in claimed:
+                continue
+            observed = _observed_at(ev)
+            if dispatch.created_at is not None and (observed is None or observed < dispatch.created_at):
+                continue  # stale: the cargo load predates this (recreated) dispatch
+            matched = ev
+            break
+        if matched is None:
             continue
         with transaction.atomic():
             updated = OutboundDispatch.objects.filter(
@@ -503,6 +526,7 @@ def _apply_outbound_loaded_events(transport, *, now=None):
             )
             if updated != 1:
                 continue
+            claimed.add(matched['event_id'][:64])
             dispatch.refresh_from_db()
             Audit.objects.create(
                 actor=dispatch.actor,

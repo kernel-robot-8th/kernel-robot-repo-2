@@ -329,8 +329,21 @@ def load_site_recognition(client=None, *, known_site_refs=None):
     try:
         return client.site_recognition(known_site_refs=known_site_refs), ''
     except HTTPError as error:
-        error.close()
-        return None, 'ROSY에 아직 인식 API 없음' if error.code == 404 else 'ROSY 인식 연결 오류'
+        if error.code != 404:
+            error.close()
+            return None, 'ROSY 인식 연결 오류'
+        detail_code = None
+        try:
+            raw = error.read(4097)  # synthetic HTTPError may carry fp=None
+            detail = json.loads(raw).get('detail', {}) if len(raw) <= 4096 else {}
+            if isinstance(detail, dict):
+                detail_code = detail.get('code')
+        except (http.client.HTTPException, OSError, ValueError, TypeError, AttributeError):
+            detail_code = None
+        finally:
+            error.close()
+        return None, ('ROSY 인식 스냅샷 수신 대기' if detail_code == 'CELL_SITE_RECOGNITION_NOT_YET_OBSERVED'
+                      else 'ROSY에 아직 인식 API 없음')
     except FleetIdentityError:
         return None, 'ROSY 인식 연결 오류'
     except ValueError:
