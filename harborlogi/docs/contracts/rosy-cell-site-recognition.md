@@ -1,8 +1,8 @@
-# ROSY 자리별 인식 수신 계약 (제안)
+# ROSY 자리별 인식 수신 계약
 
-Rosy D-1075(Proposed)의 필드 이름을 따르는 Harbor 수신부다. 정본 응답 예시는
+Rosy D-1075(ROSY #735 운영 배포)의 필드 이름과 확정 경로를 따르는 Harbor 수신부다. 정본 응답 예시는
 [JSON 예시](rosy-cell-site-recognition.v1.example.json)이며, 37자리 중 일부만 담는다.
-API 경로·보관 개수·유효 시간은 아직 Rosy 미정이다.
+확정 API 경로는 `GET /api/fleet/cell-site-recognition`(viewer 권한)과 `POST /api/fleet/cell-site-recognition`(operator/service 권한)이며 Harbor는 읽기(`GET`)만 호출한다.
 
 | 필드 | 형식과 의미 |
 |---|---|
@@ -38,13 +38,28 @@ UTC가 아닌/잘못된 시각, 잘못된 타입·범위는 `ValueError(코드: 
 못 읽음은 사람 확인 대기이며, 응답에 없는 자리는 빈 자리로 추정하지 않는다.
 이 결과는 ADR 0036의 표시·사람 확인 보류용이다. 사진 판정·장부 자동 수정은 하지 않는다.
 
-Rosy가 붙일 때: 서비스 주체 `harbor`에 Fleet 읽기 권한을 주고 실제 경로를 알려 준다.
-`harbor/rosy_http.py`의 `SITE_RECOGNITION_PATH_PROPOSED`만 교체하거나 생성자의
-`site_recognition_path` / 환경 `HARBOR_ROSY_SITE_RECOGNITION_PATH`로 덮어쓴다
-(생성자 우선, 같은 origin의 절대 경로만 허용). 기존 Fleet 인증/TLS와 transport를 재사용한다.
-`HARBOR_ROSY_SITE_RECOGNITION=1`일 때만 `load_site_recognition(client)`가 조회한다.
-client를 생략하면 기존 `HARBOR_FLEET_ORIGIN`, `HARBOR_FLEET_TOKEN`, `HARBOR_FLEET_CA_FILE`을 쓴다.
-반환은 `(snapshot, '')` 또는 `(None, 상태 문구)`이며 기본은 「ROSY 인식 연동 전」,
-404는 「ROSY에 아직 인식 API 없음」, 검증 실패는 「ROSY 인식 응답 형식 오류」다.
-`RosyClient.site_recognition()`는 직접 읽기 메서드이고, opt-in은 위 헬퍼가 담당한다.
-UI 연결·보관/만료 정책·실제 API와의 접속 검증은 이번 수신부 범위 밖이다.
+## 연결 설정과 상태 문구
+
+- 확정 경로는 `harbor/rosy_http.py`의 `SITE_RECOGNITION_PATH = '/api/fleet/cell-site-recognition'`이며,
+  생성자 `site_recognition_path` 또는 환경 `HARBOR_ROSY_SITE_RECOGNITION_PATH`로 덮어쓸 수 있다
+  (생성자 우선, 같은 origin의 절대 경로만 허용). 기존 Fleet 인증/TLS와 transport를 재사용한다.
+- **기본 켜짐**이며 `HARBOR_ROSY_SITE_RECOGNITION=0`일 때만 조회를 끈다(「ROSY 인식 연동 전」).
+- `load_site_recognition(client)`는 `(snapshot, '')` 또는 `(None, 상태 문구)`를 반환한다(HTTP 타임아웃 2초).
+  client를 생략하면 `HARBOR_FLEET_ORIGIN`, `HARBOR_FLEET_TOKEN`, `HARBOR_FLEET_CA_FILE`을 쓴다.
+- 404 응답은 본문을 최대 64KB까지 예외 없이 읽어 `detail.code`로 두 경우를 구분한다.
+  - `detail.code == "CELL_SITE_RECOGNITION_NOT_YET_OBSERVED"` → 「ROSY 인식 스냅샷 수신 대기」
+  - 그 밖의 404, JSON 아님, 본문 읽기 실패 → 「ROSY에 아직 인식 API 없음」
+- 설정 미완료는 「ROSY 인식 연동 전」, 그 밖의 HTTP/연결 오류는 「ROSY 인식 연결 오류」,
+  스키마 검증 실패는 「ROSY 인식 응답 형식 오류」다.
+- `RosyClient.site_recognition()`는 직접 읽기 메서드이고, 기본 켜짐/`=0` 끔과 상태 문구 변환은 `load_site_recognition()`이 담당한다.
+
+## UI 연결 범위
+
+- 웹 연결 헬퍼 `harbor_web/site_recognition_view.py`는 `harbor_web/fleet_connection.py`의 `connection_settings()`(DB 저장 연결 또는 env)와
+  `HARBOR_FLEET_TOKEN`을 사용하고, 결과를 `(origin, token digest, path)` 키로 프로세스 메모리에 15초 캐시한다(타임아웃 2초).
+- 야드 화면(`/inventory/`, 부분 템플릿 `site_recognition_panel.html`)은 상태 한 줄
+  (「ROSY 인식 · HH:MM · source_id · 37자리 중 n자리」 또는 상태 문구), 최신 `grid-placement-v1` 장부와의
+  일치 개수, 불일치(`ROSY_EMPTY_HARBOR_OCCUPIED`, `ROSY_OCCUPIED_HARBOR_EMPTY`, `CLASS_MISMATCH`, `UNREADABLE`)
+  목록과 「현장 확인」(`/field/`) 링크만 표시한다.
+- 처리할 것(`/alerts/`, `harbor_web/alert_pages.py` `ATTENTION_KIND['인식 불일치']`)에 불일치 건을 종류 「인식 불일치」로 연결한다.
+- 화면 GET은 Plan·Command·Observation을 만들지 않으며, 장부를 자동으로 고치지 않는다(ADR 0036).

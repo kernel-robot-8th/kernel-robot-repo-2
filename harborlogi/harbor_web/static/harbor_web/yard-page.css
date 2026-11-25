@@ -239,6 +239,53 @@
   margin-top: var(--primitive-space-3);
 }
 
+.site-recognition-panel {
+  margin-top: var(--primitive-space-4);
+}
+
+.site-recognition-panel .site-recognition-action {
+  margin-left: auto;
+}
+
+.site-recognition-status {
+  margin: 0;
+  color: var(--semantic-text-secondary);
+  font-size: var(--primitive-font-label);
+}
+
+.site-recognition-list {
+  list-style: none;
+  margin: var(--primitive-space-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--primitive-space-2);
+}
+
+.site-recognition-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--primitive-space-2) var(--primitive-space-3);
+  padding: var(--primitive-space-2) var(--primitive-space-3);
+  background: var(--semantic-surface-canvas);
+  border: var(--primitive-border-thin) solid var(--semantic-border-divider);
+  border-radius: var(--primitive-radius-control);
+  font-size: var(--primitive-font-label);
+}
+
+.site-recognition-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--primitive-space-1) var(--primitive-space-2);
+  min-width: 0;
+}
+
+.site-recognition-reason {
+  color: var(--semantic-text-secondary);
+  font-size: var(--primitive-font-caption);
+}
+
 .site-places-panel {
   margin-top: var(--primitive-space-4);
 }

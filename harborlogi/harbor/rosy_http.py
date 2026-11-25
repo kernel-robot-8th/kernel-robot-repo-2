@@ -13,8 +13,9 @@ from harbor.cell_site_map import decode_cell_site_json
 from harbor.fleet_discovery import _NoRedirect
 from harbor.site_recognition import parse_site_recognition
 
-# ROSY Wave 4 구현 경로 (`rosy.cell-site-recognition.v1`).
-SITE_RECOGNITION_PATH_PROPOSED = '/api/fleet/cell-site-recognition'
+# ROSY 확정 읽기 경로 (ROSY #735, `rosy.cell-site-recognition.v1`).
+SITE_RECOGNITION_PATH = '/api/fleet/cell-site-recognition'
+SITE_RECOGNITION_PATH_PROPOSED = SITE_RECOGNITION_PATH
 
 
 def validate_console_url(value):
@@ -332,15 +333,19 @@ class RosyClient:
         )
 
 
+
 def load_site_recognition(client=None, *, known_site_refs=None):
-    """Optional read entry point for future UI use: (snapshot or None, status text)."""
-    if os.environ.get('HARBOR_ROSY_SITE_RECOGNITION') != '1':
+    """Read-only entry point for UI use: (snapshot or None, status text)."""
+    if os.environ.get('HARBOR_ROSY_SITE_RECOGNITION', '').strip() == '0':
         return None, 'ROSY 인식 연동 전'
     if client is None:
         origin, token = os.environ.get('HARBOR_FLEET_ORIGIN'), os.environ.get('HARBOR_FLEET_TOKEN')
         if not origin or not token:
             return None, 'ROSY 인식 연동 전'
-        client = RosyClient(origin, token, ca_file=os.environ.get('HARBOR_FLEET_CA_FILE') or None)
+        try:
+            client = RosyClient(origin, token, timeout=2, ca_file=os.environ.get('HARBOR_FLEET_CA_FILE') or None)
+        except ValueError:
+            return None, 'ROSY 인식 연결 오류'
     try:
         return client.site_recognition(known_site_refs=known_site_refs), ''
     except HTTPError as error:
