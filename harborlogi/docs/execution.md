@@ -140,6 +140,16 @@ python -m tools.integration.real_fleet_http --platform-root <플랫폼-root> --p
 
 업무 대조 시험에서는 별도 시험 actor가 Fleet의 기명 승인자로 승인한다. Harbor의 런타임 클라이언트에 승인 기능을 추가하지 않는다. 실제 `GOAL_CONFIRMED` 뒤에도 Harbor 장부가 WAITING에 남는지, 잘못된 관측을 거절하는지, 재시작 후 새 조회가 필요한지, 인계 뒤에도 별도 내려놓기·퇴피 근거 전에는 AWAITING_FINAL_EVIDENCE인지 확인한다. 관측 값은 시험에 명시한 합성 데이터이며 인증된 현장 관측을 읽는 어댑터가 아니다. [실행 결과와 제한](validation/2026-10-22-business-reconciliation.md)을 따른다.
 
+### RFID 입고 계약 시험
+
+RFID 판독 계약이 포함된 ROSY 체크아웃과 Fleet 시험 의존성이 필요하다. `harborlogi/`에서 실행한다.
+
+```bash
+python -m tools.integration.rfid_intake --platform-root <ROSY-체크아웃> --platform-sha <전체-SHA>
+```
+
+합성 EPC와 공급 완료 상태로 Cell Fleet의 판독 HTTP 경로, Fleet R의 중계, Harbor 입고 장부를 실행한다. 인증 없는 판독, 공급 완료 전 판독, 응답 유실 뒤 판독 재전송을 확인한다. 입고 이벤트가 한 번만 반영돼야 통과한다. 시험은 프로세스 안의 HTTP 전송과 임시 SQLite 장부를 사용한다.
+
 ## 탑뷰 프레임 프록시
 
 로그인한 열람·운영·관리 역할은 `GET /topview/<source_id>/frame/`으로 최신 JPEG 한 장을 받는다(운영 현황과 관측 재고의 야드 평면 옆 「ROSY 탑뷰」에서 표시). 기존 `HARBOR_FLEET_ORIGIN`, `HARBOR_FLEET_TOKEN`, `HARBOR_FLEET_CA_FILE`을 사용해 `GET /api/fleet/vision/sources`의 `sources`에 있는 출처인지 확인한 뒤, `POST /api/fleet/vision/lease`에 실제 환경+좌표 버드뷰 보정(`rectification: {"mode": "map_overlay"}`)을 우선 요청하고(`422` 미지원이면 `{"mode": "map"}` D-560으로 대체), 해당 카메라에 승인된 평면 보정이 없어 Vision이 `409`(`X-Frame-State: plane-unavailable`)를 돌려주면 기본 프레임 lease(`source_id`만 전달)로 대체한다(`?view=raw`는 카메라 화면만 요청). 브라우저에는 JPEG와 선택한 `X-Frame-*` 헤더만 반환하며 lease는 전달하지 않고 `no-store`로 응답한다. JPEG는 4 MiB 이하만 허용하고 리다이렉트·다른 origin의 `frame_path`는 거절한다. 설정 누락은 503 「ROSY 연동 전」, 오래된 프레임은 404 `frame stale`이다. 클라이언트의 `sources()`는 `GET /api/fleet/vision/sources`를 지원한다. 확인 못 함: R이 CELL-A 카메라를 sources에 내놓는지, Harbor 서비스 계정이 카메라 열람 권한을 통과하는지, 그림을 Fleet가 아닌 다른 호스트가 주는지. 다른 호스트가 필요하면 현재 프록시로 수용하지 않으며 ROSY 전달 계약을 먼저 확인해야 한다.
