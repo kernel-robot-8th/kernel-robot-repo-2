@@ -301,6 +301,55 @@ class SiteRecognitionClientTests(unittest.TestCase):
             self.assertEqual(load_site_recognition(RosyClient(transport=lambda *args: {})),
                              (None, 'ROSY 인식 응답 형식 오류'))
 
+    def test_loader_404_detail_code_distinguishes_snapshot_wait_from_missing_api(self):
+        import http.client
+
+        class TrackedBody(io.BytesIO):
+            closed_count = 0
+
+            def close(self):
+                self.closed_count += 1
+                super().close()
+
+        class TruncatedBody:
+            def read(self, _n=-1):
+                raise http.client.IncompleteRead(b'{"detail":')
+
+            def close(self):
+                pass
+
+        not_yet = json.dumps({'detail': {'code': 'CELL_SITE_RECOGNITION_NOT_YET_OBSERVED'}}).encode()
+        oversized_not_yet = json.dumps({
+            'detail': {'code': 'CELL_SITE_RECOGNITION_NOT_YET_OBSERVED', 'pad': 'x' * 4100}
+        }).encode()
+        tracked_404 = TrackedBody(not_yet)
+        tracked_503 = TrackedBody(b'service unavailable')
+        cases = [
+            (HTTPError('http://synthetic', 404, 'waiting', {}, tracked_404),
+             'ROSY 인식 스냅샷 수신 대기'),
+            (HTTPError('http://synthetic', 404, 'missing', {}, io.BytesIO(b'<html>not json</html>')),
+             'ROSY에 아직 인식 API 없음'),
+            (HTTPError('http://synthetic', 404, 'too big', {}, io.BytesIO(oversized_not_yet)),
+             'ROSY에 아직 인식 API 없음'),
+            (HTTPError('http://synthetic', 404, 'truncated', {}, TruncatedBody()),
+             'ROSY에 아직 인식 API 없음'),
+            (HTTPError('http://synthetic', 404, 'missing', {}, None),
+             'ROSY에 아직 인식 API 없음'),
+            (HTTPError('http://synthetic', 403, 'forbidden', {}, io.BytesIO(not_yet)),
+             'ROSY 인식 연결 오류'),
+            (HTTPError('http://synthetic', 503, 'unavailable', {}, tracked_503),
+             'ROSY 인식 연결 오류'),
+            (HTTPError('http://synthetic', 503, 'truncated', {}, TruncatedBody()),
+             'ROSY 인식 연결 오류'),
+        ]
+        for error, status in cases:
+            def transport(*args):
+                raise error
+            with self.subTest(status=status, code=error.code), patch.dict(os.environ, {'HARBOR_ROSY_SITE_RECOGNITION': '1'}):
+                self.assertEqual(load_site_recognition(RosyClient(transport=transport)), (None, status))
+        self.assertGreaterEqual(tracked_404.closed_count, 1)
+        self.assertGreaterEqual(tracked_503.closed_count, 1)
+
 
 if __name__ == '__main__':
     unittest.main()

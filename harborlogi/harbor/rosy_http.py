@@ -17,6 +17,21 @@ from harbor.site_recognition import parse_site_recognition
 SITE_RECOGNITION_PATH_PROPOSED = '/api/fleet/cell-site-recognition'
 
 
+def validate_console_url(value):
+    if not value:
+        return None
+    parsed = urlsplit(value)
+    try:
+        local = parsed.hostname == 'localhost' or ipaddress.ip_address(parsed.hostname).is_loopback
+    except ValueError:
+        local = False
+    if (not parsed.hostname or parsed.username is not None or '?' in value or '#' in value
+            or parsed.scheme not in {'https', 'http'} or parsed.scheme == 'http' and not local
+            or any(c.isspace() or ord(c) <= 32 for c in value) or '\\' in value or parsed.port == 0):
+        raise ValueError('Expected a console HTTPS URL or loopback HTTP URL without credentials or query')
+    return value
+
+
 class FleetIdentityError(ValueError):
     """The configured app identity was not authenticated; no operation was sent."""
 
@@ -329,8 +344,21 @@ def load_site_recognition(client=None, *, known_site_refs=None):
     try:
         return client.site_recognition(known_site_refs=known_site_refs), ''
     except HTTPError as error:
-        error.close()
-        return None, 'ROSY에 아직 인식 API 없음' if error.code == 404 else 'ROSY 인식 연결 오류'
+        if error.code != 404:
+            error.close()
+            return None, 'ROSY 인식 연결 오류'
+        detail_code = None
+        try:
+            raw = error.read(4097)  # synthetic HTTPError may carry fp=None
+            detail = json.loads(raw).get('detail', {}) if len(raw) <= 4096 else {}
+            if isinstance(detail, dict):
+                detail_code = detail.get('code')
+        except (http.client.HTTPException, OSError, ValueError, TypeError, AttributeError):
+            detail_code = None
+        finally:
+            error.close()
+        return None, ('ROSY 인식 스냅샷 수신 대기' if detail_code == 'CELL_SITE_RECOGNITION_NOT_YET_OBSERVED'
+                      else 'ROSY에 아직 인식 API 없음')
     except FleetIdentityError:
         return None, 'ROSY 인식 연결 오류'
     except ValueError:
