@@ -74,14 +74,16 @@ class PortEventProjectionTests(TestCase):
     def test_occurrence_receipt_dispatch_observation_replay_and_repeat(self):
         from django.conf import settings
         from harbor_web.cell_plan_dispatch import auto_dispatch_next
-        from harbor_web.models import IntakeOccurrence, Order, Plan
+        from datetime import timedelta
+        from harbor_web.models import IntakeOccurrence, IntakeProjectionCursor, Order, Plan
         from harbor_web.runtime_models import DeploymentState
         from harbor_web.tests.test_cell_plan_dispatch import _FakeCellPlanClient
         DeploymentState.objects.get_or_create(pk=1, defaults={'mode': settings.MODE})
         yard = dict(schema='grid-placement-v1', observed_areas=['yard', 'temp_a', 'temp_b', 'stand'],
                     holdings=[], placements=[])
         legacy = IntakeLedger(self.path)
-        legacy.expect('C1', now=self.now)
+        # Harbor's manifest clock is ahead of Fleet's RFID clock.
+        legacy.expect('C1', now=self.now + timedelta(minutes=2))
         def event(kind, char, occurrence, *, identity='observed', **fields):
             self.fleet.events.append(dict(event_id=char * 64, kind='container.' + kind,
                 observation_ref='observation-' + char, object_ref='C1', identity=identity,
@@ -138,6 +140,7 @@ class PortEventProjectionTests(TestCase):
             provenance='DECLARED', condition=self.condition, payload=yard)
         event('received_at_intake', 'c', 'second', intake_point='belt')
         self.assertEqual(Order.objects.count(), 2)
+        self.assertEqual((legacy.read('C1')['state'], legacy.read('C1')['slot_ref']), ('RECEIVED_AT_INTAKE', None))
         second = IntakeOccurrence.objects.get(pk='second')
         second_dispatch = auto_dispatch_next(client=_FakeCellPlanClient(), production=False)
         self.assertEqual(second_dispatch.order_id, second.order_id)
@@ -150,8 +153,14 @@ class PortEventProjectionTests(TestCase):
         second.refresh_from_db()
         self.assertEqual(second.status, 'STORED')
         self.assertEqual(second.result_identity, 'attested')
+        self.assertEqual((legacy.read('C1')['state'], legacy.read('C1')['slot_ref']), ('COMPLETED', second.observed_slot))
         self.assertContains(self.client.get('/inventory/'), 'RFID 작업 추적 · 놓기 위치 검증')
         self.assertEqual(Observation.objects.filter(provenance='PORT_EVENT').count(), 2)
+        cursor = IntakeProjectionCursor.objects.get()
+        self.assertEqual(legacy.occurrence_batch(cursor.sequence, cursor.pending), [])
+        cursor.delete()
+        intake_loop.tick(self.registry, now=timezone.now())
+        self.assertEqual((legacy.read('C1')['slot_ref'], IntakeOccurrence.objects.count()), (second.observed_slot, 2))
 
     def test_receipt_binds_unique_scheduled_order_and_retries_unknown_cargo(self):
         from harbor_web.models import Cargo, IntakeOccurrence, Order

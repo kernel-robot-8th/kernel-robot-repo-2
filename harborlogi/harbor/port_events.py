@@ -109,6 +109,8 @@ class IntakeLedger:
                     updated_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS intake_receipt_binding (
                     object_ref TEXT PRIMARY KEY, occurrence_id TEXT NOT NULL UNIQUE);
+                CREATE TABLE IF NOT EXISTS port_stream (singleton INTEGER PRIMARY KEY, stream_id TEXT NOT NULL UNIQUE);
+                INSERT OR IGNORE INTO port_stream VALUES(1, lower(hex(randomblob(16))));
                 {RELEASE_SCHEMA};
             """)
 
@@ -143,6 +145,20 @@ class IntakeLedger:
         with closing(self._connect()) as c:
             return [parse_event(json.loads(row["payload"])) for row in c.execute(
                 "SELECT payload FROM port_events WHERE outcome='OCCURRENCE' ORDER BY rowid")]
+
+    def occurrence_batch(self, after, pending):
+        with closing(self._connect()) as c:
+            rows = list(c.execute("SELECT rowid,payload FROM port_events WHERE outcome='OCCURRENCE' "
+                                  "AND rowid>? ORDER BY rowid LIMIT 100", (after,)))
+            for start in range(0, len(pending), 500):
+                part = pending[start:start+500]
+                placeholders = ','.join('?' for _ in part)
+                rows.extend(c.execute(f"SELECT rowid,payload FROM port_events WHERE rowid IN ({placeholders})", part))
+        return [(seq, parse_event(json.loads(body))) for seq, body in sorted(rows, key=lambda row: row[0])]
+
+    def stream_id(self):
+        with closing(self._connect()) as c:
+            return c.execute("SELECT stream_id FROM port_stream WHERE singleton=1").fetchone()[0]
 
     def holds(self):
         """Intake rows waiting for human review (HOLD or UNREADABLE attention), oldest update first."""
@@ -215,15 +231,6 @@ class IntakeLedger:
     def _apply(self, c, event, now):
         kind, ref = event["kind"], event["object_ref"]
         if event.get("intake_occurrence_id"):
-            if kind == "container.received_at_intake":
-                row = c.execute("SELECT * FROM intake WHERE object_ref=?", (ref,)).fetchone()
-                if (row and row["state"] in ("EXPECTED", "TRIP_ARRIVED")
-                        and datetime.fromisoformat(row["updated_at"]) <= event["observed_at"] <= now):
-                    c.execute("INSERT OR IGNORE INTO intake_receipt_binding VALUES(?,?)", (ref, event["intake_occurrence_id"]))
-                    bound = c.execute("SELECT occurrence_id FROM intake_receipt_binding WHERE object_ref=?", (ref,)).fetchone()
-                    if bound and bound[0] == event["intake_occurrence_id"]:
-                        self._advance(c, row, "RECEIVED_AT_INTAKE", now, identity=event["identity"],
-                                      intake_point=event["intake_point"], attention=None)
             return "OCCURRENCE"
         if kind == "vehicle.release_permitted":
             record_release(c, event)
@@ -260,6 +267,23 @@ class IntakeLedger:
                             "WHERE i.object_ref=? AND b.occurrence_id=?", (event["object_ref"], event["intake_occurrence_id"])).fetchone()
             if row:
                 self._advance(c, row, "COMPLETED", event["observed_at"], identity=event["identity"], slot_ref=event["slot_ref"])
+
+    def bind_received_occurrence(self, event):
+        """Mirror Harbor's accepted current occurrence into an existing single-row cargo manifest."""
+        ref, occurrence = event["object_ref"], event["intake_occurrence_id"]
+        with closing(self._connect()) as c, c:
+            c.execute("BEGIN IMMEDIATE")
+            row = c.execute("SELECT * FROM intake WHERE object_ref=?", (ref,)).fetchone()
+            if row is None or (row["hold_reason"] and row["hold_reason"] != "LOST"):
+                return
+            binding = c.execute("SELECT occurrence_id FROM intake_receipt_binding WHERE object_ref=?", (ref,)).fetchone()
+            if binding and binding[0] == occurrence:
+                return
+            c.execute("INSERT INTO intake_receipt_binding VALUES(?,?) ON CONFLICT(object_ref) "
+                      "DO UPDATE SET occurrence_id=excluded.occurrence_id", (ref, occurrence))
+            c.execute("UPDATE intake SET state='RECEIVED_AT_INTAKE',identity=?,intake_point=?,slot_ref=NULL,"
+                      "hold_reason=NULL,attention=NULL,attested_by=NULL,updated_at=?,version=version+1 WHERE object_ref=?",
+                      (event["identity"], event["intake_point"], event["observed_at"].isoformat(), ref))
 
     def outbound_loaded_events(self, *, object_ref=None, vehicle_id=None):
         """Return consumed `container.loaded_for_outbound` events filtered by optional cargo/vehicle."""

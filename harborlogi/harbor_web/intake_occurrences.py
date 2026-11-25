@@ -8,7 +8,7 @@ from django.utils import timezone
 from harbor_web.autoplanning import replan_enabled
 from harbor_web.command_models import ACTIVE_CELL_PLAN_DISPATCH_STATES, ACTIVE_COMMAND_STATES, CellPlanDispatch
 from harbor_web.coordination import serialized
-from harbor_web.models import Audit, Cargo, IntakeOccurrence, Observation, Order, Plan
+from harbor_web.models import Audit, Cargo, IntakeOccurrence, IntakeProjectionCursor, Observation, Order, Plan
 from harbor_web.plan_freshness import plan_changes
 from harbor_web.plan_service import placement_decision
 from harbor_web.service_common import automatic_actor
@@ -17,6 +17,7 @@ from harbor_web.order_queue import back_of_tier
 from harbor_web.port_event_projection import _ProjectionRejected, _record_rejection_once, project_stored_event
 
 logger = logging.getLogger(__name__)
+WAITING = ('CARGO_UNKNOWN', 'AMBIGUOUS_ORDER', 'WAITING_FOR_YARD', 'PLANNING_CAPACITY')
 
 
 def requested_slot(dispatch):
@@ -45,7 +46,7 @@ def _receive(event):
     if receipt.receipt_event_id != event['event_id']:
         _record_rejection_once(event, 'OCCURRENCE_RECEIPT_CONFLICT', '회차에 다른 수령 기록이 있습니다.')
         return
-    if not created and receipt.status not in ('CARGO_UNKNOWN', 'AMBIGUOUS_ORDER', 'WAITING_FOR_YARD', 'PLANNING_CAPACITY'):
+    if not created and receipt.status not in WAITING:
         return
     cargo = Cargo.objects.filter(code=receipt.object_ref).first()
     if cargo is None:
@@ -102,8 +103,10 @@ def _receive(event):
 @transaction.atomic
 def _stored(event):
     receipt = IntakeOccurrence.objects.filter(pk=event['intake_occurrence_id']).first()
-    if receipt is None or receipt.order_id is None:
+    if receipt is None or event['observed_at'] > timezone.now():
         return  # Replay after the receipt/registration arrives.
+    if receipt.order_id is None:
+        return False if receipt.status == 'STALE_RECEIPT' else None
     retry = receipt.stored_event_id == event['event_id'] and receipt.status == 'YARD_CONFLICT'
     if receipt.stored_event_id == event['event_id'] and not retry:
         if not receipt.result_identity:
@@ -114,10 +117,10 @@ def _stored(event):
     if (receipt.object_ref != event['object_ref'] or (receipt.stored_event_id and not retry) or dispatch is None
             or dispatch.request_key != event['placement_attempt_id'] or dispatch.request_payload.get('intake_occurrence_id') != receipt.pk
             or dispatch.request_payload.get('placement_attempt_id') != dispatch.request_key
-            or not requested_slot(dispatch) or not max(dispatch.created_at, receipt.received_at) <= event['observed_at'] <= timezone.now()
+            or not requested_slot(dispatch) or event['observed_at'] < receipt.received_at
             or IntakeOccurrence.objects.filter(object_ref=receipt.object_ref, received_at__gte=receipt.received_at).exclude(pk=receipt.pk).exists()):
         _record_rejection_once(event, 'STALE_OR_UNBOUND_PLACEMENT', '입고 회차와 최신 배치 시도를 대조할 수 없습니다.')
-        return
+        return False
     try:
         project_stored_event(event, dispatch=dispatch)
     except _ProjectionRejected as exc:
@@ -141,12 +144,43 @@ def _stored(event):
         return True
 
 
+def _project(event, ledger):
+    if event['kind'] == 'container.stored':
+        outcome = _stored(event)
+        if outcome:
+            ledger.complete_bound_receipt(event)
+        return outcome is not None
+    _receive(event)
+    receipt = IntakeOccurrence.objects.filter(pk=event['intake_occurrence_id']).first()
+    if receipt is None:
+        return False
+    if receipt.receipt_event_id != event['event_id']:
+        return True
+    if (receipt.order_id and receipt.status != 'STALE_RECEIPT' and not IntakeOccurrence.objects.filter(
+            object_ref=receipt.object_ref, received_at__gte=receipt.received_at).exclude(pk=receipt.pk).exists()):
+        ledger.bind_received_occurrence(event)
+    return receipt.status not in WAITING
+
+
+@serialized
+@transaction.atomic
 def project_occurrences(ledger):
-    for event in ledger.occurrence_events():
+    """Checkpoint in the projected database so restoring it replays the matching journal."""
+    cursor, _ = IntakeProjectionCursor.objects.select_for_update().get_or_create(pk=ledger.stream_id())
+    pending = set(cursor.pending)
+    last = cursor.sequence
+    for seq, event in ledger.occurrence_batch(last, sorted(pending)):
         try:
-            if event['kind'] == 'container.received_at_intake':
-                _receive(event)
-            elif _stored(event):
-                ledger.complete_bound_receipt(event)
+            with transaction.atomic():
+                finished = _project(event, ledger)
         except Exception:
             logger.exception('Intake occurrence event %s will be retried', event['event_id'])
+            finished = False
+        if finished:
+            pending.discard(seq)
+        else:
+            pending.add(seq)
+        last = max(last, seq)
+    if last != cursor.sequence or pending != set(cursor.pending):
+        cursor.sequence, cursor.pending = last, sorted(pending)
+        cursor.save(update_fields=['sequence', 'pending'])

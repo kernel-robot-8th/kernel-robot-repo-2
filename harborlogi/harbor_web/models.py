@@ -150,6 +150,12 @@ class Order(Authored):
         ]
 
 
+class IntakeProjectionCursor(models.Model):
+    stream_id = models.CharField(max_length=32, primary_key=True)
+    sequence = models.PositiveBigIntegerField(default=0)
+    pending = models.JSONField(default=list)
+
+
 class IntakeOccurrence(models.Model):
     occurrence_id = models.CharField(max_length=128, primary_key=True)
     object_ref = models.CharField(max_length=128)
