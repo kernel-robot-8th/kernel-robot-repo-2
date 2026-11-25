@@ -2,21 +2,20 @@
 import argparse
 from datetime import datetime, timezone
 from http import HTTPStatus
-import ipaddress
 from importlib.metadata import distribution
 import json
 import os
 import re
 from pathlib import Path
 import sqlite3
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs
 from wsgiref.simple_server import make_server, WSGIRequestHandler
 
 from harbor.process import ArmTransferBinding
 from harbor.execution import arm_execution_view
 from harbor.ledger import ReadOnlyLedger, plan_payload
 from harbor.planning_view import preview
-from harbor.rosy_http import RosyClient
+from harbor.rosy_http import RosyClient, validate_console_url
 
 
 ASSETS = Path(__file__).with_name('web_assets')
@@ -48,26 +47,10 @@ def _summary(row):
     }
 
 
-def _console_url(value):
-    if not value:
-        return None
-    parsed = urlsplit(value)
-    try:
-        local = parsed.hostname == 'localhost' or ipaddress.ip_address(parsed.hostname).is_loopback
-    except ValueError:
-        local = False
-    if (not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment
-            or parsed.scheme not in {'https', 'http'} or parsed.scheme == 'http' and not local
-            or any(ord(c) <= 32 for c in value) or '\\' in value):
-        raise ValueError('Expected a console HTTPS URL or loopback HTTP URL without credentials or query')
-    parsed.port  # Reject malformed ports before emitting a link.
-    return value
-
-
 class Workbench:
     def __init__(self, ledger, client=None, *, console_url=None, demo=False):
         self.ledger, self.client, self.demo = ledger, client, demo
-        self.console_url = _console_url(console_url)
+        self.console_url = validate_console_url(console_url)
 
     def tasks(self):
         return [_summary(row) for row in self.ledger.tasks()]

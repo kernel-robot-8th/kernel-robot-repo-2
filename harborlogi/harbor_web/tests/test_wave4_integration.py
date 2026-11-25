@@ -1,5 +1,5 @@
 """Wave 4 Harbor integration tests: outbound loaded port events and S3 ARM recovery client."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
 import os
@@ -72,57 +72,74 @@ class Wave4HarborIntegrationTests(TestCase):
             queue_digest='0' * 64, result={'status': 'READY', 'moves': []},
         )
 
+    def _pickup_arrived_dispatch(self, suffix, **extra):
+        plan = Plan.objects.create(
+            created_by=self.operator,
+            order=self.order, order_version=1, observation=self.obs, condition=self.condition,
+            queue_digest='0' * 64, result={'status': 'READY', 'moves': []},
+        )
+        cmd = Command.objects.create(
+            plan=plan,
+            order=self.order,
+            actor=self.operator,
+            plan_version=1,
+            ledger_identity=f'harbor-w4-outbound-{suffix}',
+            fleet_origin='http://127.0.0.1:8000',
+            fleet_principal='harbor-service',
+            body_digest='d' * 64,
+            binding={'moves': []},
+            state='COMPLETED',
+            mission_id=f'mission-out-{suffix}',
+        )
+        fields = dict(
+            command=cmd,
+            cargo=self.cargo,
+            actor=self.operator,
+            stand_zone_id='stand',
+            pickup_stop_id='S_OUT',
+            exit_stop_id='S_EXIT',
+            site_places_digest='c' * 64,
+            candidate_robot_ids=['rosy_46'],
+            state='PICKUP_ARRIVED',
+            assigned_vehicle_id='rosy_46',
+            pickup_mission_id='trip-leg1',
+        )
+        fields.update(extra)
+        return OutboundDispatch.objects.create(**fields)
+
+    def _ledger_event(self, intake, *, event_id, observed_at):
+        ev = parse_event({
+            'event_id': event_id,
+            'kind': 'container.loaded_for_outbound',
+            'observation_ref': f'obs-{event_id[:8]}',
+            'object_ref': 'CNTR-W4-1',
+            'intake_point': None,
+            'slot_ref': None,
+            'vehicle_id': 'rosy_46',
+            'reason': None,
+            'identity': 'observed',
+            'observed_at': observed_at,
+        })
+        outcomes = intake.consume([ev], now=_NOW)
+        self.assertEqual(outcomes[event_id], 'OUTBOUND_LOADED')
+
+    def _tick_registry(self, ledger_path):
+        transport = _DummyTransport()
+        client = SimpleNamespace(propose_trip=lambda *a, **kw: None, trip_request=lambda *a, **kw: None)
+        registry = SimpleNamespace(transport=transport, client=client, config={'path': str(ledger_path)})
+        return registry, transport
+
     def test_loaded_for_outbound_port_event_advances_pickup_arrived_to_loaded(self):
         with tempfile.TemporaryDirectory() as tmp:
             ledger_path = Path(tmp) / 'intake.sqlite3'
             intake = IntakeLedger(ledger_path)
-            ev = parse_event({
-                'event_id': _EVENT_ID,
-                'kind': 'container.loaded_for_outbound',
-                'observation_ref': 'obs-out-1',
-                'object_ref': 'CNTR-W4-1',
-                'intake_point': None,
-                'slot_ref': None,
-                'vehicle_id': 'rosy_46',
-                'reason': None,
-                'identity': 'observed',
-                'observed_at': '2026-11-25T02:00:00Z',
-            })
-            outcomes = intake.consume([ev], now=_NOW)
-            self.assertEqual(outcomes[_EVENT_ID], 'OUTBOUND_LOADED')
-
-            cmd = Command.objects.create(
-                plan=self.plan,
-                order=self.order,
-                actor=self.operator,
-                plan_version=1,
-                ledger_identity='harbor-w4-outbound',
-                fleet_origin='http://127.0.0.1:8000',
-                fleet_principal='harbor-service',
-                body_digest='d' * 64,
-                binding={'moves': []},
-                state='COMPLETED',
-                mission_id='mission-out-1',
-            )
-            dispatch = OutboundDispatch.objects.create(
-                command=cmd,
-                cargo=self.cargo,
-                actor=self.operator,
-                stand_zone_id='stand',
-                pickup_stop_id='S_OUT',
-                exit_stop_id='S_EXIT',
-                site_places_digest='c' * 64,
-                candidate_robot_ids=['rosy_46'],
-                state='PICKUP_ARRIVED',
-                assigned_vehicle_id='rosy_46',
-                pickup_mission_id='trip-leg1',
-            )
-            transport = _DummyTransport()
-            client = SimpleNamespace(propose_trip=lambda *a, **kw: None, trip_request=lambda *a, **kw: None)
-            registry = SimpleNamespace(transport=transport, client=client, config={'path': str(ledger_path)})
+            dispatch = self._pickup_arrived_dispatch('advance')
+            # created_at is wall-clock (auto_now_add); an event observed at/after creation is fresh.
+            self._ledger_event(intake, event_id=_EVENT_ID, observed_at=dispatch.created_at.isoformat())
+            registry, transport = self._tick_registry(ledger_path)
 
             with patch.dict(os.environ, {'HARBOR_LEDGER_PATH': str(ledger_path)}):
-                res = outbound_loop.tick(registry, now=_NOW)
+                res = outbound_loop.tick(registry)
             self.assertEqual(res[dispatch.pk], 'EXIT_PROPOSED')
             dispatch.refresh_from_db()
             self.assertEqual(dispatch.state, 'EXIT_PROPOSED')
@@ -130,6 +147,105 @@ class Wave4HarborIntegrationTests(TestCase):
             self.assertEqual(dispatch.loaded_event_id, _EVENT_ID)
             self.assertTrue(any(k.startswith('harbor-outbound-exit:') for k in transport.prepared))
             self.assertTrue(Audit.objects.filter(action='outbound.loaded_from_port_event').exists())
+
+    def test_claimed_event_does_not_advance_recreated_dispatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / 'intake.sqlite3'
+            intake = IntakeLedger(ledger_path)
+            self._pickup_arrived_dispatch(
+                'claimed-prior', state='CANCELLED', loaded_event_id=_EVENT_ID, reason='OPERATOR_CANCELLED',
+            )
+            dispatch = self._pickup_arrived_dispatch('recreated')
+            self._ledger_event(intake, event_id=_EVENT_ID, observed_at=dispatch.created_at.isoformat())
+            registry, transport = self._tick_registry(ledger_path)
+
+            with patch.dict(os.environ, {'HARBOR_LEDGER_PATH': str(ledger_path)}):
+                res = outbound_loop.tick(registry)
+            self.assertNotIn(dispatch.pk, res)
+            dispatch.refresh_from_db()
+            self.assertEqual(dispatch.state, 'PICKUP_ARRIVED')
+            self.assertEqual(dispatch.loaded_event_id, '')
+            self.assertFalse(any(k.startswith('harbor-outbound-exit:') for k in transport.prepared))
+            self.assertFalse(Audit.objects.filter(action='outbound.loaded_from_port_event').exists())
+
+    def test_stale_event_does_not_advance_recreated_dispatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / 'intake.sqlite3'
+            intake = IntakeLedger(ledger_path)
+            self._ledger_event(intake, event_id=_EVENT_ID, observed_at='2020-01-01T00:00:00Z')
+            dispatch = self._pickup_arrived_dispatch('stale-new')
+            registry, transport = self._tick_registry(ledger_path)
+
+            with patch.dict(os.environ, {'HARBOR_LEDGER_PATH': str(ledger_path)}):
+                res = outbound_loop.tick(registry)
+            self.assertNotIn(dispatch.pk, res)
+            dispatch.refresh_from_db()
+            self.assertEqual(dispatch.state, 'PICKUP_ARRIVED')
+            self.assertEqual(dispatch.loaded_event_id, '')
+            self.assertFalse(any(k.startswith('harbor-outbound-exit:') for k in transport.prepared))
+            self.assertFalse(Audit.objects.filter(action='outbound.loaded_from_port_event').exists())
+
+    def test_fresh_unclaimed_event_advances_recreated_dispatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / 'intake.sqlite3'
+            intake = IntakeLedger(ledger_path)
+            dispatch = self._pickup_arrived_dispatch('fresh-new')
+            observed = (dispatch.created_at + timedelta(minutes=1)).isoformat()
+            self._ledger_event(intake, event_id=_EVENT_ID, observed_at=observed)
+            registry, transport = self._tick_registry(ledger_path)
+
+            with patch.dict(os.environ, {'HARBOR_LEDGER_PATH': str(ledger_path)}):
+                res = outbound_loop.tick(registry)
+            self.assertEqual(res[dispatch.pk], 'EXIT_PROPOSED')
+            dispatch.refresh_from_db()
+            self.assertEqual(dispatch.state, 'EXIT_PROPOSED')
+            self.assertEqual(dispatch.exit_mission_id, 'm-leg2')
+            self.assertEqual(dispatch.loaded_event_id, _EVENT_ID)
+            self.assertTrue(any(k.startswith('harbor-outbound-exit:') for k in transport.prepared))
+            self.assertTrue(Audit.objects.filter(action='outbound.loaded_from_port_event').exists())
+
+    def test_single_event_does_not_advance_two_waiting_dispatches_in_same_tick(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / 'intake.sqlite3'
+            intake = IntakeLedger(ledger_path)
+            first = self._pickup_arrived_dispatch('same-tick-1', stand_zone_id='stand-1')
+            second = self._pickup_arrived_dispatch('same-tick-2', stand_zone_id='stand-2')
+            observed = (second.created_at + timedelta(minutes=1)).isoformat()
+            self._ledger_event(intake, event_id=_EVENT_ID, observed_at=observed)
+            registry, transport = self._tick_registry(ledger_path)
+
+            with patch.dict(os.environ, {'HARBOR_LEDGER_PATH': str(ledger_path)}):
+                res = outbound_loop.tick(registry)
+            self.assertEqual(res[first.pk], 'EXIT_PROPOSED')
+            self.assertNotIn(second.pk, res)
+            first.refresh_from_db()
+            second.refresh_from_db()
+            self.assertEqual(first.loaded_event_id, _EVENT_ID)
+            self.assertEqual(second.state, 'PICKUP_ARRIVED')
+            self.assertEqual(second.loaded_event_id, '')
+            self.assertEqual(set(transport.prepared), {f'harbor-outbound-exit:{first.key}'})
+
+    def test_malformed_stored_timestamp_is_ignored_without_advancing(self):
+        dispatch = self._pickup_arrived_dispatch('bad-ts')
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / 'intake.sqlite3'
+            ledger_path.write_text('', encoding='utf-8')
+            registry, transport = self._tick_registry(ledger_path)
+            bad_event = {
+                'event_id': _EVENT_ID,
+                'kind': 'container.loaded_for_outbound',
+                'object_ref': 'CNTR-W4-1',
+                'vehicle_id': 'rosy_46',
+                'observed_at': 'not-a-timestamp',
+            }
+            with patch('harbor.port_events.IntakeLedger.outbound_loaded_events', return_value=[bad_event]):
+                with patch.dict(os.environ, {'HARBOR_LEDGER_PATH': str(ledger_path)}):
+                    res = outbound_loop.tick(registry)
+            self.assertNotIn(dispatch.pk, res)
+            dispatch.refresh_from_db()
+            self.assertEqual(dispatch.state, 'PICKUP_ARRIVED')
+            self.assertEqual(dispatch.loaded_event_id, '')
+            self.assertEqual(transport.prepared, [])
 
     def test_rosy_client_arm_recovery_preview_and_request_preserve_rosy_authority(self):
         # Confirm RosyClient never exposes admit/approve helpers.

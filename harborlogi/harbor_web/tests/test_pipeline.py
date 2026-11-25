@@ -68,6 +68,38 @@ class PipelineTests(TestCase):
             self.assertNotIn(private, repr(value))
         self.assertFalse(value['verified'])
 
+    def test_public_console_is_used_only_for_the_configured_fleet(self):
+        with patch.dict(os.environ, {
+            'HARBOR_FLEET_ORIGIN': 'https://fleet.example',
+            'HARBOR_FLEET_CONSOLE_URL': 'https://remote.example:8443/console',
+            'HARBOR_FLEET_ARM_CONSOLE_ENABLED': '1',
+        }):
+            summary = connection_summary()
+            work = self.context(status='PROPOSED')
+        self.assertEqual(summary['origin'], 'https://fleet.example')
+        self.assertEqual(summary['links']['console'], 'https://remote.example:8443/console?view=work')
+        self.assertEqual(work['primary']['href'],
+                         'https://remote.example:8443/console?view=work&arm_transfer=job%2F1%3Fx%3Dy')
+
+        with patch.dict(os.environ, {
+            'HARBOR_FLEET_ORIGIN': 'https://new-fleet.example',
+            'HARBOR_FLEET_CONSOLE_URL': 'https://remote.example:8443/console',
+            'HARBOR_FLEET_ARM_CONSOLE_ENABLED': '1',
+        }):
+            historic = self.context(status='PROPOSED')
+        self.assertEqual(historic['links']['console'], 'https://fleet.example/console?view=work')
+        self.assertIsNone(historic['links']['arm'])
+
+    def test_invalid_public_console_falls_back_to_fleet_origin(self):
+        for console in ('https://remote.example/console?token=secret',
+                        'https://@remote.example/console', 'http://remote.example/console'):
+            with self.subTest(console=console), patch.dict(os.environ, {
+                'HARBOR_FLEET_ORIGIN': 'https://fleet.example',
+                'HARBOR_FLEET_CONSOLE_URL': console,
+            }):
+                summary = connection_summary()
+                self.assertEqual(summary['links']['console'], 'https://fleet.example/console?view=work')
+
 
 class PipelinePageTests(TestCase):
     setUp = command_fixtures.CommandTests.setUp
