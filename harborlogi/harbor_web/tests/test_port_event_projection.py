@@ -89,6 +89,10 @@ class PortEventProjectionTests(TestCase):
             intake_loop.tick(self.registry, now=timezone.now())
         event('received_at_intake', 'a', 'first', intake_point='belt')
         self.assertEqual(legacy.read('C1')['state'], 'RECEIVED_AT_INTAKE')
+        self.fleet.events.append(dict(event_id='0'*64, kind='container.stored', observation_ref='old-unbound',
+            object_ref='C1', identity='observed', slot_ref='yard-r1-c4-l1', observed_at=timezone.now().isoformat()))
+        intake_loop.tick(self.registry, now=timezone.now())
+        self.assertEqual(legacy.read('C1')['state'], 'RECEIVED_AT_INTAKE')
         receipt = IntakeOccurrence.objects.get(pk='first')
         self.assertEqual(receipt.status, 'WAITING_FOR_YARD')
         self.assertEqual(Order.objects.count(), 1)

@@ -233,6 +233,9 @@ class IntakeLedger:
         row = None if ref is None else c.execute("SELECT * FROM intake WHERE object_ref=?", (ref,)).fetchone()
         if row is None:
             return "HOLD_UNKNOWN"
+        if (kind in ("container.received_at_intake", "container.stored")
+                and c.execute("SELECT 1 FROM intake_receipt_binding WHERE object_ref=?", (ref,)).fetchone()):
+            return "IGNORED_UNBOUND_OCCURRENCE"
         if kind == "container.received_at_intake":
             done = self._advance(c, row, "RECEIVED_AT_INTAKE", now, identity=event["identity"],
                                  intake_point=event["intake_point"], attention=None)
