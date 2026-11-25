@@ -10,7 +10,7 @@
     "yard": "화면(180° 회전) 기준 야드 3열 왼→오 = r1·r2·r3, 위 칸 = s1, 아래 칸(컨베이어 쪽) = s2.",
     "temp": "화면 왼쪽 위 부채꼴 판 = temp_a(팔 A 쪽), 오른쪽 위 = temp_b. 레인 번호는 화면 왼→오 1·2·3로 가정.",
     "stand": "반출대는 이 카메라 화면 밖이라 위치 미정.",
-    "belt": "컨베이어 집기 점은 벨트 위 화물 중심."
+    "belt": "ROSY 이름 belt(site-points 키 belt_out) = 팔 A·B가 컨베이어에서 집는 끝. 반대쪽 belt-in은 공급암 S가 놓는 끝으로 이 카메라 밖."
   },
   "points": [
     {
@@ -242,8 +242,8 @@
     },
     {
       "site": "belt",
-      "label": "컨베이어(집기)",
-      "short_label": "컨베이어",
+      "label": "컨베이어 끝 belt (팔 A·B 집기, ROSY site-points belt_out)",
+      "short_label": "belt 집기",
       "zone": "belt",
       "kind": "pick",
       "point": [
