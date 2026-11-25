@@ -39,6 +39,10 @@ def make_plan(actor, *, order_id, expected_version, observation_id, now=None, au
     if order.version != expected_version:
         raise Conflict('Order changed; reload before planning.')
     observation = Observation.objects.select_related('condition').get(pk=observation_id)
+    from harbor_web.autoplanning import unreconciled_cell_dispatches
+    if (unreconciled_cell_dispatches(observation).filter(order=order).exists()
+            or order.cell_plan_dispatches.filter(state='COMPLETED').exists()):
+        raise Conflict('EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION')
     if automatic is not None:
         if type(automatic) is not bool:
             raise ValidationError('Automatic planning requires a boolean.')

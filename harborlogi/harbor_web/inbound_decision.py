@@ -69,7 +69,7 @@ def decision_block(order, plan, *, queue_digest=None):
         return '계획 없음 · 계산 필요'
     if plan.result.get('plan_kind') != 'inbound-placement' or plan.result.get('status') != 'READY':
         return '추천 위치 없음(보류)'
-    from harbor_web.workspace import plan_changes
+    from harbor_web.plan_freshness import plan_changes
     codes = {change['code'] for change in plan_changes(order, plan, current_queue_digest=queue_digest)}
     return next((reason for code, reason in BLOCKED_BY if code in codes), None)
 

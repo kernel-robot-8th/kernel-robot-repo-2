@@ -273,19 +273,38 @@ def _create_and_submit(
     return row
 
 
-def preview_harbor_plan(actor, *, plan_id: int, robot_id: str | None = None, client=None) -> CellPlanDryRunResponse:
-    """Read-only simulation preview for Mode 1 Harbor plan without persisting ROSY tasks."""
-    services._role(actor, 'operator')
-    plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
+def _harbor_plan_payload(plan, robot_id, *, check_reservations=False):
+    result = plan.result
+    if result.get('plan_kind') == 'inbound-placement':
+        from harbor_web.plan_service import placement_decision
+
+        decision = placement_decision(plan)
+        if decision is not None:
+            result = {**result, 'recommendation': decision.detail['recommendation']}
+        if check_reservations:
+            from harbor_web.autoplanning import placement_cells, placement_reservations, unreconciled_cell_dispatches
+
+            if unreconciled_cell_dispatches(plan.observation).filter(order=plan.order).exists():
+                raise services.Conflict('EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION')
+            reserved, _ = placement_reservations(plan.order, plan.observation)
+            if reserved and placement_cells(result['recommendation'], result['incoming_shape']) & reserved:
+                raise services.Conflict('INBOUND_DESTINATION_RESERVED')
     try:
-        payload = build_harbor_plan_request(
-            plan.result,
+        return build_harbor_plan_request(
+            result,
             observation_payload=plan.observation.payload,
             robot_id=robot_id or _default_robot_id(),
             cargo_id=plan.order.cargo.code if plan.order.cargo_id else None,
         )
     except ValueError as error:
         raise ValidationError(str(error)) from error
+
+
+def preview_harbor_plan(actor, *, plan_id: int, robot_id: str | None = None, client=None) -> CellPlanDryRunResponse:
+    """Read-only simulation preview for Mode 1 Harbor plan without persisting ROSY tasks."""
+    services._role(actor, 'operator')
+    plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
+    payload = _harbor_plan_payload(plan, robot_id)
     rosy_client = client if client is not None else _default_client()
     try:
         raw = rosy_client.preview_cell_plan(payload)
@@ -344,15 +363,15 @@ def dispatch_harbor_plan(actor, *, plan_id: int, robot_id: str | None = None, cl
 def _submit_harbor_plan(actor, *, plan_id: int, robot_id: str | None, client, production: bool) -> CellPlanDispatch:
     plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
     _reject_blocked_order(plan.order, production=production, observation=plan.observation)
-    try:
-        payload = build_harbor_plan_request(
-            plan.result,
-            observation_payload=plan.observation.payload,
-            robot_id=robot_id or _default_robot_id(),
-            cargo_id=plan.order.cargo.code if plan.order.cargo_id else None,
-        )
-    except ValueError as error:
-        raise ValidationError(str(error)) from error
+    if plan.result.get('plan_kind') == 'inbound-placement':
+        from harbor_web.inbound_decision import decision_block
+
+        if Plan.objects.filter(order_id=plan.order_id, pk__gt=plan.pk).exists():
+            raise services.Conflict('INBOUND_PLAN_SUPERSEDED')
+        blocked = decision_block(plan.order, plan)
+        if blocked:
+            raise services.Conflict(blocked)
+    payload = _harbor_plan_payload(plan, robot_id, check_reservations=True)
     req_key = f'harbor-cell-plan:{plan.pk}:{uuid.uuid4().hex[:12]}'
     rosy_client = client if client is not None else _default_client()
     return _create_and_submit(
