@@ -1,4 +1,4 @@
-"""Seed a realistic 3x6x3 site-matched sample dataset (C-1..C-8, EPC tags, shippers, voyages, arrivals)."""
+"""Seed a realistic 3x6x3 site-matched sample dataset (C-1..C-20, EPC tags, shippers, voyages, arrivals)."""
 from datetime import timedelta
 import json
 from pathlib import Path
@@ -28,11 +28,25 @@ SEED_CONTAINERS = [
     ('C-6', '도쿄행 후속 입하 6', '대한물산', 2, 'V-TOKYO-02', 8, None, '3034257BF7194E4000000006'),
     ('C-7', 'LA행 일반 입하 7', '태평양무역', 3, 'V-LA-03', 20, None, '3034257BF7194E4000000007'),
     ('C-8', '부산행 추가 입하 8', '한진특송', 1, 'V-BUSAN-01', 3, None, '3034257BF7194E4000000008'),
+    # More of the yard (12 of 18 places) so the board, yard and plans show a working shift, not one example.
+    ('C-9', 'LA행 일반 화물 9', '태평양무역', 3, 'V-LA-03', 22, (1, 1, 3), '3034257BF7194E4000000009'),
+    ('C-10', '도쿄행 일반 화물 10', '대한물산', 2, 'V-TOKYO-02', 9, (2, 1, 1), '3034257BF7194E4000000010'),
+    ('C-11', 'LA행 일반 화물 11', '태평양무역', 3, 'V-LA-03', 24, (2, 1, 2), '3034257BF7194E4000000011'),
+    ('C-12', '도쿄행 일반 화물 12', '대한물산', 2, 'V-TOKYO-02', 10, (2, 4, 1), '3034257BF7194E4000000012'),
+    ('C-13', 'LA행 일반 화물 13', '태평양무역', 3, 'V-LA-03', 26, (3, 1, 1), '3034257BF7194E4000000013'),
+    ('C-14', '부산행 일반 화물 14', '한진특송', 2, 'V-BUSAN-01', 4, (3, 1, 2), '3034257BF7194E4000000014'),
+    ('C-15', 'LA행 일반 화물 15', '태평양무역', 3, 'V-LA-03', 28, (3, 1, 3), '3034257BF7194E4000000015'),
+    ('C-16', '도쿄행 일반 화물 16', '대한물산', 2, 'V-TOKYO-02', 11, (3, 4, 1), '3034257BF7194E4000000016'),
+    # More sequential arrivals (inbound examples).
+    ('C-17', '도쿄행 후속 입하 17', '대한물산', 2, 'V-TOKYO-02', 12, None, '3034257BF7194E4000000017'),
+    ('C-18', '부산행 긴급 입하 18', '한진특송', 1, 'V-BUSAN-01', 5, None, '3034257BF7194E4000000018'),
+    ('C-19', 'LA행 후속 입하 19', '태평양무역', 3, 'V-LA-03', 30, None, '3034257BF7194E4000000019'),
+    ('C-20', '부산행 후속 입하 20', '한진특송', 2, 'V-BUSAN-01', 6, None, '3034257BF7194E4000000020'),
 ]
 
 
 class Command(BaseCommand):
-    help = 'Seed realistic 3x6x3 Harbor sample dataset (C-1..C-8, EPC tags, shippers, voyages, sequential arrivals).'
+    help = 'Seed realistic 3x6x3 Harbor sample dataset (C-1..C-20, EPC tags, shippers, voyages, sequential arrivals).'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -153,5 +167,5 @@ class Command(BaseCommand):
                     payload=seed_payload,
                 )
         self.stdout.write(self.style.SUCCESS(
-            f'Seeded {len(SEED_CONTAINERS)} containers (C-1..C-8) with {provenance} yard snapshot.'
+            f'Seeded {len(SEED_CONTAINERS)} containers (C-1..C-20) with {provenance} yard snapshot.'
         ))
