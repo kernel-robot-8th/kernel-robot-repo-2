@@ -25,7 +25,12 @@ class SitePlacesPanelTests(TestCase):
     def setUp(self):
         self.viewer = User.objects.create_user('places-viewer')
         self.viewer.groups.add(Group.objects.get_or_create(name='viewer')[0])
-        self.client.force_login(self.viewer)
+        self.admin = User.objects.create_user('places-admin')
+        self.admin.groups.add(
+            Group.objects.get_or_create(name='admin')[0],
+            Group.objects.get_or_create(name='viewer')[0],
+        )
+        self.client.force_login(self.admin)
 
     def test_rosy_client_calls_port_view_endpoint(self):
         calls = []
@@ -41,14 +46,23 @@ class SitePlacesPanelTests(TestCase):
     def test_inventory_shows_offline_status_and_topview_180_note_without_fleet_env(self):
         with patch.dict(os.environ, {'HARBOR_FLEET_ORIGIN': '', 'HARBOR_FLEET_TOKEN': ''}):
             response = self.client.get('/inventory/')
+            settings_resp = self.client.get('/settings/')
             overview = self.client.get('/')
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(settings_resp.status_code, 200)
         self.assertEqual(overview.status_code, 200)
         html = response.content.decode('utf-8')
+        settings_html = settings_resp.content.decode('utf-8')
         self.assertContains(response, '카메라 ↔ 3D 위치 매핑')
-        self.assertContains(response, 'data-site-places-status>ROSY 연동 전')
+        self.assertNotContains(response, 'ROSY 위치 체계')
+        self.assertNotContains(response, 'data-site-places')
+        self.assertTemplateNotUsed(response, 'site_places_panel.html')
+        self.assertTemplateUsed(settings_resp, 'site_places_panel.html')
+        self.assertContains(settings_resp, 'ROSY 위치 체계')
+        self.assertContains(settings_resp, 'data-site-places-status>ROSY 연동 전')
         self.assertContains(overview, '탑뷰를 180° 돌려 야드 평면과 같은 방향으로 보여 줍니다')
         _assert_glossary_clean(self, html)
+        _assert_glossary_clean(self, settings_html)
 
     def test_inventory_renders_valid_port_site_places_and_passes_glossary_sweep(self):
         payload = json.loads(CONFIG_PATH.read_text(encoding='utf-8'))
@@ -57,7 +71,11 @@ class SitePlacesPanelTests(TestCase):
             'HARBOR_FLEET_ALLOWED_ORIGINS': 'https://fleet.example',
             'HARBOR_FLEET_TOKEN': 'token-for-test',
         }), patch('harbor.rosy_http.RosyClient.site_places', return_value=payload):
-            response = self.client.get('/inventory/')
+            inv_response = self.client.get('/inventory/')
+            response = self.client.get('/settings/')
+        self.assertEqual(inv_response.status_code, 200)
+        self.assertNotContains(inv_response, 'ROSY 위치 체계')
+        self.assertNotContains(inv_response, 'data-site-places')
         self.assertEqual(response.status_code, 200)
         html = response.content.decode('utf-8')
         self.assertContains(response, 'ROSY 위치 체계')
@@ -78,7 +96,7 @@ class SitePlacesPanelTests(TestCase):
             'HARBOR_FLEET_ALLOWED_ORIGINS': 'https://fleet.example',
             'HARBOR_FLEET_TOKEN': 'token-for-test',
         }), patch('harbor.rosy_http.RosyClient.site_places', return_value=bad_with_xy):
-            response = self.client.get('/inventory/')
+            response = self.client.get('/settings/')
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'ROSY 위치 계약 검증 실패')
         self.assertNotContains(response, '1.25')
@@ -92,14 +110,15 @@ class SitePlacesPanelTests(TestCase):
             'HARBOR_FLEET_ALLOWED_ORIGINS': 'https://fleet.example',
             'HARBOR_FLEET_TOKEN': 'token-for-test',
         }), patch('harbor.rosy_http.RosyClient.site_places', return_value=payload):
-            response = self.client.get('/inventory/')
+            response = self.client.get('/settings/')
         self.assertEqual(response.status_code, 200)
         html = response.content.decode('utf-8')
         self.assertContains(response, '구역·정지선 정합')
         self.assertContains(response, '정합 점검 필요')
         self.assertContains(response, 'NO_ACTIVE_CONDITION')
         self.assertContains(response, 'OUTBOUND_EXIT_ROLE_MISMATCH')
-        summary, _ = html.split('<details class="fold">', 1)
+        _, panel_html = html.split('data-site-places>', 1)
+        summary, _ = panel_html.split('<details class="fold">', 1)
         self.assertIn('반출 출구로 지정된 S1에 전용 출구 역할이 필요합니다', summary)
         self.assertIn('CELL_ZONES_UNVERIFIED', summary)
         self.assertIn('OUTBOUND_PICKUP_UNVERIFIED', summary)

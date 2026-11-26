@@ -103,8 +103,7 @@
     </div>
   </aside>
   {% include 'camera_map_panel.html' %}
-  {% include 'site_recognition_panel.html' %}
-  {% include 'site_places_panel.html' %}
+  {% if site_recognition.available and site_recognition.mismatches %}{% include 'site_recognition_panel.html' %}{% endif %}
 </div>
 <details class="fold yard-source-fold">
   <summary>기준 · 출처 선택(지원 담당자용)</summary>

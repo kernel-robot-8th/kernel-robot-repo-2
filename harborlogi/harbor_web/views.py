@@ -461,7 +461,6 @@ def inventory(request):
     placement_rows = [dict(cargo=item['cargo_id'], place=placement_text(item, labels, slot))
                       for item in (selected.payload.get('placements', []) if selected else [])]
     from harbor_web.camera_map_view import camera_map_context
-    from harbor_web.site_places_view import site_places_context
     from harbor_web.site_recognition_view import site_recognition_context
     from harbor_web.yard_pages import yard_page_context
     from harbor_web.intake_occurrences import inventory_occurrences
@@ -476,7 +475,6 @@ def inventory(request):
                     condition=condition,
                     can_open_field=has_role(request.user, 'operator', 'admin', 'field'),
                 ),
-                site_places=site_places_context(condition=condition),
                 condition=condition, condition_filter='condition' in request.GET,
                 conditions=Condition.objects.order_by('-pk'), definition_rows=definition_rows,
                 placement_rows=placement_rows, yard_stage=stage, yard_scene=scene, **yard_page_context(selected))
@@ -492,8 +490,14 @@ def observation_new(request):
 @require_http_methods(['GET'])
 def settings_page(request):
     from harbor_web.role_guide import role_table
+    from harbor_web.site_places_view import site_places_context
+    condition = (
+        Condition.objects.filter(payload__has_key='yard_layout').order_by('-pk').first()
+        or Condition.objects.order_by('-pk').first()
+    )
     return page(request, 'settings.html', section='settings',
-                conditions=Condition.objects.order_by('-id'), role_table=role_table())
+                conditions=Condition.objects.order_by('-id'), role_table=role_table(),
+                site_places=site_places_context(condition=condition))
 
 
 @require_roles('admin')

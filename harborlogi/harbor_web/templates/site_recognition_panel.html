@@ -1,3 +1,4 @@
+{% if site_recognition.available and site_recognition.mismatches %}
 <section id="site-recognition" class="panel site-recognition-panel" aria-labelledby="site-recognition-title" data-site-recognition>
   <div class="panel-h">
     <h3 id="site-recognition-title">ROSY 인식</h3>
@@ -10,7 +11,6 @@
   </div>
   <div class="panel-b">
     <p role="status" class="site-recognition-status" data-site-recognition-status>{{ site_recognition.summary_line }}</p>
-    {% if site_recognition.mismatches %}
     <ul class="site-recognition-list" data-site-recognition-mismatches>
       {% for item in site_recognition.mismatches %}
       <li data-recognition-result="{{ item.result }}">
@@ -26,6 +26,6 @@
       </li>
       {% endfor %}
     </ul>
-    {% endif %}
   </div>
 </section>
+{% endif %}
