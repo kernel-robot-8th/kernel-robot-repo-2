@@ -10,6 +10,7 @@ from harbor.cell_site_map import (
     SCHEMA_ID,
     canonical_cell_slot_specs,
     canonical_cell_wire_refs,
+    canonical_site_id_to_wire_ref,
     compare_condition_with_rosy,
     decode_cell_site_json,
     default_calibration_ref,
@@ -391,6 +392,17 @@ class CanonicalZoneAlignmentTests(unittest.TestCase):
             validate_canonical_cell_placement('temp_a', 1, 1, 1, arm_id='arm_b')
         with self.assertRaisesRegex(ValueError, 'INVALID_CELL_ZONE_ARM'):
             validate_canonical_wire_ref('temp_b-r1-c1-l1', arm_id='A')
+
+    def test_canonical_site_id_to_wire_ref_converts_and_rejects_invalid(self):
+        self.assertEqual(canonical_site_id_to_wire_ref('yard:r2-s2-t2'), 'yard-r2-c4-l2')
+        self.assertEqual(canonical_site_id_to_wire_ref('yard:r1-s1-t3'), 'yard-r1-c1-l3')
+        self.assertEqual(canonical_site_id_to_wire_ref('temp_b:r3-s1-t1'), 'temp_b-r3-c1-l1')
+        self.assertEqual(canonical_site_id_to_wire_ref('stand:r1-s1-t1'), 'stand-r1-c1-l1')
+        self.assertEqual(canonical_site_id_to_wire_ref('yard-r1-c4-l2'), 'yard-r1-c4-l2')
+        self.assertEqual(canonical_site_id_to_wire_ref('aux:r1-s2-t1', slot_cells=3), 'aux-r1-c4-l1')
+        for bad in ('', 'yard:r4-s1-t1', 'yard:r1-s3-t1', 'stand:r1-s1-t2', 'unknown:r1-s1-t1', 'not-a-ref'):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, 'INVALID_CELL_SLOT_COORDINATE'):
+                canonical_site_id_to_wire_ref(bad)
 
     def _canonical_condition(self):
         return {

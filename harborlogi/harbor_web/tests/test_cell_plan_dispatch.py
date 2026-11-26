@@ -670,3 +670,490 @@ class AutomaticCellPlanProposalTests(CellPlanDispatchTests):
         with patch('harbor_web.runtime.execution_block_reason', return_value=''):
             cell_plan_dispatch.tick(_Reg(client))
         self.assertEqual(CellPlanDispatch.objects.filter(plan=self.plan, state='PROPOSED').count(), 1)
+
+
+class YardFollowsCellPlanTests(TestCase):
+    """Completed cell plans derive a fresh DECLARED yard observation so auto_replan and auto_dispatch advance."""
+
+    setUp = CellPlanDispatchTests.setUp
+    _inbound_plan = CellPlanDispatchTests._inbound_plan
+
+    def _reg(self, client):
+        class _Reg:
+            production = False
+
+            def __init__(self, c):
+                self.client = c
+
+        return _Reg(client)
+
+    def test_completed_outbound_cell_plan_updates_yard_triggers_auto_replan_and_auto_proposes_next(self):
+        from harbor_web.models import Observation, Plan
+
+        # Enable auto_replan on order 1 (C1) and order 2 (C2 stacked on top of C1).
+        c2_cargo = CargoFootprint.objects.filter(cargo__code='C2').latest('pk').cargo
+        order2 = services.create_order(
+            self.operator, cargo=c2_cargo, kind='OUTBOUND', priority_group=1, sequence=2, tie_policy='FIXED',
+        )
+        plan1 = services.make_plan(
+            self.operator, order_id=self.order.pk, expected_version=self.order.version,
+            observation_id=self.observation.pk, automatic=True,
+        )
+        plan2_initial = services.make_plan(
+            self.operator, order_id=order2.pk, expected_version=order2.version,
+            observation_id=self.observation.pk, automatic=True,
+        )
+        self.assertEqual(plan1.result['status'], 'READY')
+        self.assertEqual(plan2_initial.result['status'], 'HOLD')
+        self.assertEqual(plan2_initial.result['reason'], 'PRIORITY_ORDER_BLOCKED')
+
+        client = _FakeCellPlanClient()
+        reg = self._reg(client)
+        with patch('harbor_web.runtime.execution_block_reason', return_value=''):
+            # Tick 1: auto-proposes C1 outbound plan.
+            cell_plan_dispatch.tick(reg)
+            d1 = CellPlanDispatch.objects.get(order=self.order)
+            self.assertEqual(d1.state, 'PROPOSED')
+
+            # Fake ROSY finishes C1 plan (C2 -> temp_a, C1 -> stand, C2 -> yard-r1-c1-l1).
+            client.status = 'COMPLETED'
+            # Tick 2: sync transitions d1 -> COMPLETED, records derived DECLARED observation,
+            # and triggers auto_replan so order2 gets a READY plan on the new yard.
+            cell_plan_dispatch.tick(reg)
+
+        d1.refresh_from_db()
+        self.assertEqual(d1.state, 'COMPLETED')
+        derived = Observation.objects.get(
+            source_id=self.observation.source_id,
+            source_revision=f'cell-plan-{d1.pk}',
+        )
+        self.assertEqual(derived.provenance, 'DECLARED')
+        self.assertEqual(derived.condition_id, self.condition.pk)
+        self.assertEqual(
+            derived.payload['derived_from'],
+            {'cell_plan_dispatch': d1.pk, 'rosy_plan_id': d1.rosy_plan_id},
+        )
+        # C1 went to stand and is removed; C2 returned to yard-r1-c1-l1.
+        placements = {p['cargo_id']: p for p in derived.payload['placements']}
+        self.assertNotIn('C1', placements)
+        self.assertEqual(
+            (placements['C2']['area_id'], placements['C2']['row'], placements['C2']['column'], placements['C2']['level']),
+            ('yard', 1, 1, 1),
+        )
+
+        # auto_replan created a fresh READY plan for order2 anchored to the derived observation.
+        plan2_next = Plan.objects.filter(order=order2).latest('pk')
+        self.assertNotEqual(plan2_next.pk, plan2_initial.pk)
+        self.assertEqual(plan2_next.observation_id, derived.pk)
+        self.assertEqual(plan2_next.result['status'], 'READY')
+        self.assertEqual(len(plan2_next.result['moves']), 1)
+        self.assertEqual(plan2_next.result['moves'][0]['cargo_id'], 'C2')
+
+        # Tick 3: auto_dispatch_next proposes order2's new READY plan to ROSY.
+        client.status = 'PROPOSED'
+        with patch('harbor_web.runtime.execution_block_reason', return_value=''):
+            cell_plan_dispatch.tick(reg)
+        d2 = CellPlanDispatch.objects.get(order=order2)
+        self.assertEqual(d2.plan_id, plan2_next.pk)
+        self.assertEqual(d2.observation_id, derived.pk)
+        self.assertEqual(d2.state, 'PROPOSED')
+
+        # Idempotent: calling sync or follow again for d1 never records a second observation.
+        obs_count = Observation.objects.filter(source_id=self.observation.source_id).count()
+        cell_plan_dispatch.sync_cell_plan_dispatch(d1.pk, client=client)
+        cell_plan_dispatch._follow_yard_on_completed(d1)
+        self.assertEqual(Observation.objects.filter(source_id=self.observation.source_id).count(), obs_count)
+        self.assertFalse(Audit.objects.filter(action='yard.follow_skipped', object_id=str(d1.pk)).exists())
+
+    def test_completed_inbound_cell_plan_adds_cargo_to_derived_observation(self):
+        from harbor_web.models import Observation
+
+        plan = self._inbound_plan('C3', sequence=2)
+        rec = plan.result['recommendation']
+        client = _FakeCellPlanClient()
+        row = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=plan.pk, client=client)
+        client.status = 'COMPLETED'
+        cell_plan_dispatch.sync_cell_plan_dispatch(row.pk, client=client)
+
+        derived = Observation.objects.get(
+            source_id=self.observation.source_id,
+            source_revision=f'cell-plan-{row.pk}',
+        )
+        placements = {p['cargo_id']: p for p in derived.payload['placements']}
+        self.assertIn('C3', placements)
+        self.assertEqual(
+            (placements['C3']['area_id'], placements['C3']['row'], placements['C3']['column'], placements['C3']['level']),
+            (rec['area_id'], rec['row'], rec['column'], rec['level']),
+        )
+
+    def test_completed_rosy_directive_tracks_cargo_by_slot_without_cargo_id(self):
+        from harbor_web.models import Observation
+
+        client = _FakeCellPlanClient()
+        row = cell_plan_dispatch.dispatch_rosy_directive(
+            self.operator, order_id=self.order.pk, observation_id=self.observation.pk,
+            directive_mode='outbound', plan_id=self.plan.pk, client=client,
+        )
+        self.assertTrue(all('cargo_id' not in step for step in row.planned_steps))
+        client.status = 'COMPLETED'
+        cell_plan_dispatch.sync_cell_plan_dispatch(row.pk, client=client)
+
+        derived = Observation.objects.get(
+            source_id=self.observation.source_id,
+            source_revision=f'cell-plan-{row.pk}',
+        )
+        placements = {p['cargo_id']: p for p in derived.payload['placements']}
+        self.assertNotIn('C1', placements)
+        self.assertEqual(
+            (placements['C2']['area_id'], placements['C2']['row'], placements['C2']['column'], placements['C2']['level']),
+            ('yard', 1, 1, 1),
+        )
+
+    def test_yard_follow_skips_with_single_audit_when_newer_observation_exists_or_steps_fail(self):
+        from harbor_web.models import Observation
+
+        client = _FakeCellPlanClient()
+        row = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk, client=client)
+        # Record a newer observation on the same source before the dispatch completes.
+        services.record_observation(
+            self.operator,
+            source_id=self.observation.source_id,
+            source_revision='rev-manual-newer',
+            observed_at=timezone.now(),
+            provenance='DECLARED',
+            condition=self.condition,
+            payload=self.observation.payload,
+        )
+        client.status = 'COMPLETED'
+        cell_plan_dispatch.sync_cell_plan_dispatch(row.pk, client=client)
+        self.assertFalse(
+            Observation.objects.filter(source_id=self.observation.source_id, source_revision=f'cell-plan-{row.pk}').exists()
+        )
+        skips = Audit.objects.filter(action='yard.follow_skipped', object_id=str(row.pk))
+        self.assertEqual(skips.count(), 1)
+        self.assertEqual(skips.first().detail['reason'], 'NEWER_OBSERVATION_EXISTS')
+        # Calling follow again still leaves only one skip audit.
+        cell_plan_dispatch._follow_yard_on_completed(row)
+        self.assertEqual(skips.count(), 1)
+
+        # Unapplicable step against the latest observation skips with one audit.
+        latest_obs = Observation.objects.filter(source_id=self.observation.source_id).latest('pk')
+        bad_row = CellPlanDispatch.objects.create(
+            order=self.order, plan=self.plan, observation=latest_obs,
+            dispatch_mode='HARBOR_PLAN', directive_mode='harbor_plan',
+            request_key='rk-bad-steps', request_payload={}, rosy_plan_id='cp-bad',
+            order_source='harbor', state='COMPLETED', created_by=self.operator,
+            planned_steps=[{'cargo_id': 'C1', 'src_site': 'yard-r3-c4-l1', 'dst_site': 'stand-r1-c1-l1'}],
+            rosy_task_ids=['cp-bad-s1'],
+        )
+        cell_plan_dispatch._follow_yard_on_completed(bad_row)
+        self.assertFalse(Observation.objects.filter(source_revision=f'cell-plan-{bad_row.pk}').exists())
+        bad_skips = Audit.objects.filter(action='yard.follow_skipped', object_id=str(bad_row.pk))
+        self.assertEqual(bad_skips.count(), 1)
+        self.assertEqual(bad_skips.first().detail['reason'], 'SRC_SLOT_MISMATCH')
+
+    def test_yard_follow_can_be_disabled_via_env_flag(self):
+        from harbor_web.models import Observation
+
+        client = _FakeCellPlanClient()
+        row = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk, client=client)
+        client.status = 'COMPLETED'
+        with patch.dict(os.environ, {'HARBOR_YARD_FOLLOWS_CELL_PLANS': '0'}, clear=False):
+            cell_plan_dispatch.sync_cell_plan_dispatch(row.pk, client=client)
+        self.assertFalse(Observation.objects.filter(source_revision=f'cell-plan-{row.pk}').exists())
+        self.assertFalse(Audit.objects.filter(action='yard.follow_skipped', object_id=str(row.pk)).exists())
+
+    def test_derived_from_validation_keeps_spatial_schema_closed(self):
+        for bad in (
+            {'cell_plan_dispatch': 0, 'rosy_plan_id': 'p-1'},
+            {'cell_plan_dispatch': '1', 'rosy_plan_id': 'p-1'},
+            {'cell_plan_dispatch': 1, 'rosy_plan_id': 'p-1', 'extra': True},
+            'not-a-dict',
+        ):
+            with self.subTest(derived_from=bad), self.assertRaises(ValidationError):
+                services.record_observation(
+                    self.operator,
+                    source_id=self.observation.source_id,
+                    source_revision=f'bad-derived-{abs(hash(str(bad)))}',
+                    observed_at=timezone.now(),
+                    provenance='DECLARED',
+                    condition=self.condition,
+                    payload={**self.observation.payload, 'derived_from': bad},
+                )
+
+    def test_same_tick_twice_is_idempotent_and_conflict_on_same_revision_succeeds(self):
+        from harbor_web.models import Observation
+
+        client = _FakeCellPlanClient()
+        reg = self._reg(client)
+        row = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk, client=client)
+        client.status = 'COMPLETED'
+
+        with patch('harbor_web.runtime.execution_block_reason', return_value=''):
+            cell_plan_dispatch.tick(reg)
+            row.refresh_from_db()
+            derived = Observation.objects.get(
+                source_id=self.observation.source_id,
+                source_revision=f'cell-plan-{row.pk}',
+            )
+            # Deterministic observed_at matches dispatch completion time (row.updated_at).
+            self.assertEqual(derived.observed_at, row.updated_at)
+
+            # Running the same tick again is a no-op (idempotent).
+            obs_count = Observation.objects.filter(source_id=self.observation.source_id).count()
+            cell_plan_dispatch.tick(reg)
+            self.assertEqual(Observation.objects.filter(source_id=self.observation.source_id).count(), obs_count)
+            self.assertFalse(Audit.objects.filter(action='yard.follow_skipped', object_id=str(row.pk)).exists())
+
+        # Simulate two concurrent ticks racing past the initial existence check so record_observation raises Conflict.
+        original_filter = Observation.objects.filter
+        calls = {'n': 0}
+
+        def _raced_filter(*args, **kwargs):
+            if kwargs.get('source_revision') == f'cell-plan-{row.pk}':
+                calls['n'] += 1
+                if calls['n'] == 1:
+                    return original_filter(pk=-1)
+            return original_filter(*args, **kwargs)
+
+        with patch.object(Observation.objects, 'filter', side_effect=_raced_filter), patch.object(
+            services, 'record_observation', side_effect=services.Conflict('Source revision already has different content.')
+        ):
+            raced_result = cell_plan_dispatch._follow_yard_on_completed(row)
+        self.assertIsNotNone(raced_result)
+        self.assertEqual(raced_result.pk, derived.pk)
+        self.assertFalse(Audit.objects.filter(action='yard.follow_skipped', object_id=str(row.pk)).exists())
+
+    def test_newer_port_event_rebases_when_applicable_and_skips_with_alert_when_not(self):
+        from datetime import timedelta
+        import re
+        from harbor_web.models import Observation
+
+        c3 = services.register_cargo(
+            self.operator, code='C3', name='C3', weight_kg=2, volume_m3='0.012', destination='stand', length_cells=3,
+        )
+        c3_fp = CargoFootprint.objects.filter(cargo=c3).latest('pk')
+
+        # Case 1: newer PORT_EVENT adds C3 at yard-r2-c1-l1 while C1/C2 stay in place -> rebase succeeds.
+        client = _FakeCellPlanClient()
+        row = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk, client=client)
+        port_payload_ok = {
+            **self.observation.payload,
+            'placements': [
+                *self.observation.payload['placements'],
+                dict(cargo_id='C3', area_id='yard', row=2, column=1, level=1, orientation=0, footprint_revision=c3_fp.pk),
+            ],
+        }
+        pe_ok = Observation.objects.create(
+            created_by=None,
+            source_id='rosy-port-events',
+            source_revision='a' * 64,
+            observed_at=timezone.now(),
+            provenance='PORT_EVENT',
+            condition=self.condition,
+            payload=port_payload_ok,
+        )
+        client.status = 'COMPLETED'
+        cell_plan_dispatch.sync_cell_plan_dispatch(row.pk, client=client)
+
+        derived = Observation.objects.get(
+            source_id=self.observation.source_id,
+            source_revision=f'cell-plan-{row.pk}',
+        )
+        placements = {p['cargo_id']: p for p in derived.payload['placements']}
+        self.assertNotIn('C1', placements)
+        self.assertEqual((placements['C2']['area_id'], placements['C2']['row'], placements['C2']['column'], placements['C2']['level']), ('yard', 1, 1, 1))
+        self.assertEqual((placements['C3']['area_id'], placements['C3']['row'], placements['C3']['column'], placements['C3']['level']), ('yard', 2, 1, 1))
+        self.assertGreaterEqual(derived.observed_at, pe_ok.observed_at)
+        self.assertFalse(Audit.objects.filter(action='yard.follow_skipped', object_id=str(row.pk)).exists())
+
+        # Case 2: newer PORT_EVENT removes/replaces source cargo -> skip + alert on /alerts/.
+        order_c2 = services.create_order(
+            self.operator, cargo=CargoFootprint.objects.filter(cargo__code='C2').latest('pk').cargo,
+            kind='OUTBOUND', priority_group=1, sequence=2, tie_policy='FIXED',
+        )
+        plan_c2 = services.make_plan(
+            self.operator, order_id=order_c2.pk, expected_version=order_c2.version, observation_id=derived.pk,
+        )
+        self.assertEqual(plan_c2.result['status'], 'READY')
+        client2 = _FakeCellPlanClient()
+        row2 = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=plan_c2.pk, client=client2)
+        # Newer PORT_EVENT no longer has C2 at yard-r1-c1-l1 (replaced by C3 there).
+        port_payload_conflict = {
+            **derived.payload,
+            'placements': [
+                dict(cargo_id='C3', area_id='yard', row=1, column=1, level=1, orientation=0, footprint_revision=c3_fp.pk),
+            ],
+        }
+        port_payload_conflict.pop('derived_from', None)
+        Observation.objects.create(
+            created_by=None,
+            source_id='rosy-port-events',
+            source_revision='b' * 64,
+            observed_at=timezone.now(),
+            provenance='PORT_EVENT',
+            condition=self.condition,
+            payload=port_payload_conflict,
+        )
+        client2.status = 'COMPLETED'
+        cell_plan_dispatch.sync_cell_plan_dispatch(row2.pk, client=client2)
+
+        self.assertFalse(Observation.objects.filter(source_revision=f'cell-plan-{row2.pk}').exists())
+        skip_audit = Audit.objects.get(action='yard.follow_skipped', object_id=str(row2.pk))
+        self.assertEqual(skip_audit.detail['reason'], 'SRC_SLOT_MISMATCH')
+
+        self.client.force_login(self.operator)
+        with self.settings(ROOT_URLCONF='harbor_web.urls'):
+            alerts_resp = self.client.get('/alerts/')
+        self.assertEqual(alerts_resp.status_code, 200)
+        skip_alerts = [a for a in alerts_resp.context['alerts'] if a['title'].startswith('야드 갱신 못 함 · ')]
+        self.assertEqual(len(skip_alerts), 1)
+        self.assertEqual(skip_alerts[0]['count'], 1)
+        self.assertIn('출발 칸의 화물이 계획과 다름', skip_alerts[0]['title'])
+        content = alerts_resp.content.decode('utf-8').split('id="alerts-page"', 1)[1]
+        visible = re.sub(r'<[^>]+>', '', re.sub(r'<details\b.*?</details>', '', content, flags=re.S))
+        self.assertNotRegex(visible, r'관측|원본|인계|대조|회차|#\d+|\bREADY\b|\bHOLD\b|BLOCKED')
+
+        # Recording a newer observation after the skip clears the alert.
+        services.record_observation(
+            self.operator,
+            source_id=self.observation.source_id,
+            source_revision='rev-after-skip-resolved',
+            observed_at=timezone.now(),
+            provenance='DECLARED',
+            condition=self.condition,
+            payload=port_payload_conflict,
+        )
+        with self.settings(ROOT_URLCONF='harbor_web.urls'):
+            cleared_resp = self.client.get('/alerts/')
+        self.assertEqual([a for a in cleared_resp.context['alerts'] if a['title'].startswith('야드 갱신 못 함 · ')], [])
+
+    def test_rearrange_then_outbound_compound_sequence_with_c4_and_canonical_site_id(self):
+        from harbor_web.models import Observation
+
+        c3 = services.register_cargo(
+            self.operator, code='C3', name='C3', weight_kg=2, volume_m3='0.012', destination='stand', length_cells=3,
+        )
+        c4 = services.register_cargo(
+            self.operator, code='C4', name='C4', weight_kg=2, volume_m3='0.012', destination='stand', length_cells=3,
+        )
+        fp = {code: CargoFootprint.objects.filter(cargo__code=code).latest('pk').pk for code in ('C1', 'C2', 'C3', 'C4')}
+        obs = services.record_observation(
+            self.operator,
+            source_id='cam-compound',
+            source_revision='rev-compound-1',
+            observed_at=timezone.now(),
+            provenance='DECLARED',
+            condition=self.condition,
+            payload=dict(
+                schema='grid-placement-v1',
+                observed_areas=['yard', 'temp_a', 'temp_b', 'stand'],
+                holdings=[],
+                placements=[
+                    dict(cargo_id='C1', area_id='yard', row=1, column=4, level=1, orientation=0, footprint_revision=fp['C1']),
+                    dict(cargo_id='C2', area_id='yard', row=1, column=4, level=2, orientation=0, footprint_revision=fp['C2']),
+                    dict(cargo_id='C3', area_id='yard', row=2, column=4, level=1, orientation=0, footprint_revision=fp['C3']),
+                    dict(cargo_id='C4', area_id='yard', row=2, column=4, level=2, orientation=0, footprint_revision=fp['C4']),
+                ],
+            ),
+        )
+        # Step 1 (rearrange): C4 yard:r2-s2-t2 (canonical -> yard-r2-c4-l2) -> temp_b:r1-s1-t1
+        # Step 2 (rehandle): C2 yard-r1-c4-l2 -> yard:r2-s2-t2 (yard-r2-c4-l2)
+        # Step 3 (outbound): C1 yard-r1-c4-l1 -> stand:r1-s1-t1 (stand-r1-c1-l1)
+        # Step 4 (return):   C4 temp_b-r1-c1-l1 -> yard-r1-c4-l1
+        row = CellPlanDispatch.objects.create(
+            order=self.order,
+            plan=self.plan,
+            observation=obs,
+            dispatch_mode='HARBOR_PLAN',
+            directive_mode='harbor_plan',
+            request_key='rk-compound-c4',
+            request_payload={},
+            rosy_plan_id='cp-compound-c4',
+            order_source='harbor',
+            state='COMPLETED',
+            created_by=self.operator,
+            planned_steps=[
+                {'cargo_id': 'C4', 'src_site': 'yard:r2-s2-t2', 'dst_site': 'temp_b:r1-s1-t1', 'phase_label': '재배치'},
+                {'cargo_id': 'C2', 'src_wire_ref': 'yard-r1-c4-l2', 'dst_site': 'yard:r2-s2-t2', 'phase_label': '재취급'},
+                {'cargo_id': 'C1', 'src_wire_ref': 'yard-r1-c4-l1', 'dst_site': 'stand:r1-s1-t1', 'phase_label': '반출'},
+                {'cargo_id': 'C4', 'src_wire_ref': 'temp_b-r1-c1-l1', 'dst_wire_ref': 'yard-r1-c4-l1', 'phase_label': '복귀'},
+            ],
+            rosy_task_ids=['t1', 't2', 't3', 't4'],
+        )
+        derived = cell_plan_dispatch._follow_yard_on_completed(row)
+        self.assertIsNotNone(derived)
+        placements = {p['cargo_id']: p for p in derived.payload['placements']}
+        self.assertNotIn('C1', placements)
+        self.assertEqual((placements['C2']['area_id'], placements['C2']['row'], placements['C2']['column'], placements['C2']['level']), ('yard', 2, 4, 2))
+        self.assertEqual((placements['C3']['area_id'], placements['C3']['row'], placements['C3']['column'], placements['C3']['level']), ('yard', 2, 4, 1))
+        self.assertEqual((placements['C4']['area_id'], placements['C4']['row'], placements['C4']['column'], placements['C4']['level']), ('yard', 1, 4, 1))
+        self.assertEqual(placements['C2']['orientation'], 0)
+        self.assertEqual(placements['C4']['orientation'], 0)
+        self.assertFalse(Audit.objects.filter(action='yard.follow_skipped', object_id=str(row.pk)).exists())
+
+    def test_follow_unexpected_exception_records_skip_and_crash_before_follow_retries_on_next_tick(self):
+        from harbor_web.models import Observation
+
+        # Part A: unexpected exception INSIDE _follow_yard_on_completed is caught and recorded as yard.follow_skipped.
+        client_a = _FakeCellPlanClient()
+        row_a = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk, client=client_a)
+        client_a.status = 'COMPLETED'
+        with patch.object(cell_plan_dispatch, '_apply_planned_steps_to_observation', side_effect=RuntimeError('unexpected-boom')):
+            synced_a = cell_plan_dispatch.sync_cell_plan_dispatch(row_a.pk, client=client_a)
+        self.assertEqual(synced_a.state, 'COMPLETED')
+        self.assertFalse(Observation.objects.filter(source_revision=f'cell-plan-{row_a.pk}').exists())
+        skip_a = Audit.objects.get(action='yard.follow_skipped', object_id=str(row_a.pk))
+        self.assertEqual(skip_a.detail['reason'], 'UNEXPECTED_ERROR')
+        self.assertIn('RuntimeError', skip_a.detail['message'])
+
+        # Part B: crash/exception escaping _follow_yard_on_completed on Tick 1 leaves COMPLETED without obs/skip;
+        # Tick 2 catches it up and creates the derived observation.
+        c2_cargo = CargoFootprint.objects.filter(cargo__code='C2').latest('pk').cargo
+        order_b = services.create_order(
+            self.operator, cargo=c2_cargo, kind='OUTBOUND', priority_group=1, sequence=2, tie_policy='FIXED',
+        )
+        obs_b = services.record_observation(
+            self.operator,
+            source_id='cam-retry',
+            source_revision='rev-retry-1',
+            observed_at=timezone.now(),
+            provenance='DECLARED',
+            condition=self.condition,
+            payload=dict(
+                schema='grid-placement-v1',
+                observed_areas=['yard', 'temp_a', 'temp_b', 'stand'],
+                holdings=[],
+                placements=[
+                    dict(
+                        cargo_id='C2', area_id='yard', row=1, column=1, level=1, orientation=0,
+                        footprint_revision=CargoFootprint.objects.filter(cargo=c2_cargo).latest('pk').pk,
+                    ),
+                ],
+            ),
+        )
+        plan_b = services.make_plan(
+            self.operator, order_id=order_b.pk, expected_version=order_b.version, observation_id=obs_b.pk,
+        )
+        client_b = _FakeCellPlanClient()
+        reg_b = self._reg(client_b)
+        row_b = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=plan_b.pk, client=client_b)
+        client_b.status = 'COMPLETED'
+
+        with patch('harbor_web.runtime.execution_block_reason', return_value=''), patch.object(
+            cell_plan_dispatch, '_follow_yard_on_completed', side_effect=RuntimeError('simulated-process-crash')
+        ):
+            res1 = cell_plan_dispatch.tick(reg_b)
+        self.assertEqual(res1[row_b.pk], 'ERROR: RuntimeError')
+        row_b.refresh_from_db()
+        self.assertEqual(row_b.state, 'COMPLETED')
+        self.assertFalse(Observation.objects.filter(source_revision=f'cell-plan-{row_b.pk}').exists())
+        self.assertFalse(Audit.objects.filter(action='yard.follow_skipped', object_id=str(row_b.pk)).exists())
+
+        # Next tick retries unfollowed COMPLETED dispatch and updates the yard.
+        with patch('harbor_web.runtime.execution_block_reason', return_value=''):
+            cell_plan_dispatch.tick(reg_b)
+        derived_b = Observation.objects.get(source_id='cam-retry', source_revision=f'cell-plan-{row_b.pk}')
+        self.assertEqual(derived_b.payload['placements'], [])
+        self.assertEqual(derived_b.observed_at, row_b.updated_at)
+        self.assertFalse(Audit.objects.filter(action='yard.follow_skipped', object_id=str(row_b.pk)).exists())

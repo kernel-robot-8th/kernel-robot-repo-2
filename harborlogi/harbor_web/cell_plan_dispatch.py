@@ -1,6 +1,7 @@
 """Harbor_web coordinator for dual-mode OMX cell plans (Harbor plan order/coords vs ROSY directive)."""
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -9,6 +10,8 @@ from urllib.error import HTTPError, URLError
 
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
 
 from harbor.cell_plan import (
     CellPlanDryRunResponse,
@@ -19,13 +22,16 @@ from harbor.cell_plan import (
     parse_cell_plan_response,
     validate_cell_plan_response,
 )
+from harbor.cell_site_map import canonical_site_id_to_wire_ref
+from harbor.port_events import parse_slot_ref
 from harbor_web import services
 from harbor_web.command_models import (ACTIVE_CELL_PLAN_DISPATCH_STATES, ACTIVE_COMMAND_STATES, CellPlanDispatch,
                                        Command)
 from harbor_web.coordination import serialized
 from harbor_web.fleet_connection import connection_settings, fleet_client
-from harbor_web.models import Audit, IntakeOccurrence, Observation, Order, Plan
+from harbor_web.models import Audit, CargoFootprint, IntakeOccurrence, Observation, Order, Plan
 from harbor_web.service_common import AUTO_DISPATCH_USERNAME, automatic_actor
+from harbor_web.site_config import covers_spatial_yard, spatial_policy
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +55,393 @@ def _record_completed_audit(row: CellPlanDispatch, actor=None) -> None:
         object_id=str(row.pk),
         detail={'order_id': row.order_id, 'rosy_plan_id': row.rosy_plan_id},
     )
+
+
+class _YardFollowSkipped(Exception):
+    def __init__(self, reason: str, message: str = '', extra: dict | None = None):
+        super().__init__(message or reason)
+        self.reason = reason
+        self.message = str(message)[:240] if message else ''
+        self.extra = dict(extra or {})
+
+
+def _yard_follows_cell_plans() -> bool:
+    return os.environ.get('HARBOR_YARD_FOLLOWS_CELL_PLANS', '1').strip() != '0'
+
+
+def _record_yard_follow_skipped_once(
+    row: CellPlanDispatch, reason: str, *, message: str = '', extra: dict | None = None
+) -> None:
+    if Audit.objects.filter(
+        action='yard.follow_skipped',
+        object_type='CellPlanDispatch',
+        object_id=str(row.pk),
+    ).exists():
+        return
+    detail = {
+        'reason': reason,
+        'cell_plan_dispatch': row.pk,
+        'rosy_plan_id': row.rosy_plan_id,
+        **(extra or {}),
+    }
+    if message:
+        detail['message'] = str(message)[:240]
+    Audit.objects.create(
+        actor=None,
+        action='yard.follow_skipped',
+        object_type='CellPlanDispatch',
+        object_id=str(row.pk),
+        detail=detail,
+    )
+
+
+def _resolve_inbound_placement_meta(
+    row: CellPlanDispatch, cargo_id: str, dst_anchor: tuple[str, int, int, int]
+) -> tuple[int, int]:
+    fp_rev = None
+    orientation = 0
+    plan = row.plan if row.plan_id else None
+    result = plan.result if plan is not None and isinstance(plan.result, dict) else None
+    if result is not None:
+        incoming = result.get('incoming_shape')
+        if (isinstance(incoming, dict)
+                and incoming.get('cargo_id') == cargo_id
+                and type(incoming.get('footprint_revision')) is int):
+            fp_rev = incoming['footprint_revision']
+        from harbor_web.plan_service import placement_decision
+        decision = placement_decision(plan)
+        rec = decision.detail.get('recommendation') if decision is not None else result.get('recommendation')
+        if (isinstance(rec, dict)
+                and (rec.get('area_id'), rec.get('row'), rec.get('column'), rec.get('level')) == dst_anchor
+                and rec.get('orientation') in (0, 90)):
+            orientation = rec['orientation']
+    if fp_rev is None:
+        fp = CargoFootprint.objects.filter(cargo__code=cargo_id).order_by('-pk').first()
+        if fp is None:
+            raise _YardFollowSkipped('CARGO_FOOTPRINT_MISSING', f'No footprint registered for {cargo_id}')
+        fp_rev = fp.pk
+    return fp_rev, orientation
+
+
+RECENT_COMPLETED_FOLLOW_LIMIT = 8
+
+
+def _normalize_step_slot_ref(raw_ref: str, *, slot_cells: int | None) -> str:
+    """Convert canonical site_id (`yard:r2-s2-t2`) to wire_ref (`yard-r2-c4-l2`); pass wire/area refs through."""
+    if ':' in raw_ref:
+        return canonical_site_id_to_wire_ref(raw_ref, slot_cells=slot_cells)
+    return raw_ref
+
+
+def _resolve_step_cargos_on_base(row: CellPlanDispatch, base: Observation) -> dict[int, str]:
+    """For steps lacking cargo_id (ROSY_DIRECTIVE), determine expected cargo per step from the original base."""
+    steps = row.planned_steps
+    if not isinstance(steps, list) or not steps:
+        return {}
+    if all(isinstance(s, dict) and s.get('cargo_id') for s in steps):
+        return {}
+    try:
+        policy = spatial_policy(base.condition.payload)
+    except (ValidationError, ValueError):
+        return {}
+    outbound_areas = set(policy.outbound_areas)
+    by_anchor: dict[tuple[str, int, int, int], str] = {
+        (item['area_id'], item['row'], item['column'], item['level']): item['cargo_id']
+        for item in base.payload.get('placements') or ()
+    }
+    expected: dict[int, str] = {}
+    for idx, step in enumerate(steps):
+        if not isinstance(step, dict):
+            break
+        raw_src = str(step.get('src_wire_ref') or step.get('src_site') or '').strip()
+        raw_dst = str(step.get('dst_wire_ref') or step.get('dst_site') or '').strip()
+        if not raw_src or not raw_dst:
+            break
+        try:
+            dst = _normalize_step_slot_ref(raw_dst, slot_cells=policy.slot_cells)
+            dst_parsed = parse_slot_ref(dst)
+        except ValueError:
+            dst = raw_dst
+            dst_parsed = None
+        is_outbound_dst = (
+            dst in outbound_areas
+            or (dst_parsed is not None and dst_parsed[0] in outbound_areas)
+            or _is_stand_dst(step)
+        )
+        step_cargo = step.get('cargo_id')
+        if raw_src == 'belt':
+            cid = step_cargo or (row.order.cargo.code if row.order.cargo_id else None)
+            if cid and dst_parsed is not None and not is_outbound_dst:
+                expected[idx] = cid
+                by_anchor[dst_parsed] = cid
+            continue
+        try:
+            src = _normalize_step_slot_ref(raw_src, slot_cells=policy.slot_cells)
+            src_parsed = parse_slot_ref(src)
+        except ValueError:
+            break
+        cid = step_cargo or by_anchor.get(src_parsed)
+        if not cid:
+            break
+        expected[idx] = cid
+        by_anchor.pop(src_parsed, None)
+        if not is_outbound_dst and dst_parsed is not None:
+            by_anchor[dst_parsed] = cid
+    return expected
+
+
+def _apply_planned_steps_to_observation(
+    row: CellPlanDispatch,
+    base: Observation,
+    *,
+    expected_step_cargos: dict[int, str] | None = None,
+) -> dict:
+    # Projection assumptions for applying ROSY cell-plan steps onto grid-placement-v1:
+    # 1. Wire column number (e.g. c1/c4 in yard-r1-c4-l2) equals the Harbor grid anchor column.
+    # 2. Moving a container preserves its existing orientation (ROSY wire format carries no orientation).
+    steps = row.planned_steps
+    if not isinstance(steps, list) or not steps:
+        raise _YardFollowSkipped('NO_PLANNED_STEPS', 'Completed dispatch has no planned steps to apply.')
+    try:
+        policy = spatial_policy(base.condition.payload)
+    except (ValidationError, ValueError) as exc:
+        raise _YardFollowSkipped('INVALID_SPATIAL_CONDITION', str(exc)) from None
+    outbound_areas = set(policy.outbound_areas)
+    placements = copy.deepcopy(base.payload['placements'])
+    holdings = copy.deepcopy(base.payload['holdings'])
+    by_cargo: dict[str, dict] = {}
+    by_anchor: dict[tuple[str, int, int, int], str] = {}
+    for item in placements:
+        cid = item['cargo_id']
+        anchor = (item['area_id'], item['row'], item['column'], item['level'])
+        by_cargo[cid] = item
+        by_anchor[anchor] = cid
+
+    for idx, step in enumerate(steps):
+        if not isinstance(step, dict):
+            raise _YardFollowSkipped('INVALID_STEP', f'Step {idx} is not an object.')
+        raw_src = str(step.get('src_wire_ref') or step.get('src_site') or '').strip()
+        raw_dst = str(step.get('dst_wire_ref') or step.get('dst_site') or '').strip()
+        step_cargo = step.get('cargo_id') or (expected_step_cargos.get(idx) if expected_step_cargos else None)
+        if not raw_src or not raw_dst:
+            raise _YardFollowSkipped('INVALID_STEP', f'Step {idx} missing src or dst.')
+
+        try:
+            dst = _normalize_step_slot_ref(raw_dst, slot_cells=policy.slot_cells)
+            dst_parsed = parse_slot_ref(dst)
+        except ValueError:
+            dst = raw_dst
+            dst_parsed = None
+        is_outbound_dst = (
+            dst in outbound_areas
+            or (dst_parsed is not None and dst_parsed[0] in outbound_areas)
+            or _is_stand_dst(step)
+        )
+
+        if raw_src == 'belt':
+            cid = step_cargo or (row.order.cargo.code if row.order.cargo_id else None)
+            if not cid:
+                raise _YardFollowSkipped('STEP_CARGO_UNKNOWN', f'Step {idx} inbound cargo unknown.')
+            if cid in by_cargo:
+                raise _YardFollowSkipped('CARGO_ALREADY_PLACED', f'Cargo {cid} already placed in yard.')
+            if is_outbound_dst or dst_parsed is None:
+                raise _YardFollowSkipped('INVALID_DST_SLOT', f'Step {idx} has invalid inbound dst {raw_dst!r}.')
+            if dst_parsed in by_anchor:
+                raise _YardFollowSkipped('DST_SLOT_OCCUPIED', f'Step {idx} dst {raw_dst!r} already occupied.')
+            fp_rev, orientation = _resolve_inbound_placement_meta(row, cid, dst_parsed)
+            holdings = [h for h in holdings if h.get('cargo_id') != cid]
+            item = {
+                'cargo_id': cid,
+                'area_id': dst_parsed[0],
+                'row': dst_parsed[1],
+                'column': dst_parsed[2],
+                'level': dst_parsed[3],
+                'orientation': orientation,
+                'footprint_revision': fp_rev,
+            }
+            by_cargo[cid] = item
+            by_anchor[dst_parsed] = cid
+            continue
+
+        try:
+            src = _normalize_step_slot_ref(raw_src, slot_cells=policy.slot_cells)
+            src_parsed = parse_slot_ref(src)
+        except ValueError:
+            raise _YardFollowSkipped('INVALID_SRC_SLOT', f'Step {idx} has invalid src {raw_src!r}.') from None
+        at_src = by_anchor.get(src_parsed)
+        if step_cargo:
+            if at_src != step_cargo:
+                raise _YardFollowSkipped('SRC_SLOT_MISMATCH', f'Step {idx}: expected {step_cargo} at {src}, found {at_src}.')
+            cid = step_cargo
+        else:
+            if at_src is None:
+                raise _YardFollowSkipped('SRC_SLOT_EMPTY', f'Step {idx}: no cargo at {src}.')
+            cid = at_src
+
+        by_anchor.pop(src_parsed, None)
+        if is_outbound_dst:
+            by_cargo.pop(cid, None)
+            holdings = [h for h in holdings if h.get('cargo_id') != cid]
+        else:
+            if dst_parsed is None:
+                raise _YardFollowSkipped('INVALID_DST_SLOT', f'Step {idx} has invalid dst {raw_dst!r}.')
+            if dst_parsed in by_anchor:
+                raise _YardFollowSkipped('DST_SLOT_OCCUPIED', f'Step {idx} dst {raw_dst!r} already occupied.')
+            # Keep existing orientation intact; ROSY wire moves only carry slot coordinates.
+            item = by_cargo[cid]
+            item['area_id'], item['row'], item['column'], item['level'] = dst_parsed
+            by_anchor[dst_parsed] = cid
+
+    return {
+        'schema': 'grid-placement-v1',
+        'observed_areas': list(base.payload['observed_areas']),
+        'placements': list(by_cargo.values()),
+        'holdings': holdings,
+        'derived_from': {
+            'cell_plan_dispatch': row.pk,
+            'rosy_plan_id': row.rosy_plan_id,
+        },
+    }
+
+
+def _follow_yard_on_completed(row: CellPlanDispatch) -> Observation | None:
+    """Record one derived DECLARED yard snapshot when a cell plan transitions to COMPLETED."""
+    if not _yard_follows_cell_plans():
+        return None
+    try:
+        base = row.observation
+        source_id = base.source_id
+        source_revision = f'cell-plan-{row.pk}'
+        existing = Observation.objects.filter(source_id=source_id, source_revision=source_revision).first()
+        if existing is not None:
+            return existing
+        if (not isinstance(base.payload, dict)
+                or base.payload.get('schema') != 'grid-placement-v1'
+                or not covers_spatial_yard(base)):
+            raise _YardFollowSkipped(
+                'BASE_OBSERVATION_UNAVAILABLE',
+                'Base observation is not a complete grid-placement-v1 snapshot.',
+            )
+        # Deterministic timestamp (completion time) so concurrent ticks compute identical observations.
+        observed_at = row.updated_at or timezone.now()
+        if base.observed_at > observed_at:
+            raise _YardFollowSkipped('NEWER_OBSERVATION_EXISTS', 'Base observation timestamp is in the future.')
+        newer_same_source = (
+            Observation.objects.filter(source_id=source_id)
+            .exclude(pk=base.pk)
+            .exclude(source_revision=source_revision)
+            .exclude(provenance='PORT_EVENT')
+            .filter(Q(observed_at__gt=base.observed_at) | Q(observed_at=base.observed_at, pk__gt=base.pk))
+            .order_by('-observed_at', '-pk')
+            .first()
+        )
+        if newer_same_source is not None:
+            raise _YardFollowSkipped(
+                'NEWER_OBSERVATION_EXISTS',
+                'A newer observation already exists for this source.',
+                extra={'base_observation_id': base.pk, 'newer_observation_id': newer_same_source.pk},
+            )
+        effective_base = base
+        expected_step_cargos = None
+        extra_skip: dict[str, int] = {}
+        newer_port_event = (
+            Observation.objects.filter(
+                condition_id=base.condition_id,
+                provenance='PORT_EVENT',
+            )
+            .exclude(pk=base.pk)
+            .filter(Q(observed_at__gt=base.observed_at) | Q(observed_at=base.observed_at, pk__gt=base.pk))
+            .order_by('-observed_at', '-pk')
+            .first()
+        )
+        if newer_port_event is not None:
+            extra_skip = {'base_observation_id': base.pk, 'newer_observation_id': newer_port_event.pk}
+            if (not isinstance(newer_port_event.payload, dict)
+                    or newer_port_event.payload.get('schema') != 'grid-placement-v1'
+                    or not covers_spatial_yard(newer_port_event)):
+                raise _YardFollowSkipped(
+                    'NEWER_OBSERVATION_EXISTS',
+                    'A newer port-event observation is not a complete grid-placement-v1 snapshot.',
+                    extra=extra_skip,
+                )
+            expected_step_cargos = _resolve_step_cargos_on_base(row, base)
+            effective_base = newer_port_event
+            if effective_base.observed_at > observed_at:
+                observed_at = effective_base.observed_at
+        try:
+            new_payload = _apply_planned_steps_to_observation(
+                row, effective_base, expected_step_cargos=expected_step_cargos,
+            )
+        except _YardFollowSkipped as exc:
+            if extra_skip:
+                exc.extra = {**extra_skip, **exc.extra}
+            raise
+        try:
+            return services.record_observation(
+                automatic_actor(),
+                source_id=source_id,
+                source_revision=source_revision,
+                observed_at=observed_at,
+                provenance='DECLARED',
+                payload=new_payload,
+                condition=effective_base.condition,
+            )
+        except services.Conflict:
+            raced = Observation.objects.filter(source_id=source_id, source_revision=source_revision).first()
+            if raced is not None:
+                return raced
+            raise
+    except _YardFollowSkipped as exc:
+        _record_yard_follow_skipped_once(row, exc.reason, message=exc.message, extra=exc.extra)
+        return None
+    except (ValidationError, services.Conflict, ValueError) as exc:
+        _record_yard_follow_skipped_once(row, 'OBSERVATION_APPLY_FAILED', message=str(exc))
+        return None
+    except Exception as exc:
+        logger.exception('Unexpected error while following yard for CellPlanDispatch #%s', row.pk)
+        try:
+            _record_yard_follow_skipped_once(
+                row,
+                'UNEXPECTED_ERROR',
+                message=f'{type(exc).__name__}: {exc}',
+                extra={'error_type': type(exc).__name__},
+            )
+        except Exception:
+            logger.exception('Failed to record yard.follow_skipped audit for CellPlanDispatch #%s', row.pk)
+        return None
+
+
+def _retry_unfollowed_completed_dispatches(*, exclude_ids: set[int] | tuple[int, ...] = ()) -> None:
+    """Bounded catch-up for COMPLETED dispatches missing both a derived observation and a skip audit."""
+    if not _yard_follows_cell_plans():
+        return
+    qs = (
+        CellPlanDispatch.objects.select_related('order__cargo', 'observation__condition', 'plan')
+        .filter(state='COMPLETED')
+    )
+    if exclude_ids:
+        qs = qs.exclude(pk__in=exclude_ids)
+    recent = list(qs.order_by('-updated_at', '-pk')[:RECENT_COMPLETED_FOLLOW_LIMIT])
+    if not recent:
+        return
+    revs = [f'cell-plan-{r.pk}' for r in recent]
+    followed_pairs = set(
+        Observation.objects.filter(source_revision__in=revs).values_list('source_id', 'source_revision')
+    )
+    skipped_ids = set(
+        Audit.objects.filter(
+            action='yard.follow_skipped',
+            object_type='CellPlanDispatch',
+            object_id__in=[str(r.pk) for r in recent],
+        ).values_list('object_id', flat=True)
+    )
+    for row in reversed(recent):
+        if (row.observation.source_id, f'cell-plan-{row.pk}') in followed_pairs or str(row.pk) in skipped_ids:
+            continue
+        try:
+            _follow_yard_on_completed(row)
+        except Exception:
+            logger.exception('Retry follow failed for COMPLETED CellPlanDispatch #%s', row.pk)
 
 _STATE_LABELS = {
     'SUBMITTING': '전송 준비 중',
@@ -275,6 +668,8 @@ def _create_and_submit(
         )
         if row.state == 'COMPLETED':
             _record_completed_audit(row, actor=actor)
+    if row.state == 'COMPLETED':
+        _follow_yard_on_completed(row)
     return row
 
 
@@ -458,7 +853,7 @@ def dispatch_rosy_directive(
 
 def reconcile_cell_plan_dispatch(dispatch_id: int, *, client=None) -> CellPlanDispatch:
     """Rule 7 & 8: reconcile SUBMITTING/UNCERTAIN requests solely via GET ?request_key=."""
-    row = CellPlanDispatch.objects.select_related('order').get(pk=dispatch_id)
+    row = CellPlanDispatch.objects.select_related('order__cargo', 'observation__condition', 'plan').get(pk=dispatch_id)
     if row.state not in ('SUBMITTING', 'UNCERTAIN'):
         return row
     rosy_client = client if client is not None else _default_client()
@@ -489,6 +884,7 @@ def reconcile_cell_plan_dispatch(dispatch_id: int, *, client=None) -> CellPlanDi
         expected_request_key=row.request_key,
     )
     rosy_plan = parsed.plan
+    completed_now = False
     with transaction.atomic():
         prev_state = row.state
         row.rosy_plan_id = rosy_plan.plan_id
@@ -507,11 +903,14 @@ def reconcile_cell_plan_dispatch(dispatch_id: int, *, client=None) -> CellPlanDi
         )
         if prev_state != 'COMPLETED' and row.state == 'COMPLETED':
             _record_completed_audit(row)
+            completed_now = True
+    if completed_now:
+        _follow_yard_on_completed(row)
     return row
 
 
 def sync_cell_plan_dispatch(dispatch_id: int, *, client=None) -> CellPlanDispatch:
-    row = CellPlanDispatch.objects.select_related('order').get(pk=dispatch_id)
+    row = CellPlanDispatch.objects.select_related('order__cargo', 'observation__condition', 'plan').get(pk=dispatch_id)
     if row.state in ('SUBMITTING', 'UNCERTAIN'):
         return reconcile_cell_plan_dispatch(row.pk, client=client)
     if not row.rosy_plan_id:
@@ -534,11 +933,15 @@ def sync_cell_plan_dispatch(dispatch_id: int, *, client=None) -> CellPlanDispatc
     if new_reason != row.reason and (new_reason or new_state == 'COMPLETED'):
         row.reason = new_reason
         update_fields.append('reason')
+    completed_now = False
     if update_fields:
         with transaction.atomic():
             row.save(update_fields=[*update_fields, 'updated_at'])
             if prev_state != 'COMPLETED' and row.state == 'COMPLETED':
                 _record_completed_audit(row)
+                completed_now = True
+    if completed_now:
+        _follow_yard_on_completed(row)
     return row
 
 
@@ -642,6 +1045,7 @@ def tick(registry, *, now=None) -> dict[int, str]:
         except Exception as exc:
             logger.exception('CellPlanDispatch #%s sync failed; will retry on next tick', row.pk)
             results[row.pk] = f'ERROR: {type(exc).__name__}'
+    _retry_unfollowed_completed_dispatches(exclude_ids={row.pk for row in active})
     if not active:
         # The executor only ticks in automatic operation (HARBOR_EXECUTOR_ENABLED=1); a fake test client skips site readiness.
         try:
