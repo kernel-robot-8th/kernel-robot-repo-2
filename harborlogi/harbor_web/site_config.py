@@ -2,6 +2,7 @@
 import math
 from datetime import timedelta
 
+from django.conf import settings as django_settings
 from django.core.exceptions import ValidationError
 
 from harbor.model import Bay, CargoHolding, YardSnapshot, PortConstraints
@@ -10,12 +11,31 @@ from harbor_web.models import clean_text, Cargo, CargoFootprint
 from harbor_web.service_common import _domain
 from harbor_web.yard_occupancy import AREA_LABELS
 
+DEFAULT_MOVE_SECONDS_ESTIMATE = 60  # 이동 1회 예상 초 (실측 전 기본값)
+MOVE_SECONDS_ESTIMATE_DESCRIPTION = '이동 1회 예상 초 (실측 전 기본값)'
+
+
+def move_seconds_estimate(condition_payload=None) -> float:
+    """Return configured seconds per crane/arm move (defaults to 60s pre-measurement baseline)."""
+    if isinstance(condition_payload, dict) and 'move_seconds_estimate' in condition_payload:
+        raw = condition_payload['move_seconds_estimate']
+        if type(raw) in (int, float) and math.isfinite(raw) and raw > 0:
+            return float(raw)
+    configured = getattr(django_settings, 'MOVE_SECONDS_ESTIMATE', None)
+    if type(configured) in (int, float) and math.isfinite(configured) and configured >= 1:
+        return float(configured)
+    return float(DEFAULT_MOVE_SECONDS_ESTIMATE)
+
 
 def constraints(payload, *, _validate_spatial=True):
     def build():
         required = {'outbound_stand', 'temporary_bays', 'allowed_moves', 'max_observation_age_seconds', 'conveyor', 'arm_reach'}
-        if not isinstance(payload, dict) or not required <= set(payload) <= required | {'yard_layout', 'spatial_areas', 'spatial_moves', 'storage_areas', 'area_presentation', 'extra_outbound_stands', 'stack_rules', 'slot_cells'}:
+        if not isinstance(payload, dict) or not required <= set(payload) <= required | {'yard_layout', 'spatial_areas', 'spatial_moves', 'storage_areas', 'area_presentation', 'extra_outbound_stands', 'stack_rules', 'slot_cells', 'move_seconds_estimate'}:
             raise ValueError('Condition requires exactly the documented keys.')
+        if 'move_seconds_estimate' in payload:
+            raw_est = payload['move_seconds_estimate']
+            if type(raw_est) not in (int, float) or not math.isfinite(raw_est) or raw_est <= 0:
+                raise ValueError('move_seconds_estimate must be a positive finite number.')
         for name in ('temporary_bays', 'allowed_moves', 'arm_reach'):
             if not isinstance(payload[name], list):
                 raise ValueError('Expected lists.')

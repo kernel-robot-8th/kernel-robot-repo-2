@@ -1,11 +1,13 @@
 import {transposeArea, transposeBox, transposePoint} from './yard-display.mjs';
 import {
+  DEFAULT_CAMERA_VIEW,
   DEFAULT_FIT_PADDING,
   FOCUS_FIT_PADDING,
+  VIEW_DIRECTIONS,
   badgeColorsForBox,
   computeFitDistance,
-  layoutNameplates,
   resolvePriorityTier,
+  topNameplateSpec,
 } from './yard-visuals.mjs';
 import * as THREE from './vendor/three-0.186.1/three.module.js';
 import {OrbitControls} from './vendor/three-0.186.1/OrbitControls.js';
@@ -187,7 +189,9 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(palette.canvas);
   const camera = new THREE.PerspectiveCamera(40, 1, .05, 1000);
-  camera.position.set(12, 13, 17);
+  const defaultDir = VIEW_DIRECTIONS[DEFAULT_CAMERA_VIEW] || VIEW_DIRECTIONS.front;
+  camera.position.set(defaultDir.x * 20, defaultDir.y * 20, defaultDir.z * 20);
+  canvas.dataset.cameraView = DEFAULT_CAMERA_VIEW;
   const orbit = new OrbitControls(camera, canvas);
   orbit.enableDamping = true;
   orbit.dampingFactor = .15;
@@ -255,52 +259,21 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
   function invalidate() {
     if (!disposed && !failed && !raf) raf = requestAnimationFrame(draw);
   }
-  const nameplateWorldPos = new THREE.Vector3();
-  const nameplateProjected = new THREE.Vector3();
-  const NAMEPLATE_BASE_W = 0.96;
-  const NAMEPLATE_BASE_H = 0.36;
-
-  function updateNameplates() {
-    if (!models.size || !width || !height) return;
-    camera.updateMatrixWorld();
-    const tanHalfFov = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-    const items = [];
+  function syncNameplates() {
+    const visibleBoxes = [];
     models.forEach((model, id) => {
-      if (!model.group.visible) {
-        model.nameplate.visible = false;
-        return;
-      }
-      model.group.updateMatrixWorld();
-      model.nameplate.getWorldPosition(nameplateWorldPos);
-      const dist = Math.max(0.2, camera.position.distanceTo(nameplateWorldPos));
-      nameplateProjected.copy(nameplateWorldPos).project(camera);
-      if (nameplateProjected.z < -1 || nameplateProjected.z > 1) {
-        model.nameplate.visible = false;
-        return;
-      }
-      const px = (nameplateProjected.x * 0.5 + 0.5) * width;
-      const py = (-nameplateProjected.y * 0.5 + 0.5) * height;
-      const pxPerWorld = height / (2 * dist * tanHalfFov);
-      const priority = id === selected ? 3 : model.role === 'target' ? 2 : model.role === 'blocker' ? 1 : 0;
-      items.push({
-        id,
-        x: px,
-        y: py,
-        width: Math.max(28, NAMEPLATE_BASE_W * pxPerWorld),
-        height: Math.max(14, NAMEPLATE_BASE_H * pxPerWorld),
-        priority,
-        depth: nameplateProjected.z,
-      });
+      if (model.group.visible && model.box) visibleBoxes.push(model.box);
     });
-    const layout = layoutNameplates(items);
     models.forEach((model, id) => {
-      const entry = layout.get(id);
-      if (!entry || !entry.visible) {
+      if (!model.group.visible || !model.box) {
         model.nameplate.visible = false;
         return;
       }
-      model.nameplate.visible = true;
-      model.nameplate.scale.set(NAMEPLATE_BASE_W * entry.scale, NAMEPLATE_BASE_H * entry.scale, 1);
+      const spec = topNameplateSpec(model.box, visibleBoxes);
+      model.nameplate.visible = spec.visible;
+      model.nameplate.position.set(spec.x, spec.y, spec.z);
+      model.nameplate.rotation.set(spec.rotX, 0, spec.rotZ);
+      model.nameplate.scale.set(spec.length, spec.width, 1);
     });
   }
 
@@ -308,7 +281,6 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
     raf = 0;
     if (disposed || failed) return;
     const changed = orbit.update();
-    updateNameplates();
     renderer.render(scene, camera);
     canvas.dataset.renderedPositions = JSON.stringify(Object.fromEntries([...models].map(([id, model]) =>
       [id, logicalPoint(model.group.position)])));
@@ -389,11 +361,18 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
     ctx.fillText(String(text), surface.width / 2, surface.height / 2 + 2, rw - 20);
     const texture = new THREE.CanvasTexture(surface);
     texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.SpriteMaterial({map: texture, transparent: true, depthTest: false, depthWrite: false});
-    const sprite = new THREE.Sprite(material);
-    sprite.scale.set(NAMEPLATE_BASE_W, NAMEPLATE_BASE_H, 1);
-    sprite.renderOrder = 10;
-    return {sprite, texture, material};
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    const mesh = new THREE.Mesh(plane, material);
+    mesh.renderOrder = 5;
+    return {mesh, texture, material};
   }
 
   function makeRoleFrame(w, h, d, width, depth, role) {
@@ -470,12 +449,15 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
     }
     group.add(posts);
     const badge = makeNameplate(box.id, badgeColorsForBox(box, palette));
-    badge.sprite.position.set(box.width / 2, h + .30, box.depth / 2);
-    group.add(badge.sprite);
+    const initSpec = topNameplateSpec(box, [box]);
+    badge.mesh.position.set(initSpec.x, initSpec.y, initSpec.z);
+    badge.mesh.rotation.set(initSpec.rotX, 0, initSpec.rotZ);
+    badge.mesh.scale.set(initSpec.length, initSpec.width, 1);
+    group.add(badge.mesh);
     scene.add(group);
     return {
       group, body, outline, baseOutlineMaterial, roleFrame, ribs, posts,
-      nameplate: badge.sprite, badge, role: box.role,
+      nameplate: badge.mesh, badge, role: box.role, box,
       displayWidth: box.width, displayDepth: box.depth,
       signature: boxSignature(box),
     };
@@ -497,6 +479,7 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
       model.group.visible = isolated === null || id === isolated;
       model.outline.material = id === selected ? selectedMaterial : model.baseOutlineMaterial;
     });
+    syncNameplates();
     invalidate();
   }
   function setBoxes(boxes) {
@@ -509,14 +492,8 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
         removeBox(model); models.delete(box.id); model = null;
       }
       if (!model) { model = makeBox(box); models.set(box.id, model); }
+      model.box = box;
       model.group.position.set(box.x, box.z, box.y);
-      const hasBoxAbove = boxes.some(other =>
-        other.id !== box.id &&
-        other.z > box.z &&
-        other.x < box.x + box.width && box.x < other.x + other.width &&
-        other.y < box.y + box.depth && box.y < other.y + other.depth
-      );
-      model.nameplate.position.set(model.displayWidth / 2, hasBoxAbove ? .46 : 1.12, model.displayDepth / 2);
     });
     canvas.dataset.boxCount = String(boxes.length);
     syncSelection();
@@ -565,7 +542,11 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
     const box = new THREE.Box3();
     points.forEach(p => box.expandByPoint(new THREE.Vector3(p.x, p.y, p.z)));
     const center = box.getCenter(new THREE.Vector3());
-    const direction = camera.position.clone().sub(orbit.target).normalize();
+    const frontVec = VIEW_DIRECTIONS[DEFAULT_CAMERA_VIEW] || VIEW_DIRECTIONS.front;
+    const direction = id
+      ? camera.position.clone().sub(orbit.target).normalize()
+      : new THREE.Vector3(frontVec.x, frontVec.y, frontVec.z).normalize();
+    if (direction.lengthSq() < 1e-6) direction.set(frontVec.x, frontVec.y, frontVec.z).normalize();
     const right = new THREE.Vector3().crossVectors(camera.up, direction).normalize();
     const up = new THREE.Vector3().crossVectors(direction, right).normalize();
     const distance = computeFitDistance(
@@ -580,14 +561,16 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
     );
     orbit.target.copy(center);
     camera.position.copy(center).addScaledVector(direction, distance);
+    if (!id) canvas.dataset.cameraView = DEFAULT_CAMERA_VIEW;
     canvas.dataset.fitDistance = String(Number(distance.toFixed(3)));
     orbit.update(); cameraChanged();
   }
   function view(name) {
-    const direction = name === 'top' ? new THREE.Vector3(0, 1, .001)
-      : name === 'front' ? new THREE.Vector3(0, .08, 1) : new THREE.Vector3(1, 1.05, 1.3);
+    const preset = VIEW_DIRECTIONS[name] || VIEW_DIRECTIONS.iso;
+    const direction = new THREE.Vector3(preset.x, preset.y, preset.z).normalize();
     const distance = camera.position.distanceTo(orbit.target);
-    camera.position.copy(orbit.target).addScaledVector(direction.normalize(), distance);
+    camera.position.copy(orbit.target).addScaledVector(direction, distance);
+    canvas.dataset.cameraView = VIEW_DIRECTIONS[name] ? name : 'iso';
     orbit.update(); cameraChanged();
   }
   function zoom(factor) {

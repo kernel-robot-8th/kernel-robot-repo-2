@@ -1,5 +1,6 @@
 """Read-only context for the yard page: open queue schedule, in-memory 3D previews, move arrows, and outbound chain 3D."""
 from dataclasses import asdict, replace
+from datetime import timedelta
 import json
 from types import SimpleNamespace
 
@@ -15,7 +16,9 @@ from harbor_web.board import _is_empty_rearrange
 from harbor_web.models import Audit, CargoFootprint, CellPlanDispatch, Command, Order, Plan
 from harbor_web.order_queue import completed_order_ids, outbound_lanes
 from harbor_web.plan_service import DECIDE_ACTION, _installed_arm_candidates, _outbound_schedule
+from harbor_web.site_config import move_seconds_estimate
 from harbor_web.tier_simulation import tier_recommendations
+from harbor_web.work_hub import format_eta
 from harbor_web.work_state import work_state
 from harbor_web.workspace import _yard_stages, spatial_stages
 from harbor_web.yard_occupancy import occupancy_map
@@ -585,10 +588,11 @@ def outbound_chain_replay(observation, *, allowed_order_ids=None, limit=PREVIEW_
     )
 
 
-def yard_page_context(observation):
+def yard_page_context(observation, *, now=None):
     """Build open queue schedule, in-memory 3D previews (never saving Plans), outbound chain replay, and current move arrows."""
     if observation is None:
         return dict(upcoming=[], active_arrows=[], active_upcoming=None, outbound_chain=None)
+    wall_now = timezone.now() if now is None else now
     open_orders = list(
         Order.objects.exclude(pk__in=completed_order_ids())
         .select_related('cargo')
@@ -700,6 +704,18 @@ def yard_page_context(observation):
             .order_by('pk')
         ):
             saved_decisions.setdefault(audit.object_id, audit)
+
+    first_order = ordered_orders[0]
+    first_cmd = active_commands.get(first_order.pk)
+    first_cp = active_cell_plans.get(first_order.pk)
+    if first_cmd is not None and work_state(first_cmd) == '진행 중':
+        eta_base = first_cmd.created_at
+    elif first_cp is not None and work_state(cell_plan_dispatch=first_cp) == '진행 중':
+        eta_base = first_cp.created_at
+    else:
+        eta_base = wall_now
+    move_sec = move_seconds_estimate(observation.condition.payload)
+    cumulative_moves = 0
 
     upcoming = []
     for index, order in enumerate(ordered_orders):
@@ -838,6 +854,17 @@ def yard_page_context(observation):
             elif arrows and arrows[0].get('arm'):
                 summary_parts.append(f"팔 {arrows[0]['arm']}")
 
+        if not preview_skipped and not hold_reason and result is not None and result.get('status') == 'READY':
+            eta_at = eta_base + timedelta(seconds=cumulative_moves * move_sec)
+            eta_text = format_eta(eta_at)
+            eta_late = bool(order.cutoff_at is not None and eta_at > order.cutoff_at)
+            step_moves = len(arrows) if arrows else (1 if order.kind == 'INBOUND' else 0)
+            cumulative_moves += step_moves
+        else:
+            eta_at = None
+            eta_text = format_eta(None)
+            eta_late = False
+
         upcoming.append(dict(
             key=key,
             order=order,
@@ -851,6 +878,9 @@ def yard_page_context(observation):
             target_label=target_label,
             hold_reason=hold_reason,
             preview_skipped=preview_skipped,
+            eta_at=eta_at,
+            eta_text=eta_text,
+            eta_late=eta_late,
             is_preview=bool(not use_saved and not preview_skipped and scene is not None),
             stages=stages,
             scene=scene,

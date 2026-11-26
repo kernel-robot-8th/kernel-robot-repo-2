@@ -1,0 +1,50 @@
+{% load static %}
+<section id="camera-map" class="panel camera-map-panel" aria-labelledby="camera-map-title" data-camera-map data-camera-map-source="camera-map-data">
+  <div class="panel-h">
+    <h2 id="camera-map-title">카메라 ↔ 3D 위치 매핑</h2>
+    <span class="scope" data-cm-status>{% if camera_map.status %}{{ camera_map.status }}{% elif camera_map.unverified_layout %}실측 전 참고값{% endif %}</span>
+  </div>
+  <div class="panel-b">
+    {{ camera_map|json_script:'camera-map-data' }}
+    <div class="cm-chips" role="group" aria-label="카메라 선택" data-cm-chips>
+      <span class="cm-chips-label">카메라</span>
+      {% for cam in camera_map.cameras %}
+      <button type="button" class="cm-chip{% if cam.key == camera_map.default_camera %} on{% endif %}" data-cm-camera="{{ cam.key }}" aria-pressed="{% if cam.key == camera_map.default_camera %}true{% else %}false{% endif %}">{{ cam.name }}<small>{{ cam.source_id }}</small></button>
+      {% endfor %}
+    </div>
+    <div class="cm-cols">
+      <section class="cm-card" aria-labelledby="cm-3d-title">
+        <div class="cm-card-head">
+          <h3 id="cm-3d-title">3D 야드</h3>
+          <span class="cm-sub" data-cm-mode-label>전체 보기</span>
+        </div>
+        <div class="cm-view" data-cm-view>
+          <p class="cm-fallback" data-cm-fallback hidden>이 환경에서는 3D 카메라 매핑을 표시할 수 없습니다.</p>
+        </div>
+        <div class="cm-btns">
+          <button type="button" class="cm-btn" data-cm-action="camera">카메라 시점으로 보기</button>
+          <button type="button" class="cm-btn alt" data-cm-action="orbit">전체 보기</button>
+          <label class="cm-toggle"><input type="checkbox" data-cm-names><span>이름 표시</span></label>
+        </div>
+        <div class="cm-legend" aria-label="3D 칸 표시 범례">
+          <span><i class="cm-sw" aria-hidden="true"></i>보이는 칸</span>
+          <span><i class="cm-sw hid" aria-hidden="true"></i>가려짐</span>
+          <span><i class="cm-sw or" aria-hidden="true"></i>선택</span>
+        </div>
+      </section>
+      <section class="cm-card" aria-labelledby="cm-frame-title">
+        <div class="cm-card-head">
+          <h3 id="cm-frame-title" data-cm-frame-title>카메라 화면</h3>
+          <span class="cm-sub" data-cm-frame-sub></span>
+        </div>
+        <div class="cm-frame" data-cm-frame></div>
+        <div class="cm-info" data-cm-info role="status">
+          <div class="cm-info-row">3D의 칸 또는 카메라 화면의 박스 위에 마우스를 올려 보세요.</div>
+        </div>
+        <div class="cm-note" data-cm-note></div>
+      </section>
+    </div>
+    <noscript><p class="helptext">카메라 위치 매핑을 보려면 JavaScript를 켜세요.</p></noscript>
+  </div>
+</section>
+<script type="module" src="{% static 'harbor_web/camera-map.js' %}"></script>

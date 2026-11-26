@@ -245,3 +245,60 @@ export function applyReasonText(validation) {
     : '이 순서로는 처리할 수 없습니다.';
   return `적용 불가: ${first}`;
 }
+
+export const DEFAULT_MOVE_SECONDS_ESTIMATE = 60;
+
+const KST_HHMM_FORMATTER = new Intl.DateTimeFormat('ko-KR', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+  timeZone: 'Asia/Seoul',
+});
+
+export function formatEtaHHMM(ms) {
+  if (!Number.isFinite(ms)) return '—';
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return '—';
+  const formatted = KST_HHMM_FORMATTER.format(date);
+  return formatted.startsWith('24:') ? `00:${formatted.slice(3)}` : formatted;
+}
+
+/**
+ * Compute per-task ETA (baseTimeMs + priorMoves * moveSecondsEstimate) for up to `limit` simulated tasks.
+ * Uncomputed tasks (index >= limit or !ok) receive '—'. Tasks past cutoffMs are flagged late=true.
+ */
+export function computeScheduleEtas(
+  items,
+  {baseTimeMs, moveSecondsEstimate = DEFAULT_MOVE_SECONDS_ESTIMATE, limit = 8} = {},
+) {
+  const results = new Map();
+  const moveSec = Number.isFinite(Number(moveSecondsEstimate)) && Number(moveSecondsEstimate) > 0
+    ? Number(moveSecondsEstimate)
+    : DEFAULT_MOVE_SECONDS_ESTIMATE;
+  const baseMs = Number(baseTimeMs);
+  const hasBase = Number.isFinite(baseMs);
+  let cumulativeMoves = 0;
+
+  (items || []).forEach((item, index) => {
+    const id = String(item.id);
+    if (!hasBase || index >= limit || !item.ok) {
+      results.set(id, {id, etaMs: null, etaText: '—', late: false});
+      return;
+    }
+    const etaMs = baseMs + cumulativeMoves * moveSec * 1000;
+    const cutoffMs = Number.isFinite(item.cutoffMs)
+      ? item.cutoffMs
+      : (item.cutoffIso ? Date.parse(item.cutoffIso) : NaN);
+    const late = Number.isFinite(cutoffMs) && etaMs > cutoffMs;
+    results.set(id, {
+      id,
+      etaMs,
+      etaText: formatEtaHHMM(etaMs),
+      late,
+    });
+    const rawMoves = Number(item.moves) || 0;
+    const stepMoves = item.kind === 'INBOUND' ? Math.max(1, rawMoves) : Math.max(0, rawMoves);
+    cumulativeMoves += stepMoves;
+  });
+  return results;
+}

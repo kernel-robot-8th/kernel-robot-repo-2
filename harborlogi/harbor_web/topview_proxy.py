@@ -12,7 +12,9 @@ HARBOR_FLEET_TOKEN(서비스 신원)을 쓴다.
 """
 import hashlib
 import json
+import math
 import os
+import re
 import threading
 import time
 from urllib.error import HTTPError
@@ -48,6 +50,28 @@ SIDE_CAMERA_SOURCES = ('side', 'omx_side')
 ARM_S_CAMERA_SOURCES = ('arm_s_top', 'omx_arm_s_top')
 # Listed first in this order; every other registered camera follows (#141: show all, find a live preview).
 PREFERRED_CAMERA_SOURCES = YARD_CAMERA_SOURCES + SIDE_CAMERA_SOURCES + ARM_S_CAMERA_SOURCES + ('ceiling_north',)
+FORWARDED_FRAME_HEADERS = tuple(dict.fromkeys((*FRAME_HEADERS, 'X-Frame-Plane')))
+_FINITE_NUMBER_RE = re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$')
+
+
+def _is_valid_frame_plane(value):
+    """X-Frame-Plane must be exactly 5 comma-separated finite numbers (x_min,y_min,x_max,y_max,ppm)."""
+    if not isinstance(value, str) or any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        return False
+    parts = value.split(',')
+    if len(parts) != 5:
+        return False
+    for raw_part in parts:
+        token = raw_part.strip()
+        if not _FINITE_NUMBER_RE.match(token):
+            return False
+        try:
+            num = float(token)
+        except ValueError:
+            return False
+        if not math.isfinite(num):
+            return False
+    return True
 
 _CACHE_MAX_ENTRIES = 64
 _SOURCES_TTL_S = 15.0
@@ -165,7 +189,7 @@ def topview_context(request, *, active_order_kind=None):
         )
         def _pending(doc):
             return [pt for pt in doc.get('points', ())
-                    if (pt.get('kind') == 'slot' and pt.get('roi') is None)
+                    if (pt.get('kind') == 'slot' and pt.get('roi') is None and pt.get('polygon') is None)
                     or (pt.get('kind') == 'pick' and pt.get('point') is None)]
         pending_points = _pending(site_pixels or {})
         pending_groups = [dict(source_id=doc['source_id'], points=_pending(doc)) for doc in overlays if _pending(doc)]
@@ -204,7 +228,7 @@ def _request_topview_lease(client, origin, source_id, *, view_mode):
     with _cache_lock:
         use_rect = rect_key not in _unrectified_sources
         use_overlay = origin not in _overlay_unsupported
-    if use_rect and use_overlay:
+    if view_mode != 'map' and use_rect and use_overlay:
         try:
             return client.lease(source_id, rectification=MAP_OVERLAY_RECTIFICATION)
         except RectificationUnsupportedError:
@@ -217,7 +241,7 @@ def _request_topview_lease(client, origin, source_id, *, view_mode):
     if use_rect:
         try:
             return client.lease(source_id, rectification=MAP_RECTIFICATION)
-        except PlaneUnavailableError:
+        except (PlaneUnavailableError, RectificationUnsupportedError):
             with _cache_lock:
                 _unrectified_sources.add(rect_key)
     return client.lease(source_id)
@@ -233,7 +257,7 @@ def topview_frame(request, source_id):
                             content_type="text/plain; charset=utf-8")
 
     raw_view = (request.GET.get('view') or 'auto').strip().lower()
-    view_mode = 'raw' if raw_view == 'raw' else 'auto'
+    view_mode = 'raw' if raw_view == 'raw' else 'map' if raw_view == 'map' else 'auto'
 
     try:
         client = VisionClient(origin, token, timeout=10, ca_file=ca_file)
@@ -275,10 +299,13 @@ def topview_frame(request, source_id):
             jpeg, metadata = client.fetch_frame(lease_response)
         response = HttpResponse(jpeg, content_type="image/jpeg")
         response["Cache-Control"] = "no-store"
-        for key in FRAME_HEADERS:
+        for key in FORWARDED_FRAME_HEADERS:
             value = metadata.get(key)
-            if value is not None:
-                response[key] = value
+            if value is None:
+                continue
+            if key == 'X-Frame-Plane' and not _is_valid_frame_plane(value):
+                continue
+            response[key] = value
         return response
     except StaleFrameError:
         return HttpResponse("frame stale", status=404, content_type="text/plain; charset=utf-8")

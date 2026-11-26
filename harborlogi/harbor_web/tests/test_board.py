@@ -377,7 +377,7 @@ class SituationBoardTests(TestCase):
     def test_board_even_container_css_tokens_and_slot_card_backwards_compat(self):
         self.assertIsNotNone(finders.find('harbor_web/board.css'))
         css = (ROOT / 'harbor_web/static/harbor_web/board.css').read_text(encoding='utf-8')
-        for selector in ('.board-job-list', '.yard-topview.board-even', '.board-counts', '.board-run', '.slot-card.is-move-slot', '.slot-ghost'):
+        for selector in ('.board-job-list', '.board-job-eta', '.board-job-eta.is-late', '.yard-topview.board-even', '.board-counts', '.board-run', '.slot-card.is-move-slot', '.slot-ghost'):
             self.assertIn(selector, css)
         self.assertIn('@media (min-width: 1100px)', css)
         self.assertNotRegex(css, r'#[0-9a-fA-F]{3,8}')
@@ -397,3 +397,31 @@ class SituationBoardTests(TestCase):
         self.assertNotIn('is-move-slot', plain_card)
         self.assertNotIn('slot-ghost', plain_card)
         self.assertIn('class="slot-empty"', plain_card)
+
+    def test_board_job_list_renders_eta_without_prefix_and_marks_late(self):
+        board = {
+            'current_job': dict(
+                title='K1 반출', state='진행 중', tone='info', href='/work/1/',
+                source='야드', destination='반출대', cargo='K1', arm='A',
+                eta_text='14:32', eta_late=False,
+            ),
+            'next_jobs': [
+                dict(
+                    title='K2 반출', kind_label='반출', state='대기', tone='neutral',
+                    href='/requests/2/', route_text='야드 → 반출대', arm='A',
+                    eta_text='14:37', eta_late=True,
+                ),
+                dict(
+                    title='K3 입고', kind_label='입고', state='대기', tone='neutral',
+                    href='/requests/3/', route_text='', arm=None,
+                    eta_text='—', eta_late=False,
+                ),
+            ],
+        }
+        html = render_to_string('overview.html', {'board': board})
+        job_list = html.split('class="board-job-list"', 1)[1].split('</ol>', 1)[0]
+        self.assertIn('<span class="board-job-eta">14:32</span>', job_list)
+        self.assertIn('<span class="board-job-eta is-late">14:37</span>', job_list)
+        self.assertIn('<span class="board-job-eta">—</span>', job_list)
+        self.assertNotIn('예상', job_list)
+        self.assertIsNone(re.search(r'\sstyle=', html))

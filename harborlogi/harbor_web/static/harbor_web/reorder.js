@@ -1,10 +1,12 @@
 import {
+  DEFAULT_MOVE_SECONDS_ESTIMATE,
   TIERS,
   actionBarState,
   applyReasonText,
   buildLaneStrings,
   canMove,
   clampTier,
+  computeScheduleEtas,
   minAllowedTier,
   moveStep,
   moveToBack,
@@ -45,12 +47,18 @@ function mountReorderEditor(editor) {
     code: li.dataset.code,
     running: li.dataset.running === '1',
     simBlocked: li.classList.contains('is-sim-blocked'),
+    cutoffIso: li.dataset.cutoffIso || '',
+    initialEta: li.dataset.eta || '—',
+    initialEtaLate: li.dataset.etaLate === '1',
     node: li,
   }));
 
+  const etaBaseMs = Date.parse(board.dataset.etaBase || '');
+  const moveSecondsEstimate = Number(board.dataset.moveSeconds) || DEFAULT_MOVE_SECONDS_ESTIMATE;
   const initialItems = readItems();
   let draft = initialItems.map(item => ({...item}));
   let validation = null;
+  let validationEtas = null;
   let busy = false;
   let suppressClick = false;
 
@@ -156,6 +164,12 @@ function mountReorderEditor(editor) {
         }
       }
       return data.planSummary;
+    },
+    getEta: data => {
+      if (validationEtas && data.orderId && validationEtas.has(String(data.orderId))) {
+        return validationEtas.get(String(data.orderId));
+      }
+      return {etaText: data.eta, late: data.etaLate};
     },
     getControls: data => {
       if (data.done || data.running || !data.orderId) return null;
@@ -453,10 +467,35 @@ function mountReorderEditor(editor) {
     }
 
     const hasValidation = Boolean(bar.dirty && validation && Array.isArray(validation.items));
+    validationEtas = hasValidation
+      ? computeScheduleEtas(
+        draft.map(item => {
+          const step = stepById.get(item.id);
+          return {
+            id: item.id,
+            kind: item.kind,
+            ok: Boolean(step && step.ok),
+            moves: step ? step.moves : 0,
+            cutoffIso: item.cutoffIso,
+          };
+        }),
+        {baseTimeMs: etaBaseMs, moveSecondsEstimate},
+      )
+      : null;
+
     draft.forEach((item, index) => {
       const li = item.node;
       const card = li.querySelector('.wf-card');
       card?.querySelectorAll('.wf-step-place').forEach(node => node.remove());
+
+      const etaNode = card?.querySelector('[data-wf-eta]');
+      if (etaNode) {
+        const etaEntry = validationEtas ? validationEtas.get(String(item.id)) : null;
+        const etaText = etaEntry ? etaEntry.etaText : item.initialEta;
+        const etaLate = etaEntry ? etaEntry.late : item.initialEtaLate;
+        etaNode.textContent = etaText;
+        etaNode.classList.toggle('wf-eta-late', Boolean(etaLate));
+      }
 
       const step = stepById.get(item.id);
       li.classList.toggle('is-step-fail', Boolean(step && !step.ok));

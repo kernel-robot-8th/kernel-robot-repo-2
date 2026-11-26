@@ -19,7 +19,10 @@
           <strong><code>{{ item.site_ref }}</code> · {{ item.cargo_label }}</strong>
           <span class="site-recognition-reason">{{ item.reason }}</span>
         </span>
-        {% if site_recognition.field_href %}<a class="button quiet site-recognition-action" href="{{ site_recognition.field_href }}">현장 확인</a>{% endif %}
+        <span class="site-recognition-actions">
+          {% if camera_map %}<button type="button" class="quiet site-recognition-camera-btn" data-camera-map-focus="{{ item.site_ref }}">카메라로 확인</button>{% endif %}
+          {% if site_recognition.field_href %}<a class="button quiet site-recognition-action" href="{{ site_recognition.field_href }}">현장 확인</a>{% endif %}
+        </span>
       </li>
       {% endfor %}
     </ul>

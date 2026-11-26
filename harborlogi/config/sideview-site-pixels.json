@@ -6,11 +6,11 @@
     480
   ],
   "status": "planned_unverified",
-  "reference_frame": "rosy-platform docs/assets/calibration/cam-side.jpg (2026-11-20)",
+  "reference_frame": "omx_side live frame (2026-11-26 18:52)",
   "assumptions": {
-    "camera": "카메라는 뱃머리(s1) 쪽 끝에서 선미 쪽을 본다고 가정. 화면 오른쪽 = 팔 A 쪽 = 야드 r1·temp_a, 왼쪽 = r3·temp_b, 보이는 앞 자리 = s1. 카메라가 선미 쪽이면 좌우가 뒤집힌다.",
-    "tier": "옆 카메라는 자리 축 방향으로 보므로 앞 자리가 뒤 자리를 가린다. 단 칸마다 두 자리(yard c1·c4) 또는 레인 3개(temp)의 wire_ref를 모두 적는다.",
-    "rosy_table": "Rosy SIDE_ROI_BY_COL_TIER는 이 프레임과 맞지 않아(칸이 컨테이너 위로 뜸) 쓰지 않았다. 픽셀은 프레임에서 눈으로 잰 참고값."
+    "camera": "카메라는 뱃머리(s1) 쪽 끝에서 선미 쪽을 본다고 가정. 화면 오른쪽 = 팔 A 쪽 = 야드 r1, 왼쪽 = r3, 보이는 앞 자리 = s1.",
+    "tier": "옆 카메라는 야드 3열의 적재 단(t1~t3)만 표시한다(맨 아래 컨테이너 = t1). 양옆 임시 판(temp_a·temp_b)은 사이드뷰 표시에서 제외한다.",
+    "rosy_table": "Rosy SIDE_ROI_BY_COL_TIER는 이 프레임과 맞지 않아 쓰지 않았고, 실측 전 참고값으로 야드 t1~t3 y 범위를 맞췄다."
   },
   "points": [
     {
@@ -25,9 +25,9 @@
       ],
       "roi": [
         150,
-        205,
+        125,
         230,
-        290
+        210
       ]
     },
     {
@@ -42,9 +42,9 @@
       ],
       "roi": [
         150,
-        290,
+        210,
         230,
-        375
+        295
       ]
     },
     {
@@ -59,9 +59,9 @@
       ],
       "roi": [
         150,
-        375,
+        295,
         230,
-        460
+        385
       ]
     },
     {
@@ -76,9 +76,9 @@
       ],
       "roi": [
         238,
-        205,
+        125,
         312,
-        290
+        210
       ]
     },
     {
@@ -93,9 +93,9 @@
       ],
       "roi": [
         238,
-        290,
+        210,
         312,
-        375
+        295
       ]
     },
     {
@@ -110,9 +110,9 @@
       ],
       "roi": [
         238,
-        375,
+        295,
         312,
-        460
+        385
       ]
     },
     {
@@ -127,9 +127,9 @@
       ],
       "roi": [
         316,
-        205,
+        125,
         400,
-        290
+        210
       ]
     },
     {
@@ -144,9 +144,9 @@
       ],
       "roi": [
         316,
-        290,
+        210,
         400,
-        375
+        295
       ]
     },
     {
@@ -161,117 +161,9 @@
       ],
       "roi": [
         316,
-        375,
+        295,
         400,
-        460
-      ]
-    },
-    {
-      "site": "side:temp_b-t3",
-      "label": "임시 B 3단 (레인 1~3 겹침)",
-      "short_label": "B t3",
-      "zone": "temp_b",
-      "kind": "tier",
-      "wire_refs": [
-        "temp_b-r1-c1-l3",
-        "temp_b-r2-c1-l3",
-        "temp_b-r3-c1-l3"
-      ],
-      "roi": [
-        0,
-        225,
-        55,
-        310
-      ]
-    },
-    {
-      "site": "side:temp_b-t2",
-      "label": "임시 B 2단 (레인 1~3 겹침)",
-      "short_label": "B t2",
-      "zone": "temp_b",
-      "kind": "tier",
-      "wire_refs": [
-        "temp_b-r1-c1-l2",
-        "temp_b-r2-c1-l2",
-        "temp_b-r3-c1-l2"
-      ],
-      "roi": [
-        0,
-        310,
-        55,
-        395
-      ]
-    },
-    {
-      "site": "side:temp_b-t1",
-      "label": "임시 B 1단 (레인 1~3 겹침)",
-      "short_label": "B t1",
-      "zone": "temp_b",
-      "kind": "tier",
-      "wire_refs": [
-        "temp_b-r1-c1-l1",
-        "temp_b-r2-c1-l1",
-        "temp_b-r3-c1-l1"
-      ],
-      "roi": [
-        0,
-        395,
-        55,
-        470
-      ]
-    },
-    {
-      "site": "side:temp_a-t3",
-      "label": "임시 A 3단 (레인 1~3 겹침)",
-      "short_label": "A t3",
-      "zone": "temp_a",
-      "kind": "tier",
-      "wire_refs": [
-        "temp_a-r1-c1-l3",
-        "temp_a-r2-c1-l3",
-        "temp_a-r3-c1-l3"
-      ],
-      "roi": [
-        490,
-        225,
-        572,
-        310
-      ]
-    },
-    {
-      "site": "side:temp_a-t2",
-      "label": "임시 A 2단 (레인 1~3 겹침)",
-      "short_label": "A t2",
-      "zone": "temp_a",
-      "kind": "tier",
-      "wire_refs": [
-        "temp_a-r1-c1-l2",
-        "temp_a-r2-c1-l2",
-        "temp_a-r3-c1-l2"
-      ],
-      "roi": [
-        490,
-        310,
-        572,
-        395
-      ]
-    },
-    {
-      "site": "side:temp_a-t1",
-      "label": "임시 A 1단 (레인 1~3 겹침)",
-      "short_label": "A t1",
-      "zone": "temp_a",
-      "kind": "tier",
-      "wire_refs": [
-        "temp_a-r1-c1-l1",
-        "temp_a-r2-c1-l1",
-        "temp_a-r3-c1-l1"
-      ],
-      "roi": [
-        490,
-        395,
-        572,
-        470
+        385
       ]
     }
   ]

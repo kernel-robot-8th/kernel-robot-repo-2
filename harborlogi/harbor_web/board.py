@@ -10,6 +10,7 @@ from harbor_web.alert_pages import alerts_context
 from harbor_web.auth import roles
 from harbor_web.models import Audit, CellPlanDispatch, Command, Order, Plan
 from harbor_web.order_queue import completed_order_ids
+from harbor_web.work_hub import format_eta, schedule_etas_for_orders
 from harbor_web.work_state import day_progress, order_completion_times, work_state, shown_state
 from harbor_web.yard_rows import (
     DEFAULT_SLOT,
@@ -248,6 +249,35 @@ def _mini_yard(yard, *, origin_key=None, dest_key=None, ghost_cargo=None):
     return mini
 
 
+def _eta_fields(etas_by_id, order_id):
+    info = etas_by_id.get(order_id)
+    if info is None:
+        return dict(eta_at=None, eta_text=format_eta(None), eta_late=False)
+    return dict(eta_at=info['eta_at'], eta_text=info['eta_text'], eta_late=info['eta_late'])
+
+
+def _outbound_ranks_from_loaded(open_orders, completed_commands, cell_plans):
+    """Build outbound rank map matching _outbound_schedule() from already-loaded orders (0 queries)."""
+    all_outbound = [o for o in open_orders if o.kind == 'OUTBOUND' and o.cargo_id]
+    seen = {o.pk for o in all_outbound}
+    for cmd in completed_commands.values():
+        if cmd.order.kind == 'OUTBOUND' and cmd.order.cargo_id and cmd.order_id not in seen:
+            all_outbound.append(cmd.order)
+            seen.add(cmd.order_id)
+    for cp in cell_plans:
+        if cp.state == 'COMPLETED' and cp.order.kind == 'OUTBOUND' and cp.order.cargo_id and cp.order_id not in seen:
+            all_outbound.append(cp.order)
+            seen.add(cp.order_id)
+    all_outbound.sort(key=lambda o: (o.priority_group, o.sequence, o.pk))
+    ranks = {}
+    for outgoing in all_outbound:
+        ranks.setdefault(
+            outgoing.cargo.code,
+            (outgoing.priority_group, outgoing.sequence if outgoing.tie_policy == 'FIXED' else None),
+        )
+    return ranks
+
+
 def running_order_kind(commands, cell_plans=()):
     """Return order.kind for the currently running Command or CellPlanDispatch, else None."""
     running = next((c for c in commands if work_state(c) == '진행 중'), None)
@@ -274,6 +304,7 @@ def board_context(request, *, observation, operations, now=None):
     commands = list(
         Command.objects.select_related(
             'order__cargo',
+            'order__planning_observation',
             'plan__observation__condition',
             'plan__condition',
         ).order_by('-pk')
@@ -281,6 +312,7 @@ def board_context(request, *, observation, operations, now=None):
     cell_plans = list(
         CellPlanDispatch.objects.select_related(
             'order__cargo',
+            'order__planning_observation',
             'plan__observation__condition',
             'plan__condition',
         ).order_by('-pk')
@@ -297,7 +329,7 @@ def board_context(request, *, observation, operations, now=None):
 
     open_orders = list(
         Order.objects.exclude(pk__in=completed_order_ids())
-        .select_related('cargo')
+        .select_related('cargo', 'planning_observation')
         .order_by('priority_group', 'sequence', 'pk')
     )
     open_ids = [order.pk for order in open_orders]
@@ -347,10 +379,54 @@ def board_context(request, *, observation, operations, now=None):
     attention = next((c for c in commands if work_state(c) == '처리할 것'), None)
     active_cmd = running or attention
     active_cp = None
+    running_cp = None
     if active_cmd is None:
         running_cp = next((cp for cp in cell_plans if work_state(cell_plan_dispatch=cp) == '진행 중'), None)
         attention_cp = next((cp for cp in cell_plans if work_state(cell_plan_dispatch=cp) == '처리할 것'), None)
         active_cp = running_cp or attention_cp
+
+    if active_cmd is not None:
+        eta_orders = [active_cmd.order, *(o for o in pending_orders if o.pk != active_cmd.order_id)]
+        eta_base = active_cmd.created_at if running is not None else now
+        running_order_id = active_cmd.order_id if running is not None else None
+    elif active_cp is not None:
+        eta_orders = [active_cp.order, *(o for o in pending_orders if o.pk != active_cp.order_id)]
+        eta_base = active_cp.created_at if running_cp is not None else now
+        running_order_id = active_cp.order_id if running_cp is not None else None
+    else:
+        eta_orders = pending_orders
+        eta_base = now
+        running_order_id = None
+
+    has_auto_inbound = (
+        any(o.kind == 'INBOUND' and o.auto_replan for o in open_orders)
+        or any(c.order.kind == 'INBOUND' and c.order.auto_replan for c in completed_commands.values())
+        or any(cp.state == 'COMPLETED' and cp.order.kind == 'INBOUND' and cp.order.auto_replan for cp in cell_plans)
+    )
+    obs_snapshot = (
+        operations.get('_snapshot')
+        if (
+            isinstance(operations, dict)
+            and observation is not None
+            and isinstance(observation.payload, dict)
+            and observation.payload.get('schema') == 'grid-placement-v1'
+        )
+        else None
+    )
+    etas_by_id = (
+        schedule_etas_for_orders(
+            eta_orders,
+            observation=observation,
+            now=now,
+            base_time=eta_base,
+            running_order_id=running_order_id,
+            snapshot=obs_snapshot,
+            outbound_ranks=_outbound_ranks_from_loaded(open_orders, completed_commands, cell_plans),
+            reservation_entries=None if has_auto_inbound else [],
+        )
+        if eta_orders
+        else {}
+    )
 
     current_job = None
     mini_move = None
@@ -366,6 +442,7 @@ def board_context(request, *, observation, operations, now=None):
             cargo=details['cargo'],
             source=details['source'],
             destination=details['destination'],
+            **_eta_fields(etas_by_id, active_cmd.order_id),
         )
         mini_move = details
         upcoming_orders = [o for o in pending_orders if o.pk != active_cmd.order_id]
@@ -381,6 +458,7 @@ def board_context(request, *, observation, operations, now=None):
             cargo=details['cargo'],
             source=details['source'],
             destination=details['destination'],
+            **_eta_fields(etas_by_id, active_cp.order_id),
         )
         mini_move = details
         upcoming_orders = [o for o in pending_orders if o.pk != active_cp.order_id]
@@ -414,6 +492,9 @@ def board_context(request, *, observation, operations, now=None):
                 cargo=details['cargo'],
                 source=details['source'],
                 destination=details['destination'],
+                eta_at=None,
+                eta_text='',
+                eta_late=False,
             )
             upcoming_orders = pending_orders
             mini_move = _move_details(first_order, command=first_cmd, plan=first_plan)
@@ -434,6 +515,7 @@ def board_context(request, *, observation, operations, now=None):
                 cargo=details['cargo'],
                 source=details['source'],
                 destination=details['destination'],
+                **_eta_fields(etas_by_id, first_order.pk),
             )
             mini_move = details
             upcoming_orders = pending_orders[1:]
@@ -452,6 +534,9 @@ def board_context(request, *, observation, operations, now=None):
                 cargo=details['cargo'],
                 source=details['source'],
                 destination=details['destination'],
+                eta_at=None,
+                eta_text='',
+                eta_late=False,
             )
         upcoming_orders = []
 
@@ -480,6 +565,7 @@ def board_context(request, *, observation, operations, now=None):
                 ),
                 arm=details['arm'],
                 route_text=details['route_text'],
+                **_eta_fields(etas_by_id, order.pk),
             )
         )
 
