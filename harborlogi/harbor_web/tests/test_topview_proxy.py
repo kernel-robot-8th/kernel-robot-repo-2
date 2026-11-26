@@ -75,6 +75,45 @@ class TopviewProxyTests(TestCase):
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 502)
 
+    def test_frame_plane_header_forwards_only_five_finite_numbers(self):
+        for valid in (
+            '-1.37,-0.76,1.37,0.76,400.0000',
+            '0, 0, 2.5, 1.5, 400',
+            '-1e0,-5e-1,1e0,5e-1,4e2',
+        ):
+            with self.subTest(valid=valid):
+                self.camera.fetch_frame.return_value = (
+                    b'jpeg-test',
+                    {'X-Frame-Seq': '42', 'X-Frame-Plane': valid},
+                )
+                response = self.client.get(self.url)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response['X-Frame-Seq'], '42')
+                self.assertEqual(response['X-Frame-Plane'], valid)
+
+        for invalid in (
+            '',
+            '1,2,3,4',
+            '1,2,3,4,5,6',
+            '1,2,3,4,',
+            'nan,0,1,1,400',
+            'inf,0,1,1,400',
+            '-inf,0,1,1,400',
+            '1e999,0,1,1,400',
+            '1,2,abc,4,5',
+            '1_000,0,1,1,400',
+            '-1.37,-0.76,1.37,0.76,400\r\nX-Injected: 1',
+        ):
+            with self.subTest(invalid=invalid):
+                self.camera.fetch_frame.return_value = (
+                    b'jpeg-test',
+                    {'X-Frame-Seq': '42', 'X-Frame-Plane': invalid},
+                )
+                response = self.client.get(self.url)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response['X-Frame-Seq'], '42')
+                self.assertNotIn('X-Frame-Plane', response)
+
     def test_missing_settings(self):
         for name, text in (('HARBOR_FLEET_ORIGIN', 'ROSY 연동 전'), ('HARBOR_FLEET_TOKEN', 'ROSY 로그인 필요')):
             with self.subTest(name=name), patch.dict(os.environ, {name: ''}):

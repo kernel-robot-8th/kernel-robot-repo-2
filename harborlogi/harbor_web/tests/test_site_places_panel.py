@@ -41,10 +41,13 @@ class SitePlacesPanelTests(TestCase):
     def test_inventory_shows_offline_status_and_topview_180_note_without_fleet_env(self):
         with patch.dict(os.environ, {'HARBOR_FLEET_ORIGIN': '', 'HARBOR_FLEET_TOKEN': ''}):
             response = self.client.get('/inventory/')
+            overview = self.client.get('/')
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(overview.status_code, 200)
         html = response.content.decode('utf-8')
-        self.assertContains(response, '탑뷰를 180° 돌려 야드 평면과 같은 방향으로 보여 줍니다')
+        self.assertContains(response, '카메라 ↔ 3D 위치 매핑')
         self.assertContains(response, 'data-site-places-status>ROSY 연동 전')
+        self.assertContains(overview, '탑뷰를 180° 돌려 야드 평면과 같은 방향으로 보여 줍니다')
         _assert_glossary_clean(self, html)
 
     def test_inventory_renders_valid_port_site_places_and_passes_glossary_sweep(self):

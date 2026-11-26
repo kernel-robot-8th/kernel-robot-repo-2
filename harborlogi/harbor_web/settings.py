@@ -117,3 +117,20 @@ if os.environ.get('HARBOR_ROSY_ACCOUNT_FILE'):
 
 if os.environ.get('HARBOR_WEB_TRUSTED_PROXY') == '1':
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+
+def parse_move_seconds_estimate(raw):
+    if raw is None or (isinstance(raw, str) and raw.strip() == ''):
+        return 60
+    if isinstance(raw, bool):
+        raise ImproperlyConfigured('HARBOR_MOVE_SECONDS_ESTIMATE must be an integer >= 1.')
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ImproperlyConfigured('HARBOR_MOVE_SECONDS_ESTIMATE must be an integer >= 1.') from exc
+    if value < 1:
+        raise ImproperlyConfigured('HARBOR_MOVE_SECONDS_ESTIMATE must be an integer >= 1.')
+    return value
+
+
+MOVE_SECONDS_ESTIMATE = parse_move_seconds_estimate(os.environ.get('HARBOR_MOVE_SECONDS_ESTIMATE'))

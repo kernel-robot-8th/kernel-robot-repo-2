@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import {
+  DEFAULT_MOVE_SECONDS_ESTIMATE,
   actionBarState,
   applyReasonText,
   assignTiers,
   buildLaneStrings,
   canMove,
   computePopoverPosition,
+  computeScheduleEtas,
+  formatEtaHHMM,
   frontIndex,
   isScheduleChanged,
   minAllowedTier,
@@ -175,4 +178,65 @@ assert.equal(nextPopoverState(openId, {type: 'outsideClick'}), null);
 assert.equal(nextPopoverState(openId, {type: 'dragStart'}), null);
 assert.equal(nextPopoverState(openId, {type: 'cancel'}), null);
 
-console.log('Reorder model: moves, dirty action bar, popover positioning & open/close rules passed');
+// Per-task ETA calculation: baseTime + priorMoves * moveSecondsEstimate, 9th+ -> '—', cutoff late flag
+assert.equal(DEFAULT_MOVE_SECONDS_ESTIMATE, 60);
+{
+  // Explicit UTC timestamps: 01:00Z = 10:00 KST, 01:05Z = 10:05 KST, 01:30Z = 10:30 KST
+  const baseMs = Date.parse('2026-11-26T01:00:00Z');
+  const cutoffEarlyMs = Date.parse('2026-11-26T01:05:00Z');
+  const cutoffSafeMs = Date.parse('2026-11-26T01:30:00Z');
+  const steps = [
+    {id: '1', kind: 'OUTBOUND', ok: true, moves: 5, cutoffMs: cutoffSafeMs},
+    {id: '2', kind: 'INBOUND', ok: true, moves: 0, cutoffMs: cutoffSafeMs},
+    {id: '3', kind: 'OUTBOUND', ok: true, moves: 3, cutoffMs: cutoffEarlyMs},
+    {id: '4', kind: 'OUTBOUND', ok: false, moves: 0, cutoffMs: cutoffEarlyMs},
+    {id: '5', kind: 'OUTBOUND', ok: true, moves: 1, cutoffMs: cutoffSafeMs},
+    {id: '6', kind: 'OUTBOUND', ok: true, moves: 1, cutoffMs: cutoffSafeMs},
+    {id: '7', kind: 'OUTBOUND', ok: true, moves: 1, cutoffMs: cutoffSafeMs},
+    {id: '8', kind: 'OUTBOUND', ok: true, moves: 1, cutoffMs: cutoffSafeMs},
+    {id: '9', kind: 'OUTBOUND', ok: true, moves: 1, cutoffMs: cutoffEarlyMs},
+  ];
+  const etas = computeScheduleEtas(steps, {baseTimeMs: baseMs, moveSecondsEstimate: 60, limit: 8});
+  assert.equal(etas.get('1').etaText, '10:00');
+  assert.equal(etas.get('1').late, false);
+  // After 5 moves * 60s = +5m -> 10:05 KST
+  assert.equal(etas.get('2').etaText, '10:05');
+  assert.equal(etas.get('2').late, false);
+  // INBOUND counts as 1 move -> +1m -> 10:06 KST (> 10:05 cutoff -> late!)
+  assert.equal(etas.get('3').etaText, '10:06');
+  assert.equal(etas.get('3').late, true);
+  // HOLD step -> '—'
+  assert.equal(etas.get('4').etaText, '—');
+  assert.equal(etas.get('4').late, false);
+  // 9th step (index 8 >= limit 8) -> '—'
+  assert.equal(etas.get('9').etaText, '—');
+  assert.equal(etas.get('9').late, false);
+  for (const entry of etas.values()) {
+    assert.equal(entry.etaText.includes('예상'), false);
+  }
+
+  // Custom moveSecondsEstimate (120s/move): 5 moves = +10m -> 10:10 KST
+  const etas120 = computeScheduleEtas(steps.slice(0, 2), {baseTimeMs: baseMs, moveSecondsEstimate: 120});
+  assert.equal(etas120.get('2').etaText, '10:10');
+  assert.equal(formatEtaHHMM(NaN), '—');
+
+  // formatEtaHHMM always renders KST (Asia/Seoul, UTC+9) regardless of host timezone
+  assert.equal(formatEtaHHMM(Date.UTC(2026, 10, 26, 0, 0, 0)), '09:00');
+  assert.equal(formatEtaHHMM(Date.UTC(2026, 10, 26, 1, 5, 0)), '10:05');
+  assert.equal(formatEtaHHMM(Date.UTC(2026, 10, 26, 14, 59, 0)), '23:59');
+  assert.equal(formatEtaHHMM(Date.UTC(2026, 10, 26, 15, 0, 0)), '00:00');
+  assert.equal(formatEtaHHMM(Date.UTC(2026, 10, 26, 15, 7, 0)), '00:07');
+
+  // Midnight KST rollover from UTC base time (14:58Z -> 23:58 KST; +2m -> 00:00 KST)
+  const rollover = computeScheduleEtas(
+    [
+      {id: 'a', kind: 'OUTBOUND', ok: true, moves: 2},
+      {id: 'b', kind: 'OUTBOUND', ok: true, moves: 1},
+    ],
+    {baseTimeMs: Date.parse('2026-11-26T14:58:00Z'), moveSecondsEstimate: 60},
+  );
+  assert.equal(rollover.get('a').etaText, '23:58');
+  assert.equal(rollover.get('b').etaText, '00:00');
+}
+
+console.log('Reorder model: moves, dirty action bar, popover positioning, open/close & ETA rules passed');

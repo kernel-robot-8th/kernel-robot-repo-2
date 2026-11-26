@@ -36,7 +36,6 @@
               {% endif %}
             </section>
           </div>
-          {% include 'topview_panel.html' %}
         </div>
         {% else %}
           <section class="empty"><h2>등록된 야드 배치 자료가 없습니다</h2><p>화물 등록과 야드 배치는 서로 다릅니다. 계획을 만들기 전에 시각·출처·설치 기준을 확인하세요.</p></section>
@@ -50,17 +49,13 @@
               </div>
               <section class="yard-arrows-panel" data-yard-arrows aria-label="예상 이동 경로" hidden></section>
             </div>
-            {% include 'topview_panel.html' %}
           </div>
           {% else %}
             {% if condition %}<details class="fold"><summary>설치 기준 안내</summary><p class="helptext">배치 좌표 미등록 · 설치 기준 #{{ condition.pk }}의 행·열 위치는 확인할 수 없습니다.</p></details>{% endif %}
-            {% include 'topview_panel.html' %}
           {% endif %}
         {% endif %}
       </div>
     </section>
-    {% include 'site_recognition_panel.html' %}
-    {% include 'site_places_panel.html' %}
   </div>
   <aside class="panel yard-upcoming-panel" aria-labelledby="yard-upcoming-title">
     <div class="panel-h">
@@ -87,7 +82,7 @@
                 <span class="chip {% if item.kind == 'OUTBOUND' %}tone-info{% elif item.kind == 'INBOUND' %}tone-inbound{% endif %}">{{ item.kind_label }}</span>
                 {% if item.active %}<span class="chip tone-new">진행 중</span>{% endif %}
               </span>
-              <span class="yard-upcoming-main"><strong>{{ item.title }}</strong><small>{% if item.target_label %}{{ item.target_label }}{% endif %}{% if item.summary %}{% if item.target_label %} · {% endif %}{{ item.summary }}{% endif %}</small></span>
+              <span class="yard-upcoming-main"><span class="yard-upcoming-head"><strong>{{ item.title }}</strong><span class="yard-upcoming-eta{% if item.eta_late %} is-late{% endif %}">{{ item.eta_text }}</span></span><small>{% if item.target_label %}{{ item.target_label }}{% endif %}{% if item.summary %}{% if item.target_label %} · {% endif %}{{ item.summary }}{% endif %}</small></span>
             </button>
             {{ item.scene|json_script:item.scene_id }}
           {% else %}
@@ -96,7 +91,7 @@
                 <span class="chip {% if item.kind == 'OUTBOUND' %}tone-info{% elif item.kind == 'INBOUND' %}tone-inbound{% endif %}">{{ item.kind_label }}</span>
                 {% if item.active %}<span class="chip tone-new">진행 중</span>{% elif item.hold_reason %}<span class="chip tone-hold">보류</span>{% endif %}
               </span>
-              <span class="yard-upcoming-main"><strong>{{ item.title }}</strong><small>{% if item.hold_reason %}{{ item.hold_reason }}{% else %}{% if item.target_label %}{{ item.target_label }}{% endif %}{% if item.summary %}{% if item.target_label %} · {% endif %}{{ item.summary }}{% endif %}{% endif %}</small></span>
+              <span class="yard-upcoming-main"><span class="yard-upcoming-head"><strong>{{ item.title }}</strong><span class="yard-upcoming-eta{% if item.eta_late %} is-late{% endif %}">{{ item.eta_text }}</span></span><small>{% if item.hold_reason %}{{ item.hold_reason }}{% else %}{% if item.target_label %}{{ item.target_label }}{% endif %}{% if item.summary %}{% if item.target_label %} · {% endif %}{{ item.summary }}{% endif %}{% endif %}</small></span>
             </div>
           {% endif %}
         </li>
@@ -107,6 +102,9 @@
       {% endif %}
     </div>
   </aside>
+  {% include 'camera_map_panel.html' %}
+  {% include 'site_recognition_panel.html' %}
+  {% include 'site_places_panel.html' %}
 </div>
 <details class="fold yard-source-fold">
   <summary>기준 · 출처 선택(지원 담당자용)</summary>

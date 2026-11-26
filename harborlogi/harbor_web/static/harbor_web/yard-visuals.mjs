@@ -2,6 +2,62 @@
 
 export const DEFAULT_FIT_PADDING = 0.96;
 export const FOCUS_FIT_PADDING = 1.08;
+export const DEFAULT_CAMERA_VIEW = 'front';
+export const VIEW_DIRECTIONS = Object.freeze({
+  front: Object.freeze({x: 0, y: 0.65, z: 1}),
+  iso: Object.freeze({x: 1, y: 1.05, z: 1.3}),
+  top: Object.freeze({x: 0, y: 1, z: 0.001}),
+});
+
+/** Return true iff no other box in `boxes` sits above `box` over an overlapping footprint. */
+export function isTopOfStack(box, boxes = []) {
+  if (!box) return false;
+  const bx0 = box.x;
+  const bx1 = box.x + (box.width || 1);
+  const by0 = box.y;
+  const by1 = box.y + (box.depth || 1);
+  const bz = box.z ?? 0;
+  return !(boxes || []).some(other => {
+    if (!other || other.id === box.id) return false;
+    const oz = other.z ?? 0;
+    if (oz <= bz) return false;
+    const ox0 = other.x;
+    const ox1 = other.x + (other.width || 1);
+    const oy0 = other.y;
+    const oy1 = other.y + (other.depth || 1);
+    return ox0 < bx1 && bx0 < ox1 && oy0 < by1 && by0 < oy1;
+  });
+}
+
+/**
+ * Compute flat top-face nameplate placement for a 3D container:
+ * - Parallel to the container roof (rotX = -PI/2), resting just above the roof ribs.
+ * - Oriented along the container's long axis (rotZ = PI/2 when depth > width, else 0).
+ * - Visible only when no other container is stacked on top.
+ */
+export function topNameplateSpec(box, boxes = [], {bodyHeight = 0.82, roofOffset = 0.055} = {}) {
+  const bw = box?.width || 1;
+  const bd = box?.depth || 1;
+  const w = Math.max(0.2, bw - 0.1);
+  const d = Math.max(0.2, bd - 0.1);
+  const longAlongZ = d > w;
+  const longSide = longAlongZ ? d : w;
+  const shortSide = longAlongZ ? w : d;
+  const maxLen = longSide > shortSide * 1.2 ? longSide * 0.68 : longSide * 0.84;
+  const width = Math.min(shortSide * 0.74, maxLen * 0.42);
+  const length = Math.min(maxLen, width * 2.75);
+  return {
+    visible: isTopOfStack(box, boxes),
+    x: bw / 2,
+    y: bodyHeight + roofOffset,
+    z: bd / 2,
+    length,
+    width,
+    rotX: -Math.PI / 2,
+    rotZ: longAlongZ ? Math.PI / 2 : 0,
+    longAxis: longAlongZ ? 'z' : 'x',
+  };
+}
 
 /** Paint the container body with its physical color (or neutral stored/muted token when unset); role never overwrites body color. */
 export function resolveContainerBodyColor(box, palette = {}) {

@@ -128,6 +128,15 @@ export function projectRoi(roi, sourceSize, displaySize, rotationDeg = DEFAULT_R
   };
 }
 
+export function projectPolygon(polygon, sourceSize, displaySize, rotationDeg = DEFAULT_ROTATION_DEG) {
+  const points = polygon.map(vertex => projectPoint(vertex, sourceSize, displaySize, rotationDeg));
+  const count = points.length || 1;
+  const cx = points.reduce((sum, pt) => sum + pt.x, 0) / count;
+  const cy = points.reduce((sum, pt) => sum + pt.y, 0) / count;
+  const pointsAttr = points.map(pt => `${pt.x.toFixed(1)},${pt.y.toFixed(1)}`).join(' ');
+  return {points, cx, cy, pointsAttr};
+}
+
 export function extractCameraId(url) {
   if (typeof url !== 'string') return '';
   const match = url.match(/\/topview\/([^/?#]+)\/frame\/?/);
@@ -175,7 +184,9 @@ export function buildOverlayItems(sitePixels, displaySize, rotationDeg = DEFAULT
       }
       continue;
     }
-    if (Array.isArray(entry.roi) && entry.roi.length === 4) {
+    if (Array.isArray(entry.polygon) && entry.polygon.length >= 3) {
+      slots.push({...base, polygon: projectPolygon(entry.polygon, sourceSize, displaySize, rotationDeg)});
+    } else if (Array.isArray(entry.roi) && entry.roi.length === 4) {
       slots.push({...base, rect: projectRoi(entry.roi, sourceSize, displaySize, rotationDeg)});
     } else {
       pending.push(base);
@@ -335,14 +346,19 @@ export function mountTopview(panel) {
         class: `topview-slot topview-zone-${slot.zone}`,
         'data-site': slot.site,
       });
-      group.appendChild(svgEl('rect', {
-        x: slot.rect.x.toFixed(1),
-        y: slot.rect.y.toFixed(1),
-        width: slot.rect.width.toFixed(1),
-        height: slot.rect.height.toFixed(1),
-        rx: 3,
-      }));
-      addLabel(group, slot.shortLabel, slot.rect.cx, slot.rect.cy, dispW, dispH);
+      if (slot.polygon) {
+        group.appendChild(svgEl('polygon', {points: slot.polygon.pointsAttr}));
+        addLabel(group, slot.shortLabel, slot.polygon.cx, slot.polygon.cy, dispW, dispH);
+      } else {
+        group.appendChild(svgEl('rect', {
+          x: slot.rect.x.toFixed(1),
+          y: slot.rect.y.toFixed(1),
+          width: slot.rect.width.toFixed(1),
+          height: slot.rect.height.toFixed(1),
+          rx: 3,
+        }));
+        addLabel(group, slot.shortLabel, slot.rect.cx, slot.rect.cy, dispW, dispH);
+      }
       const title = svgEl('title');
       title.textContent = `${slot.label} (${slot.site})`;
       group.appendChild(title);

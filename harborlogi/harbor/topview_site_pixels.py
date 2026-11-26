@@ -23,8 +23,9 @@ DEFAULT_SIDE_PIXELS_PATH = Path(__file__).resolve().parents[1] / 'config' / 'sid
 DEFAULT_ARM_S_PIXELS_PATH = Path(__file__).resolve().parents[1] / 'config' / 'arm-s-site-pixels.json'
 # Canonical non-slot places the supply-arm-S camera shows (not_places id, belt-in end); anything else is rejected.
 _ARM_S_PICK_SITES = frozenset({'not_places:vehicle_tray', 'belt-in'})
-# Side camera: one box per stack tier. 'side:yard-r2-t3', 'side:temp_a-t1' (temp has one stack, no row).
+# Side camera: one box per yard stack tier (e.g. 'side:yard-r2-t3'). Temp plates are excluded on side view.
 _TIER_SITE_RE = re.compile(r'^side:(?P<zone>[a-z][a-z0-9_]*?)(?:-r(?P<row>[1-9]\d*))?-t(?P<tier>[1-9]\d*)$')
+_SIDE_EXCLUDED_ZONES = frozenset({'temp_a', 'temp_b'})
 _SLOT_SITE_RE = re.compile(r'^(?P<zone>[a-z][a-z0-9_]*):r(?P<row>[1-9]\d*)-s(?P<slot>[1-9]\d*)$')
 
 
@@ -47,27 +48,22 @@ def _expected_slot_wire_refs(site: str) -> tuple[str, ...]:
 
 
 def _expected_tier_wire_refs(site: str) -> tuple[str, ...]:
-    """All wire refs one side-camera tier box covers: the camera looks along the slot axis, so every
-    column of the row is stacked in view (yard), and temp's three lanes overlap end-on."""
+    """All wire refs one side-camera tier box covers: only yard rows are shown on sideview (temp plates excluded)."""
     match = _TIER_SITE_RE.fullmatch(site)
     if match is None:
         return ()
-    spec = CANONICAL_ZONE_SPECS.get(match.group('zone'))
+    zone = match.group('zone')
+    if zone != 'yard':
+        return ()
+    spec = CANONICAL_ZONE_SPECS.get(zone)
     if spec is None:
         return ()
-    zone, tier = match.group('zone'), int(match.group('tier'))
+    tier = int(match.group('tier'))
     row = match.group('row')
-    if not (1 <= tier <= spec['tiers']):
+    if not (1 <= tier <= spec['tiers']) or row is None or not (1 <= int(row) <= spec['rows']):
         return ()
-    if zone == 'yard':
-        if row is None or not (1 <= int(row) <= spec['rows']):
-            return ()
-        rows = [int(row)]
-    else:
-        if row is not None:
-            return ()
-        rows = list(range(1, spec['rows'] + 1))
-    return tuple(f'{zone}-r{r}-c{col}-l{tier}' for r in rows for col in spec['valid_cols'])
+    r = int(row)
+    return tuple(f'{zone}-r{r}-c{col}-l{tier}' for col in spec['valid_cols'])
 
 
 def _default_short_label(site: str, label: str) -> str:
@@ -97,6 +93,28 @@ def _validate_roi(raw_roi: Any, width: int, height: int) -> list[float] | None:
     if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
         raise ValueError(f'roi {raw_roi!r} out of image bounds ({width}x{height})')
     return [x1, y1, x2, y2]
+
+
+def _validate_polygon(raw_polygon: Any, width: int, height: int) -> list[list[float]] | None:
+    if raw_polygon is None:
+        return None
+    if not isinstance(raw_polygon, list) or len(raw_polygon) < 3:
+        raise ValueError('polygon must be null or a list of at least 3 [x, y] vertices')
+    vertices: list[list[float]] = []
+    for vertex in raw_polygon:
+        if not isinstance(vertex, list) or len(vertex) != 2 or not all(_is_finite_number(v) for v in vertex):
+            raise ValueError(f'invalid polygon vertex {vertex!r}')
+        x, y = float(vertex[0]), float(vertex[1])
+        if not (0 <= x <= width and 0 <= y <= height):
+            raise ValueError(f'polygon vertex {vertex!r} out of image bounds ({width}x{height})')
+        vertices.append([x, y])
+    area2 = 0.0
+    for idx, (x1, y1) in enumerate(vertices):
+        x2, y2 = vertices[(idx + 1) % len(vertices)]
+        area2 += x1 * y2 - x2 * y1
+    if abs(area2) <= 0.0:
+        raise ValueError('polygon must have positive area')
+    return vertices
 
 
 def _validate_point(raw_point: Any, width: int, height: int) -> list[float] | None:
@@ -194,7 +212,11 @@ def validate_topview_site_pixels(document: Any) -> dict[str, Any] | None:
             })
             continue
 
-        is_tier = _TIER_SITE_RE.fullmatch(site) is not None
+        tier_match = _TIER_SITE_RE.fullmatch(site)
+        is_tier = tier_match is not None
+        if is_tier and tier_match.group('zone') in _SIDE_EXCLUDED_ZONES:
+            logger.warning('topview site-pixels: excluding sideview temp site %r', site)
+            continue
         if not is_tier and site not in canonical_slots:
             logger.warning('topview site-pixels: skipping non-canonical site %r', site)
             continue
@@ -217,15 +239,14 @@ def validate_topview_site_pixels(document: Any) -> dict[str, Any] | None:
 
         try:
             roi = _validate_roi(entry.get('roi'), width, height)
+            polygon = _validate_polygon(entry.get('polygon'), width, height)
         except ValueError as exc:
             logger.warning('topview site-pixels: skipping site %r (%s)', site, exc)
             continue
 
         seen_sites.add(site)
-        zone = site.split(':', 1)[0]
-        if is_tier:
-            zone = _TIER_SITE_RE.fullmatch(site).group('zone')
-        validated_points.append({
+        zone = tier_match.group('zone') if is_tier else site.split(':', 1)[0]
+        validated_entry: dict[str, Any] = {
             'site': site,
             'label': label,
             'short_label': short_label,
@@ -233,7 +254,10 @@ def validate_topview_site_pixels(document: Any) -> dict[str, Any] | None:
             'kind': 'tier' if is_tier else 'slot',
             'wire_refs': list(raw_refs),
             'roi': roi,
-        })
+        }
+        if polygon is not None:
+            validated_entry['polygon'] = polygon
+        validated_points.append(validated_entry)
 
     rosy_commit = document.get('rosy_commit')
     return {
