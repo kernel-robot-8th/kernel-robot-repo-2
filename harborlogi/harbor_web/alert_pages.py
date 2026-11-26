@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from django.conf import settings
+from django.db.models import Max
 from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
@@ -13,7 +14,7 @@ from harbor.departure import DepartureLedger
 from harbor_web import access
 from harbor_web.auth import require_roles, roles
 from harbor_web.intake_pages import intake_alert_items
-from harbor_web.models import DepartureIntent, FieldEpisode
+from harbor_web.models import Audit, CellPlanDispatch, DepartureIntent, FieldEpisode, Observation
 from harbor_web.operations import operations_context
 from harbor_web.page_helpers import selected_observation
 from harbor_web.work_state import work_state
@@ -58,6 +59,79 @@ COMMAND_TEXT = {
     'BLOCKED': '설치 조건이나 야드 현황, 복구 조건을 확인해야 합니다.',
     'CANCEL_PENDING': '취소 결과와 실제 정지 여부를 확인해야 합니다.',
 }
+YARD_FOLLOW_SKIP_REASONS = {
+    'NEWER_OBSERVATION_EXISTS': '더 새로운 야드 현황이 이미 있음',
+    'BASE_OBSERVATION_UNAVAILABLE': '기준 야드 현황 형식이 맞지 않음',
+    'NO_PLANNED_STEPS': '적용할 이동 단계가 없음',
+    'INVALID_SPATIAL_CONDITION': '설치 기준 형식이 맞지 않음',
+    'INVALID_STEP': '이동 단계 정보가 올바르지 않음',
+    'STEP_CARGO_UNKNOWN': '입고 화물 정보를 알 수 없음',
+    'CARGO_ALREADY_PLACED': '화물이 이미 야드에 배치돼 있음',
+    'INVALID_SRC_SLOT': '출발 위치 주소가 올바르지 않음',
+    'INVALID_DST_SLOT': '도착 위치 주소가 올바르지 않음',
+    'SRC_SLOT_MISMATCH': '출발 칸의 화물이 계획과 다름',
+    'SRC_SLOT_EMPTY': '출발 칸이 비어 있음',
+    'DST_SLOT_OCCUPIED': '도착 칸이 이미 차 있음',
+    'CARGO_FOOTPRINT_MISSING': '화물 크기 정보가 없음',
+    'OBSERVATION_APPLY_FAILED': '야드 현황 저장에 실패함',
+    'UNEXPECTED_ERROR': '자동 반영 중 예상치 못한 오류 발생',
+}
+
+
+def _yard_follow_skip_alert_items():
+    skips = list(
+        Audit.objects.filter(action='yard.follow_skipped', object_type='CellPlanDispatch')
+        .order_by('-created_at', '-pk')[:20]
+    )
+    if not skips:
+        return []
+    by_dispatch_id = {}
+    for entry in skips:
+        if entry.object_id not in by_dispatch_id and entry.object_id.isdigit():
+            by_dispatch_id[entry.object_id] = entry
+    if not by_dispatch_id:
+        return []
+    dispatch_ids = [int(k) for k in by_dispatch_id]
+    dispatches = {
+        d.pk: d
+        for d in CellPlanDispatch.objects.select_related('order__cargo', 'observation')
+        .filter(pk__in=dispatch_ids)
+    }
+    if not dispatches:
+        return []
+    revs = [f'cell-plan-{pk}' for pk in dispatches]
+    followed = set(
+        Observation.objects.filter(source_revision__in=revs).values_list('source_id', 'source_revision')
+    )
+    condition_ids = {d.observation.condition_id for d in dispatches.values()}
+    latest_obs_at = dict(
+        Observation.objects.filter(condition_id__in=condition_ids)
+        .values('condition_id')
+        .annotate(latest=Max('created_at'))
+        .values_list('condition_id', 'latest')
+    )
+    items = []
+    for key, entry in by_dispatch_id.items():
+        dispatch = dispatches.get(int(key))
+        if dispatch is None:
+            continue
+        if (dispatch.observation.source_id, f'cell-plan-{dispatch.pk}') in followed:
+            continue
+        latest_at = latest_obs_at.get(dispatch.observation.condition_id)
+        if latest_at is not None and latest_at > entry.created_at:
+            continue
+        reason_code = (entry.detail or {}).get('reason', '') if isinstance(entry.detail, dict) else ''
+        reason_label = YARD_FOLLOW_SKIP_REASONS.get(reason_code, '자동 반영 조건이 맞지 않음')
+        cargo = dispatch.order.cargo.code if dispatch.order.cargo_id else '자동 재배치'
+        items.append(dict(
+            kind='야드 현황',
+            title=f'야드 갱신 못 함 · {reason_label}',
+            detail=f'{cargo} · 완료된 셀 작업 결과를 야드 현황에 자동 반영하지 못했습니다. 야드 현황을 확인하세요.',
+            count=1,
+            href='/inventory/',
+            action='야드 보기',
+        ))
+    return items
 
 
 def alerts_context(request, *, observation=None, operations=None):
@@ -136,6 +210,7 @@ def alerts_context(request, *, observation=None, operations=None):
             can_open_field=bool(held & {'operator', 'admin', 'field'}),
             kind=ATTENTION_KIND['인식 불일치'],
         ))
+        alerts.extend(_yard_follow_skip_alert_items())
     return dict(alerts=alerts, alert_total=sum(item['count'] for item in alerts), intake_status=intake_status)
 
 

@@ -19,6 +19,7 @@ OBJECT_LABELS = {
     'Intake': '입고 기록',
     'CargoTag': '화물 태그',
     'ArrivalEvent': '도착 기록',
+    'CellPlanDispatch': '셀 계획 실행',
 }
 
 ACTION_SENTENCES = {
@@ -60,6 +61,7 @@ ACTION_SENTENCES = {
     'cargo.tag.bind': '화물에 EPC·바코드 태그를 연결했습니다.',
     'arrival.record': '화물 도착 스캔을 기록했습니다.',
     'order.schedule.apply': '화주·배편 기준으로 반출 순서를 정리했습니다.',
+    'yard.follow_skipped': '완료된 셀 계획의 야드 반영을 건너뛰었습니다.',
 }
 
 

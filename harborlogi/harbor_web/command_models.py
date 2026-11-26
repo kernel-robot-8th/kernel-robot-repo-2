@@ -247,6 +247,11 @@ class OutboundDispatch(models.Model):
                 condition=models.Q(state__in=ACTIVE_OUTBOUND_DISPATCH_STATES),
                 name='one_active_outbound_dispatch_per_stand',
             ),
+            models.UniqueConstraint(
+                fields=('loaded_event_id',),
+                condition=~models.Q(loaded_event_id=''),
+                name='outbound_dispatch_unique_loaded_event_id',
+            ),
             models.CheckConstraint(
                 condition=(
                     ~models.Q(state__in=('LOADED', 'EXIT_PROPOSED', 'EXITED'))

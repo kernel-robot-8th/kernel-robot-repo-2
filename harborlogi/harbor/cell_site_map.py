@@ -28,6 +28,9 @@ LEGACY_AREA_TO_ROLE = {'yard': 'storage', 'stand': 'outbound'}
 
 ZONE_ID_RE = re.compile(r'^[a-z][a-z0-9_]{0,63}$')
 WIRE_REF_RE = re.compile(r'^(?P<area>[a-z][a-z0-9_]*)-r(?P<row>[1-9]\d*)-c(?P<col>[1-9]\d*)-l(?P<tier>[1-9]\d*)$')
+CANONICAL_SITE_ID_RE = re.compile(
+    r'^(?P<area>[a-z][a-z0-9_]*):r(?P<row>[1-9]\d*)-s(?P<slot>[1-9]\d*)-t(?P<tier>[1-9]\d*)$'
+)
 
 
 def _clean_text(value: Any, *, max_len: int = 80, code: str = 'INVALID_MAP_DOCUMENT') -> str:
@@ -655,6 +658,35 @@ def validate_canonical_cell_placement(
     if allowed_wire_refs is not None and wire_ref not in allowed_wire_refs:
         raise ValueError(f'UNKNOWN_CELL_WIRE_REF: {wire_ref}')
     return wire_ref
+
+
+def canonical_site_id_to_wire_ref(site_ref: Any, *, slot_cells: int | None = None) -> str:
+    """Convert canonical site_id (`<zone>:r<row>-s<slot>-t<tier>`) to wire_ref (`<zone>-r<row>-c<col>-l<tier>`).
+
+    Already-wire-format strings are returned stripped unchanged.
+    """
+    if not isinstance(site_ref, str) or not site_ref.strip():
+        raise ValueError('INVALID_CELL_SLOT_COORDINATE: empty site_ref')
+    text = site_ref.strip()
+    if WIRE_REF_RE.fullmatch(text):
+        return text
+    m = CANONICAL_SITE_ID_RE.fullmatch(text)
+    if m is None:
+        raise ValueError(f'INVALID_CELL_SLOT_COORDINATE: {text!r}')
+    area = m.group('area')
+    row = int(m.group('row'))
+    slot_idx = int(m.group('slot'))
+    tier = int(m.group('tier'))
+    spec = CANONICAL_ZONE_SPECS.get(area)
+    if spec is not None:
+        if not (1 <= row <= spec['rows']) or not (1 <= slot_idx <= len(spec['valid_cols'])) or not (1 <= tier <= spec['tiers']):
+            raise ValueError(f'INVALID_CELL_SLOT_COORDINATE: {text!r}')
+        col = spec['valid_cols'][slot_idx - 1]
+        return f'{area}-r{row}-c{col}-l{tier}'
+    if type(slot_cells) is int and slot_cells >= 1:
+        col = 1 + (slot_idx - 1) * slot_cells
+        return f'{area}-r{row}-c{col}-l{tier}'
+    raise ValueError(f'INVALID_CELL_SLOT_COORDINATE: unknown zone {area!r}')
 
 
 def validate_canonical_wire_ref(

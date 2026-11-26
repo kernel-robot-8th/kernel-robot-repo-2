@@ -65,6 +65,8 @@ ledger = BusinessLedger(ledger_path, placement_sources=("synthetic-camera",),
 | `HARBOR_RELEASE_OVERDUE_MINUTES` | 열린 현장 배정에서 ROSY 출발 허락(`vehicle.release_permitted`)이 오지 않을 때 비상 적재면 확인을 알리는 기준 시간(분) | 기본 10분 |
 | `HARBOR_OUTBOUND_AUTO_DISPATCH` | `1`이면 완료된 반출 `Command` 또는 `stand` 대상 `CellPlanDispatch` 뒤 `OutboundDispatch`(`S_OUT`)를 자동 준비 | 끔 |
 | `HARBOR_OUTBOUND_VEHICLES` | 반출대 차량 호출(`OutboundDispatch`)에 사용할 후보 Pinky ID 쉼표 목록(최대 8대) | 미설정 |
+| `HARBOR_YARD_FOLLOWS_CELL_PLANS` | 완료된 `CellPlanDispatch`의 이동을 직전 `grid-placement-v1` 관측에 적용해 파생 `DECLARED` 야드 관측을 자동 기록 (`0`이면 끔) | 켬(`1`) |
+| `HARBOR_PORT_EVENT_CLOCK_SKEW_S` | `container.loaded_for_outbound`의 `observed_at`을 `OutboundDispatch.created_at`과 비교할 때 허용하는 시계 오차(초) | 30 |
 
 ## 이중 모드 OMX 셀 계획(`/api/fleet/pipeline/cell-plans`)과 반출대 2단계 Pinky 이송
 
@@ -74,6 +76,10 @@ ledger = BusinessLedger(ledger_path, placement_sources=("synthetic-camera",),
    - 두 함수 모두 POST 전 `CellPlanDispatch(state='SUBMITTING', request_key=..., request_payload=...)`를 저장하고, 응답 유실 시 `UNCERTAIN`으로 남겨 `executor.tick`이 `GET /api/fleet/pipeline/cell-plans?request_key=<key>`(`reconcile_cell_plan_dispatch`)로만 복구한다.
    - `preview_harbor_plan`/`preview_rosy_directive`(`/api/fleet/pipeline/cell-plans/dry-run`)와 `cancel_cell_plan_dispatch`(`/api/fleet/pipeline/cell-plans/{plan_id}/cancel`) 및 `hold_reason`·`last_refusal` 사유 동기화는 `harbor/cell_plan.py`·`harbor/fleet_types.py`·`RosyClient.*_typed()`로 타입 검증한다.
 2. `harbor_web/outbound_loop.py`는 완료된 반출 `Command` 또는 `stand` 목적지의 완료된 `CellPlanDispatch`를 받아 2단계 차량 이송(`S_OUT` pickup → `confirm_outbound_loaded` 적재 확인 → 고정 차량 `S_EXIT` departure, `object_ref=''`)을 수행한다. `OutboundDispatch`는 `command`와 `cell_plan_dispatch` 중 정확히 하나만 참조(`outbound_dispatch_exactly_one_source`)하며 `stand_zone_id`당 활성 1건만 허용한다.
+
+**완료된 셀 계획의 야드 현황 자동 갱신.** `harbor_web/cell_plan_dispatch.py`의 tick/sync에서 `CellPlanDispatch`가 `COMPLETED`로 전이하는 순간 한 번, 계획의 이동(`planned_steps`: 재취급→반출/입고→복귀)을 기준 `grid-placement-v1` 관측에 적용한 파생 `DECLARED` 관측을 `services.record_observation`으로 기록한다(`source_id`·`condition` 유지, `source_revision="cell-plan-<dispatch.pk>"`, `observed_at`은 디스패치 완료 시각 `row.updated_at` 등 결정적 시각을 써 동시 tick에서도 멱등이며 같은 `source_revision` 충돌은 기존 관측 성공으로 간주, `payload.derived_from={"cell_plan_dispatch": pk, "rosy_plan_id": ...}`, 반출로 `stand`에 간 화물은 장부에서 제외). 새 관측이 기록되면 기존 `auto_replan` 경로가 다음 작업 계획을 새 야드 기준으로 갱신한다. 같은 `condition`에 더 새로운 `PORT_EVENT` 관측이 있으면 출발 칸에 해당 화물이 실제로 있을 때만 최신 `PORT_EVENT` 관측 기준으로 이동을 재적용하고, 적용할 수 없거나 동일 출처에 더 새로운 비-`PORT_EVENT` 관측이 있거나 예상 밖 오류가 나면 관측을 쓰지 않고 감사 기록 `yard.follow_skipped`(사유 포함)를 한 번 남기며 처리할 것(`/alerts/`)에 「야드 갱신 못 함 · 이유」 1건으로 표시한다. 상태 저장 직후 프로세스가 중단되어 `COMPLETED`만 남은 디스패치는 다음 `tick`이 최근 건(상한 8건)에서 관측·`yard.follow_skipped`가 모두 없는 항목을 찾아 한 번 다시 반영한다. `HARBOR_YARD_FOLLOWS_CELL_PLANS=0`으로 끌 수 있다. 이동 투영에는 두 가지 가정을 둔다: (1) ROSY 와이어 주소의 열 번호(`c1`/`c4` 등)는 Harbor `grid-placement-v1`의 그리드 앵커 열(`column`)과 같으며, 정본 형식(`yard:r2-s2-t2` 등)이 들어오면 `harbor.cell_site_map.canonical_site_id_to_wire_ref`로 와이어 형식으로 바꿔 처리한다. (2) ROSY 셀 계획 와이어 형식에는 방향(`orientation`)이 없으므로 이동 시 화물의 기존 `orientation`을 그대로 유지한다.
+
+**반출 적재 이벤트 중복 방지와 시계 허용 오차.** `OutboundDispatch.loaded_event_id`에는 빈 값을 제외한 부분 유니크 제약(`outbound_dispatch_unique_loaded_event_id`)을 두어, 같은 `container.loaded_for_outbound` `event_id`를 두 반출 디스패치가 동시 또는 재시도로 중복 소비하지 못하도록 DB 수준에서 차단한다(기존 중복이 있는 DB도 마이그레이션 `0031`이 먼저 정리한다). 또한 `outbound_loop._apply_outbound_loaded_events`는 ROSY와 Harbor 간 시계 차이를 고려해 `observed_at < dispatch.created_at - skew`일 때만 오래된 이벤트로 버리며, 허용 오차는 기본 30초(`HARBOR_PORT_EVENT_CLOCK_SKEW_S`로 조정)다.
 
 근거 제출은 `harbor_web.evidence.submit`(현장 확인 역할)로 들어오며, mission·attempt·계획 revision에 결속되고 신선(기본 5초)하며 아직 소모되지 않은 것만 채택된다. 운영 producer의 전송·자격 계약은 [물리 관측 수용 조건](observation-acceptance.md) 산출물이 열기 전까지 설치 통합 담당 영역이다.
 

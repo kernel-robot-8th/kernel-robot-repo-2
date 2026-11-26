@@ -232,8 +232,22 @@ def spatial_snapshot(observation):
     from harbor.spatial import CargoShape, Placement, SpatialSnapshot
     def build():
         payload = observation.payload
-        if not isinstance(payload, dict) or set(payload) != {'schema', 'observed_areas', 'placements', 'holdings'} or payload['schema'] != 'grid-placement-v1':
+        required = {'schema', 'observed_areas', 'placements', 'holdings'}
+        if (not isinstance(payload, dict)
+                or not (required <= set(payload) <= required | {'derived_from'})
+                or payload['schema'] != 'grid-placement-v1'):
             raise ValueError('Spatial observation requires exactly the documented fields.')
+        if 'derived_from' in payload:
+            derived = payload['derived_from']
+            if (not isinstance(derived, dict)
+                    or set(derived) != {'cell_plan_dispatch', 'rosy_plan_id'}
+                    or type(derived['cell_plan_dispatch']) is not int
+                    or derived['cell_plan_dispatch'] < 1
+                    or not isinstance(derived['rosy_plan_id'], str)
+                    or len(derived['rosy_plan_id']) > 96):
+                raise ValueError('Invalid derived_from metadata.')
+            if derived['rosy_plan_id']:
+                clean_text(derived['rosy_plan_id'])
         constraints(observation.condition.payload)
         layout, areas = _spatial_areas(observation.condition.payload)
         observed = payload['observed_areas']

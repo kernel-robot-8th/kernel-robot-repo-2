@@ -5,8 +5,9 @@ confirmation -> pinned vehicle ``S_EXIT`` departure) with empty ``object_ref`` s
 ROSY ``intake_transfer`` never treats outbound trips as supply-to-cell intake.
 """
 import logging
+import math
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import re
 from urllib.error import HTTPError, URLError
@@ -460,6 +461,23 @@ def _advance_leg(dispatch, transport, client):
     return next_state
 
 
+DEFAULT_PORT_EVENT_CLOCK_SKEW_S = 30.0
+
+
+def _port_event_clock_skew():
+    """Return allowed clock skew for port event timestamps (HARBOR_PORT_EVENT_CLOCK_SKEW_S, default 30s)."""
+    raw = os.environ.get('HARBOR_PORT_EVENT_CLOCK_SKEW_S', '').strip()
+    if not raw:
+        return timedelta(seconds=DEFAULT_PORT_EVENT_CLOCK_SKEW_S)
+    try:
+        seconds = float(raw)
+    except ValueError:
+        return timedelta(seconds=DEFAULT_PORT_EVENT_CLOCK_SKEW_S)
+    if not math.isfinite(seconds) or seconds < 0:
+        return timedelta(seconds=DEFAULT_PORT_EVENT_CLOCK_SKEW_S)
+    return timedelta(seconds=seconds)
+
+
 def _observed_at(event):
     """Parse one stored port event's `observed_at` into an aware datetime; None when unparseable."""
     text = event.get('observed_at')
@@ -495,50 +513,57 @@ def _apply_outbound_loaded_events(transport, *, now=None):
     claimed = set(
         OutboundDispatch.objects.exclude(loaded_event_id='').values_list('loaded_event_id', flat=True)
     )
+    skew = _port_event_clock_skew()
     transitioned = []
     stamp = now or timezone.now()
     for dispatch in waiting:
         candidates = by_pair.get((dispatch.cargo.code, dispatch.assigned_vehicle_id), ())
         matched = None
         for ev in candidates:  # ledger rowid order, so the first hit is the earliest event
-            if ev.get('event_id') in claimed:
+            ev_id = (ev.get('event_id') or '')[:64]
+            if not ev_id or ev_id in claimed:
                 continue
             observed = _observed_at(ev)
-            if dispatch.created_at is not None and (observed is None or observed < dispatch.created_at):
-                continue  # stale: the cargo load predates this (recreated) dispatch
+            if dispatch.created_at is not None and (observed is None or observed < dispatch.created_at - skew):
+                continue  # stale: the cargo load predates this (recreated) dispatch beyond allowed clock skew
             matched = ev
             break
         if matched is None:
             continue
-        with transaction.atomic():
-            updated = OutboundDispatch.objects.filter(
-                pk=dispatch.pk,
-                version=dispatch.version,
-                state='PICKUP_ARRIVED',
-            ).update(
-                state='LOADED',
-                reason='',
-                loaded_by=None,
-                loaded_at=stamp,
-                loaded_event_id=matched['event_id'][:64],
-                version=dispatch.version + 1,
-                updated_at=stamp,
-            )
-            if updated != 1:
-                continue
-            claimed.add(matched['event_id'][:64])
-            dispatch.refresh_from_db()
-            Audit.objects.create(
-                actor=dispatch.actor,
-                action='outbound.loaded_from_port_event',
-                object_type='OutboundDispatch',
-                object_id=str(dispatch.pk),
-                detail={
-                    'vehicle_id': dispatch.assigned_vehicle_id,
-                    'event_id': matched['event_id'],
-                    'exit_stop_id': dispatch.exit_stop_id,
-                },
-            )
+        ev_id = matched['event_id'][:64]
+        try:
+            with transaction.atomic():
+                updated = OutboundDispatch.objects.filter(
+                    pk=dispatch.pk,
+                    version=dispatch.version,
+                    state='PICKUP_ARRIVED',
+                ).update(
+                    state='LOADED',
+                    reason='',
+                    loaded_by=None,
+                    loaded_at=stamp,
+                    loaded_event_id=ev_id,
+                    version=dispatch.version + 1,
+                    updated_at=stamp,
+                )
+                if updated != 1:
+                    continue
+                claimed.add(ev_id)
+                dispatch.refresh_from_db()
+                Audit.objects.create(
+                    actor=dispatch.actor,
+                    action='outbound.loaded_from_port_event',
+                    object_type='OutboundDispatch',
+                    object_id=str(dispatch.pk),
+                    detail={
+                        'vehicle_id': dispatch.assigned_vehicle_id,
+                        'event_id': matched['event_id'],
+                        'exit_stop_id': dispatch.exit_stop_id,
+                    },
+                )
+        except IntegrityError:
+            claimed.add(ev_id)
+            continue
         transport.prepare(_leg2_intent(dispatch))
         transitioned.append(dispatch.pk)
     return transitioned

@@ -7,7 +7,7 @@ from django.db import transaction
 from harbor_web.coordination import serialized
 from harbor_web.models import Cargo, CargoFootprint, Condition, Observation, Measurement
 # Callers keep using `services.<name>`; new code imports from the owning module (one file per responsibility).
-from harbor_web.service_common import Conflict, _domain, _role, _save  # noqa: F401
+from harbor_web.service_common import AUTO_DISPATCH_USERNAME, Conflict, _domain, _role, _save  # noqa: F401
 from harbor_web.site_config import (area_presentation, constraints, map_areas, snapshot,  # noqa: F401
                                     spatial_policy, spatial_snapshot)
 from harbor_web.order_queue import (TIERS, apply_tier_order, back_of_tier, create_order, move_outbound_to_front, open_outbound_orders,
@@ -62,7 +62,8 @@ def register_condition(actor, *, name, calibration_ref, payload):
 @serialized
 @transaction.atomic
 def record_observation(actor, *, source_id, source_revision, observed_at, provenance, payload, condition):
-    _role(actor, 'admin')
+    if not (getattr(actor, 'username', None) == AUTO_DISPATCH_USERNAME and not getattr(actor, 'is_active', True)):
+        _role(actor, 'admin')
     _provenance(provenance)
     obj = Observation(created_by=actor, source_id=source_id, source_revision=source_revision,
                       observed_at=observed_at, provenance=provenance, payload=payload, condition=condition)
