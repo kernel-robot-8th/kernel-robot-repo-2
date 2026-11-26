@@ -53,6 +53,8 @@ REST 요청(경로 A)
 
 ### 이중 모드 OMX 셀 계획 · 2단계 반출 Pinky 이송 계약 (2026-11-24)
 
+RFID 판독 이후 입고 예약과 실제 장치 위치를 연결하는 규칙, 일정 변경 시 처리 순서, 회차 식별 제안은 [RFID 입고와 실제 장치 위치](contracts/inbound-placement.md)에 있다.
+
 - **이중 모드 셀 계획 (`/api/fleet/pipeline/cell-plans`)**:
   - **모드 1 (`mode="harbor_plan"`, `order_source="harbor"`)**: Harbor가 계산한 `steps[]` 이동 순서와 `wire_ref` 좌표를 그대로 보낸다. R은 물리·선행적재·티어 합법성을 fail-closed 검증해 거부(HTTP 422)하거나 `PROPOSED` 태스크 체인을 생성한다.
   - **모드 2 (`mode="outbound"|"rehandle"|"goal"`, `order_source="rosy_r"`)**: Harbor는 `steps` 없이 목표 지시와 현재 배치를 보내고, R이 이동 순서·재취급·슬롯 좌표를 자율 산출한다.

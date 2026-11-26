@@ -2,23 +2,77 @@
 import hashlib
 import json
 
+from django.db.models import Q
 from django.utils import timezone
-from harbor_web.command_models import ACTIVE_COMMAND_STATES
+from harbor.port_events import parse_slot_ref
+from harbor_web.command_models import ACTIVE_CELL_PLAN_DISPATCH_STATES, ACTIVE_COMMAND_STATES, CellPlanDispatch
 from harbor_web.models import Command, CargoFootprint, Observation, Order, Plan
 from harbor_web.order_queue import queue_digest
 from harbor_web.plan_service import _calculate_plan, placement_decision
-from harbor_web.site_config import constraints
+from harbor_web.site_config import constraints, covers_spatial_yard
+
+
+def unreconciled_cell_dispatches(observation):
+    """Cell work can still own space until its outcome and the affected yard are observed."""
+    terminal = ('COMPLETED', 'CANCELLED', 'ABORTED')
+    outstanding = CellPlanDispatch.objects.filter(state__in=(*ACTIVE_CELL_PLAN_DISPATCH_STATES, *terminal))
+    outstanding = outstanding.exclude(state__in=terminal, intakeoccurrence__status='STORED',
+        intakeoccurrence__observed_at__lte=observation.observed_at, observation__condition_id=observation.condition_id)
+    if (observation.provenance in ('DECLARED', 'SYNTHETIC') and observation.observed_at <= timezone.now()
+            and covers_spatial_yard(observation)):
+        same_source = Q(observation__provenance=observation.provenance, observation__source_id=observation.source_id)
+        if observation.provenance == 'DECLARED':
+            same_source |= Q(observation__provenance='PORT_EVENT')
+        outstanding = outstanding.exclude(same_source, ~Q(observation_id=observation.pk),
+            state__in=terminal, updated_at__lt=observation.observed_at,
+            observation__condition_id=observation.condition_id,
+        )
+    return outstanding
+
+
+def placement_cells(recommendation, incoming):
+    from harbor.spatial import CargoShape, Placement
+    shape, placement = CargoShape(**incoming), Placement(**recommendation)
+    return frozenset((placement.area_id,
+        placement.row + (n if placement.orientation == 90 else 0),
+        placement.column + (n if placement.orientation == 0 else 0), placement.level)
+        for n in range(shape.length_cells))
 
 
 def placement_reservations(order, observation):
-    """Earlier automatic requests reserve empty cells, never observed support."""
-    from harbor.spatial import CargoShape, Placement
+    """Sent destinations take precedence over earlier automatic recommendations."""
     binding = order.planning_observation if order.planning_observation_id else observation
     seen = {item['cargo_id'] for item in observation.payload.get('placements', [])}
     cells, references = set(), []
+
+    def reserve(plan, recommendation, incoming):
+        cells.update(placement_cells(recommendation, incoming))
+        references.append({'plan_id': plan.pk, 'recommendation': recommendation, 'incoming_shape': incoming})
+
+    sent = unreconciled_cell_dispatches(observation).filter(order__kind='INBOUND', dispatch_mode='HARBOR_PLAN',
+        observation__condition_id=observation.condition_id, plan__isnull=False).exclude(order=order)
+    for dispatch in sent.select_related('plan', 'order__cargo').order_by('pk'):
+        plan = dispatch.plan
+        incoming = plan.result.get('incoming_shape')
+        if not incoming or plan.result.get('plan_kind') != 'inbound-placement':
+            continue
+        code = dispatch.order.cargo.code
+        for step in dispatch.request_payload.get('steps', []):
+            if step.get('cargo_id') != code or step.get('src_site') != 'belt':
+                continue
+            area, row, col, level = parse_slot_ref(step['dst_site'])
+            decision = placement_decision(plan)
+            anchor = dict(area_id=area, row=row, column=col, level=level)
+            candidate = plan.result['recommendation']
+            if decision and decision.created_at <= dispatch.created_at:
+                chosen = decision.detail['recommendation']
+                if all(chosen.get(field) == value for field, value in anchor.items()):
+                    candidate = chosen
+            reserve(plan, dict(candidate, **anchor), incoming)
     earlier = Order.objects.filter(auto_replan=True, kind='INBOUND', pk__lt=order.pk,
         planning_observation__source_id=binding.source_id,
-        planning_observation__condition_id=binding.condition_id).select_related('cargo')
+        planning_observation__condition_id=binding.condition_id).exclude(
+            pk__in=sent.values('order_id')).exclude(cell_plan_dispatches__state='COMPLETED').select_related('cargo')
     for request in earlier.order_by('pk'):
         if request.cargo.code in seen or Command.objects.filter(order=request, state__in=ACTIVE_COMMAND_STATES).exists():
             continue
@@ -33,12 +87,7 @@ def placement_reservations(order, observation):
         incoming = plan.result.get('incoming_shape')
         if recommendation is None or incoming is None:
             continue
-        shape, placement = CargoShape(**incoming), Placement(**recommendation)
-        cells.update((placement.area_id,
-            placement.row + (n if placement.orientation == 90 else 0),
-            placement.column + (n if placement.orientation == 0 else 0), placement.level)
-            for n in range(shape.length_cells))
-        references.append({'plan_id': plan.pk, 'recommendation': recommendation, 'incoming_shape': incoming})
+        reserve(plan, recommendation, incoming)
     return frozenset(cells), references
 
 
@@ -59,13 +108,22 @@ def planning_digest(order, observation, *, now=None):
 
 def replan_enabled(actor, trigger, *, source_id=None):
     # Called inside each event's serialized atomic transaction; never calls a public mutator.
-    for order in Order.objects.filter(auto_replan=True).select_related('cargo', 'planning_observation').order_by('pk'):
+    for order in Order.objects.filter(auto_replan=True).select_related('cargo', 'planning_observation', 'intake_occurrence').order_by('pk'):
         binding = order.planning_observation
         if binding is None or (source_id is not None and binding.source_id != source_id):
             continue
-        if Command.objects.filter(order=order, state__in=ACTIVE_COMMAND_STATES).exists():
+        if (Command.objects.filter(order=order, state__in=ACTIVE_COMMAND_STATES).exists()
+                or CellPlanDispatch.objects.filter(order=order, state='COMPLETED').exists()):
             continue
-        observation = Observation.objects.filter(source_id=binding.source_id).select_related('condition').latest('pk')
+        observations = Observation.objects.filter(source_id=binding.source_id).select_related('condition')
+        if getattr(order, 'intake_occurrence', None):
+            observation = observations.filter(provenance__in=('DECLARED', 'PORT_EVENT')).order_by('-observed_at', '-pk').first()
+            if observation is None or not covers_spatial_yard(observation):
+                continue
+        else:
+            observation = observations.latest('pk')
+        if unreconciled_cell_dispatches(observation).filter(order=order).exists():
+            continue
         current = timezone.now()
         digest = planning_digest(order, observation, now=current)
         previous = Plan.objects.filter(order=order).order_by('-pk').first()

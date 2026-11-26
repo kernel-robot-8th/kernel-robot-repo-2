@@ -442,10 +442,32 @@ def _parse_moves(raw_moves: Any) -> tuple[CellPlanMoveView, ...]:
     return tuple(out)
 
 
+HARDWARE_REFUSALS = frozenset({
+    'SITE_NOT_CALIBRATED', 'STAND_NOT_CALIBRATED', 'STAND_REQUIRES_ARM_A', 'SITE_ARM_NOT_ALLOWED',
+    'UNCALIBRATED_DISPLACED_SITE', 'ROUTE_DEPTH_INPUTS_MISSING', 'CELL_CONFIG_OR_WRAPPER_MISSING',
+    'ZONE_FIX_REQUESTED', 'SUBPROCESS_TIMEOUT', 'FOLD_READBACK_MISSING',
+})
+RECEIPT_REFUSALS = HARDWARE_REFUSALS | {
+    'REVIEW_REQUIRED', 'UNKNOWN_SITE', 'HANDOFF_TASK_MISMATCH', 'AMR_NOT_LOCKED_AT_HANDOFF',
+    'HUMAN_HOLD_OR_SAFETY_FEED_LOST', 'SAFETY_WATCHDOG_UNRESPONSIVE',
+}
+
+
 def _extract_last_refusal(task: dict[str, Any]) -> str | None:
     refusal = task.get('last_refusal')
-    if isinstance(refusal, dict) and isinstance(refusal.get('code'), str):
-        return refusal['code']
+    refusal = refusal.get('code') if isinstance(refusal, dict) else refusal
+    if isinstance(refusal, str) and refusal in RECEIPT_REFUSALS:
+        return refusal
+    if task.get('status') == 'ABORTED':
+        # Older Fleet versions exposed the worker's stable refusal only in telemetry.
+        receipt = task.get('receipt')
+        reason = receipt.get('reason') if isinstance(receipt, dict) else None
+        if isinstance(reason, str) and reason in RECEIPT_REFUSALS:
+            return reason
+        telemetry = task.get('hardware_telemetry')
+        code = telemetry.get('error') if isinstance(telemetry, dict) else None
+        if isinstance(code, str) and code in HARDWARE_REFUSALS:
+            return code
     if isinstance(refusal, str) and refusal.strip():
         return refusal.strip()
     return None

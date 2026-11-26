@@ -7,8 +7,8 @@ from django.db import transaction
 
 from harbor.port_events import parse_slot_ref
 from harbor_web.coordination import serialized
-from harbor_web.models import Audit, Cargo, CargoFootprint, Condition, Observation
-from harbor_web.site_config import map_areas, spatial_policy, spatial_snapshot
+from harbor_web.models import Audit, Cargo, CargoFootprint, Condition, IntakeOccurrence, Observation
+from harbor_web.site_config import covers_spatial_yard, map_areas, spatial_policy, spatial_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -51,29 +51,39 @@ def _record_rejection_once(event, code, message):
 
 
 @serialized
-def project_stored_event(event):
+def project_stored_event(event, *, dispatch=None):
     """Apply one container.stored event onto the latest spatial Condition, returning new Observation or None."""
     with transaction.atomic():
         if Observation.objects.filter(source_id=PORT_EVENT_SOURCE_ID, source_revision=event['event_id']).exists():
             return None
+        if dispatch is None and IntakeOccurrence.objects.filter(object_ref=event['object_ref']).exists():
+            raise _ProjectionRejected('PLACEMENT_CORRELATION_MISSING', '회차가 있는 화물의 적재 증거에는 배치 시도가 필요합니다.')
         try:
             area_id, row, col, level = parse_slot_ref(event.get('slot_ref'))
         except ValueError as exc:
             raise _ProjectionRejected('INVALID_SLOT_REF', exc) from None
-        condition = _latest_spatial_condition()
+        condition = dispatch.observation.condition if dispatch else _latest_spatial_condition()
         if condition is None:
             raise _ProjectionRejected('SPATIAL_CONDITION_MISSING', '등록된 3x6 공간 설치 기준이 없습니다.')
         cargo = Cargo.objects.filter(code=event['object_ref']).first()
         if cargo is None:
             raise _ProjectionRejected('CARGO_NOT_REGISTERED', f"미등록 화물 코드: {event['object_ref']}")
-        footprint = CargoFootprint.objects.filter(cargo=cargo).order_by('-pk').first()
+        footprints = CargoFootprint.objects.filter(cargo=cargo)
+        if dispatch:
+            footprints = footprints.filter(pk=dispatch.plan.result['incoming_shape']['footprint_revision'])
+        footprint = footprints.order_by('-pk').first()
         if footprint is None:
             raise _ProjectionRejected('CARGO_FOOTPRINT_MISSING', f"화물 크기(footprint) 미등록: {cargo.code}")
         policy = spatial_policy(condition.payload)
         if not policy.aligned(row, col, 0):
             raise _ProjectionRejected('SLOT_NOT_ALIGNED', f"슬롯 경계에 맞지 않는 위치: {event['slot_ref']}")
 
-        base = Observation.objects.filter(condition=condition).order_by('-pk').first()
+        snapshots = Observation.objects.filter(condition=condition)
+        if dispatch:
+            snapshots = snapshots.filter(provenance__in=('DECLARED', 'PORT_EVENT'))
+        base = snapshots.order_by('-observed_at', '-pk').first() if dispatch else snapshots.order_by('-pk').first()
+        if (dispatch and base is None) or (base and base.payload.get('schema') == 'grid-placement-v1' and not covers_spatial_yard(base)):
+            raise _ProjectionRejected('INCOMPLETE_YARD_OBSERVATION', '한 자리의 관측으로 야드 전체를 확정할 수 없습니다.')
         if base is None:
             placements, holdings = [], []
         elif not isinstance(base.payload, dict) or base.payload.get('schema') != 'grid-placement-v1':
@@ -84,14 +94,22 @@ def project_stored_event(event):
 
         holdings = [h for h in holdings if h.get('cargo_id') != cargo.code]
         existing = next((p for p in placements if p.get('cargo_id') == cargo.code), None)
+        if dispatch and base and base.observed_at > event['observed_at']:
+            if (base.provenance in ('DECLARED', 'PORT_EVENT') and existing
+                    and (existing['area_id'], existing['row'], existing['column'], existing['level']) == (area_id, row, col, level)):
+                return None  # A later yard already independently shows the same placement.
+            raise _ProjectionRejected('NEWER_YARD_OBSERVATION', '현재 관측이 배치 결과보다 늦습니다.')
         if existing is not None:
             same_slot = (
                 existing.get('area_id') == area_id and existing.get('row') == row
                 and existing.get('column') == col and existing.get('level') == level
             )
-            if same_slot:
+            if same_slot and not dispatch:
                 return None
-            raise _ProjectionRejected('CARGO_ALREADY_PLACED', f"화물 {cargo.code}은(는) 이미 다른 위치에 배치되어 있습니다.")
+            if dispatch:
+                placements.remove(existing)
+            else:
+                raise _ProjectionRejected('CARGO_ALREADY_PLACED', f"화물 {cargo.code}은(는) 이미 다른 위치에 배치되어 있습니다.")
 
         placements.append({
             'cargo_id': cargo.code,
@@ -111,7 +129,7 @@ def project_stored_event(event):
             condition=condition,
             payload={
                 'schema': 'grid-placement-v1',
-                'observed_areas': [area.area_id for area in map_areas(condition.payload)],
+                'observed_areas': base.payload['observed_areas'] if base else [area.area_id for area in map_areas(condition.payload)],
                 'placements': placements,
                 'holdings': holdings,
             },

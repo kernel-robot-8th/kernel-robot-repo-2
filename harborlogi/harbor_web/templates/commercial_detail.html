@@ -1,0 +1,10 @@
+{% extends 'base.html' %}{% block title %}{{ title }}{% endblock %}{% block content %}
+<div class="page-head"><h1>{{ title }}</h1></div>
+{% if can_operate %}
+<form method="post" class="form-panel">{% csrf_token %}{{ form.as_div }}
+  <div class="actions"><button type="submit">저장</button><a href="{{ back }}">돌아가기</a></div>
+</form>
+{% else %}
+<dl>{% for label,value in details %}<dt>{{ label }}</dt><dd>{{ value|linebreaksbr }}</dd>{% endfor %}</dl>
+<a href="{{ back }}">돌아가기</a>
+{% endif %}{% endblock %}

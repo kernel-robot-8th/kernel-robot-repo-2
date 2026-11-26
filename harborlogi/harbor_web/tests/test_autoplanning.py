@@ -2,7 +2,9 @@ from copy import deepcopy
 from datetime import timedelta
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
+from django.utils import timezone
 from harbor_web import services
+from harbor_web.command_models import ACTIVE_CELL_PLAN_DISPATCH_STATES, CellPlanDispatch
 from harbor_web.models import Order, Plan, Command, CargoFootprint
 from harbor_web.tests import test_multicell_services as multicell
 
@@ -35,6 +37,57 @@ class AutomaticPlanningTests(TestCase):
         self.assertNotEqual(newer.pk, plan.pk)
         self.assertEqual(newer.result['incoming_shape']['length_cells'], 2)
         self.assertEqual(plan.result['incoming_shape']['length_cells'], 1)
+
+    def test_cell_dispatch_freezes_sent_plan_and_reserves_only_its_destination_until_reconciled(self):
+        order, observed, sent = self.enabled()
+        later = services.create_order(self.operator, cargo=self.cargo('second', 1), kind='INBOUND',
+            priority_group=1, sequence=2, tie_policy='FIXED')
+        sent = Plan.objects.filter(order=order).latest('pk')
+        dispatched = CellPlanDispatch.objects.create(order=order, plan=sent, observation=observed,
+            created_by=self.operator, dispatch_mode='HARBOR_PLAN', directive_mode='harbor_plan',
+            order_source='harbor', request_key='frozen', request_payload={'steps': [
+                {'src_site': 'belt', 'dst_site': 'yard-r1-c1-l1', 'cargo_id': order.cargo.code}]})
+        for state in (*ACTIVE_CELL_PLAN_DISPATCH_STATES, 'ABORTED', 'CANCELLED', 'COMPLETED'):
+            with self.subTest(state=state):
+                dispatched.state = state
+                dispatched.save(update_fields=['state', 'updated_at'])
+                with self.assertRaises(services.Conflict):
+                    services.make_plan(self.operator, order_id=order.pk, expected_version=order.version,
+                        observation_id=observed.pk, automatic=False)
+                other = services.make_plan(self.operator, order_id=later.pk, expected_version=later.version,
+                    observation_id=observed.pk, automatic=True)
+                self.assertEqual(other.result['status'], 'READY')
+                self.assertEqual(other.result['recommendation']['column'], 2)
+                self.assertEqual(Plan.objects.filter(order=order).latest('pk'), sent)
+        self.now = timezone.now()
+        self.observe(observed.condition, observed.payload, 'post-execution')
+        self.assertEqual(Plan.objects.filter(order=order).latest('pk'), sent)
+        updated = Plan.objects.filter(order=later).latest('pk')
+        self.assertEqual(updated.result['status'], 'READY')
+        self.assertEqual(updated.result['recommendation']['column'], 1)
+
+    def test_manually_sent_alternative_reserves_its_wire_destination_for_even_older_orders(self):
+        from harbor_web.autoplanning import placement_reservations
+        older = services.create_order(self.operator, cargo=self.cargo('older', 1), kind='INBOUND',
+            priority_group=1, sequence=2, tie_policy='FIXED')
+        order, observed, plan = self.enabled()
+        plan = services.make_plan(self.operator, order_id=order.pk, expected_version=order.version,
+            observation_id=observed.pk, automatic=False)
+        self.assertEqual(plan.result['recommendation']['column'], 1)
+        dispatch = CellPlanDispatch.objects.create(order=order, plan=plan, observation=observed,
+            created_by=self.operator, dispatch_mode='HARBOR_PLAN', directive_mode='harbor_plan',
+            order_source='harbor', request_key='manual', state='UNCERTAIN', request_payload={'steps': [
+                {'src_site': 'belt', 'dst_site': 'yard-r1-c2-l1', 'cargo_id': order.cargo.code}]})
+        cells, _ = placement_reservations(older, observed)
+        self.assertEqual(cells, {('yard', 1, 2, 1)})
+        dispatch.state = 'CANCELLED'
+        dispatch.save(update_fields=['state', 'updated_at'])
+        self.assertEqual(placement_reservations(older, observed)[0], cells)
+        self.now = timezone.now()
+        refreshed = self.observe(observed.condition, observed.payload, 'post-cancellation')
+        self.assertFalse(placement_reservations(older, refreshed)[0])
+        self.assertEqual(services.make_plan(self.operator, order_id=order.pk, expected_version=order.version,
+            observation_id=refreshed.pk).result['status'], 'READY')
 
     def test_new_observation_dedupes_and_ignores_foreign_source(self):
         order, observation, plan = self.enabled()

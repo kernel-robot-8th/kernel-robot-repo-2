@@ -14,12 +14,19 @@ from harbor.rosy_http import RosyClient
 from tools.integration.real_fleet_http import verify_checkout
 
 WORKCELL = "test-supply"
-CARGO = "TEST-CARGO"
-EPC = "432D31320000000000000000"
+CARGO = "C-1"
 WORKCELL_TOKEN = "test-reader"
 PEER_AUTH = {"Authorization": "Bearer test-fleet-r"}
 HARBOR_AUTH = {"Authorization": "Bearer test-harbor"}
 INGRESS = f"/api/fleet/workcell-observations/{WORKCELL}/intake-readings"
+
+
+def sample_epc(cargo):
+    """A synthetic 96-bit tag containing an ASCII cargo label, padded with NUL."""
+    return cargo.encode("ascii").ljust(12, b"\0").hex().upper()
+
+
+EPC = sample_epc(CARGO)
 
 
 def run(platform, temporary):
@@ -132,7 +139,27 @@ def run(platform, temporary):
                 "SELECT payload FROM port_events WHERE kind='container.received_at_intake'",
             ).fetchall()
         assert EPC not in payload
-        print("PASS: authorized RFID -> Cell Fleet -> Fleet R -> Harbor, exactly one intake receipt")
+
+        # These EPCs belong only to the synthetic manifest. The site's tags are enrolled by scan.
+        for number in range(2, 22):
+            cargo = f"C-{number}"
+            epc = sample_epc(cargo)
+            cell.state.intake["container_epcs"][epc] = cargo
+            mission = f"supply-{number}"
+            with closing(sqlite3.connect(path)) as db, db:
+                db.execute("INSERT INTO fleet_intake_bindings VALUES (?, ?, ?)", (mission, f"trip-{number}", cargo))
+                db.execute("INSERT INTO fleet_cell_jobs VALUES (?, ?)", (mission, "GOAL_CONFIRMED"))
+            ledger.expect(cargo, now=now)
+            ledger.arrive(cargo, now=now)
+            reading = port_event_outbox.reading("rfid_intake", {"state": "read", "epc": epc}, observed_at=now)
+            port_event_outbox.queue(reading, outbox)
+            assert port_event_outbox.send(link, outbox)
+            assert list(ledger.poll(harbor, connection="fleet-r", now=now)["outcomes"].values()) == ["APPLIED"]
+            assert ledger.read(cargo)["state"] == "RECEIVED_AT_INTAKE"
+        with closing(ledger._connect()) as db:
+            count = db.execute("SELECT COUNT(*) FROM port_events WHERE kind='container.received_at_intake'").fetchone()[0]
+            assert count == 21
+        print("PASS: C-1 through C-21 each received once through Cell Fleet, Fleet R and Harbor")
 
 
 def main():

@@ -201,6 +201,13 @@ def spatial_policy(payload):
     return _domain(build)
 
 
+def covers_spatial_yard(observation):
+    payload = observation.payload
+    areas = payload.get('observed_areas', [])
+    return (payload.get('schema') == 'grid-placement-v1' and isinstance(areas, list)
+            and sorted(areas) == sorted(area.area_id for area in map_areas(observation.condition.payload)))
+
+
 def spatial_snapshot(observation):
     from harbor.spatial import CargoShape, Placement, SpatialSnapshot
     def build():

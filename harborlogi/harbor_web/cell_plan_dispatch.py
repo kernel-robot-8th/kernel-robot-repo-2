@@ -24,7 +24,8 @@ from harbor_web.command_models import (ACTIVE_CELL_PLAN_DISPATCH_STATES, ACTIVE_
                                        Command)
 from harbor_web.coordination import serialized
 from harbor_web.fleet_connection import connection_settings, fleet_client
-from harbor_web.models import Audit, Observation, Order, Plan
+from harbor_web.models import Audit, IntakeOccurrence, Observation, Order, Plan
+from harbor_web.service_common import AUTO_DISPATCH_USERNAME, automatic_actor
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,10 @@ def _targets_stand(row: CellPlanDispatch) -> bool:
 
 
 def _failure_reason(parsed) -> str:
+    from harbor.cell_plan import RECEIPT_REFUSALS
+    for task in parsed.tasks:
+        if task.status in ('ABORTED', 'PAUSED_HUMAN', 'CANCELLED') and task.last_refusal in RECEIPT_REFUSALS:
+            return task.last_refusal
     if parsed.plan.hold_reason:
         return parsed.plan.hold_reason[:192]
     for task in parsed.tasks:
@@ -273,19 +278,38 @@ def _create_and_submit(
     return row
 
 
-def preview_harbor_plan(actor, *, plan_id: int, robot_id: str | None = None, client=None) -> CellPlanDryRunResponse:
-    """Read-only simulation preview for Mode 1 Harbor plan without persisting ROSY tasks."""
-    services._role(actor, 'operator')
-    plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
+def _harbor_plan_payload(plan, robot_id, *, check_reservations=False):
+    result = plan.result
+    if result.get('plan_kind') == 'inbound-placement':
+        from harbor_web.plan_service import placement_decision
+
+        decision = placement_decision(plan)
+        if decision is not None:
+            result = {**result, 'recommendation': decision.detail['recommendation']}
+        if check_reservations:
+            from harbor_web.autoplanning import placement_cells, placement_reservations, unreconciled_cell_dispatches
+
+            if unreconciled_cell_dispatches(plan.observation).filter(order=plan.order).exists():
+                raise services.Conflict('EXISTING_ORDER_EXECUTION_REQUIRES_RECONCILIATION')
+            reserved, _ = placement_reservations(plan.order, plan.observation)
+            if reserved and placement_cells(result['recommendation'], result['incoming_shape']) & reserved:
+                raise services.Conflict('INBOUND_DESTINATION_RESERVED')
     try:
-        payload = build_harbor_plan_request(
-            plan.result,
+        return build_harbor_plan_request(
+            result,
             observation_payload=plan.observation.payload,
             robot_id=robot_id or _default_robot_id(),
             cargo_id=plan.order.cargo.code if plan.order.cargo_id else None,
         )
     except ValueError as error:
         raise ValidationError(str(error)) from error
+
+
+def preview_harbor_plan(actor, *, plan_id: int, robot_id: str | None = None, client=None) -> CellPlanDryRunResponse:
+    """Read-only simulation preview for Mode 1 Harbor plan without persisting ROSY tasks."""
+    services._role(actor, 'operator')
+    plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
+    payload = _harbor_plan_payload(plan, robot_id)
     rosy_client = client if client is not None else _default_client()
     try:
         raw = rosy_client.preview_cell_plan(payload)
@@ -344,16 +368,26 @@ def dispatch_harbor_plan(actor, *, plan_id: int, robot_id: str | None = None, cl
 def _submit_harbor_plan(actor, *, plan_id: int, robot_id: str | None, client, production: bool) -> CellPlanDispatch:
     plan = Plan.objects.select_related('order__cargo', 'observation').get(pk=plan_id)
     _reject_blocked_order(plan.order, production=production, observation=plan.observation)
-    try:
-        payload = build_harbor_plan_request(
-            plan.result,
-            observation_payload=plan.observation.payload,
-            robot_id=robot_id or _default_robot_id(),
-            cargo_id=plan.order.cargo.code if plan.order.cargo_id else None,
-        )
-    except ValueError as error:
-        raise ValidationError(str(error)) from error
+    if plan.result.get('plan_kind') == 'inbound-placement':
+        from harbor_web.inbound_decision import decision_block
+
+        if Plan.objects.filter(order_id=plan.order_id, pk__gt=plan.pk).exists():
+            raise services.Conflict('INBOUND_PLAN_SUPERSEDED')
+        blocked = decision_block(plan.order, plan)
+        if blocked:
+            raise services.Conflict(blocked)
+    payload = _harbor_plan_payload(plan, robot_id, check_reservations=True)
     req_key = f'harbor-cell-plan:{plan.pk}:{uuid.uuid4().hex[:12]}'
+    receipt = getattr(plan.order, 'intake_occurrence', None)
+    if receipt is not None:
+        if receipt.stored_event_id:
+            raise services.Conflict('INTAKE_ALREADY_OBSERVED')
+        if IntakeOccurrence.objects.filter(object_ref=receipt.object_ref, received_at__gte=receipt.received_at).exclude(pk=receipt.pk).exists():
+            raise services.Conflict('INTAKE_OCCURRENCE_SUPERSEDED')
+        if Observation.objects.filter(condition_id=plan.condition_id, provenance='PORT_EVENT',
+                observed_at__gt=plan.observation.observed_at).exists():
+            raise services.Conflict('INTAKE_YARD_OBSERVATION_CHANGED')
+        payload.update(intake_occurrence_id=receipt.pk, placement_attempt_id=req_key, propose=True)
     rosy_client = client if client is not None else _default_client()
     return _create_and_submit(
         actor,
@@ -387,6 +421,8 @@ def dispatch_rosy_directive(
     """Mode 2: send a high-level directive and let ROSY compute the move order and coords (order_source='rosy_r')."""
     services._role(actor, 'operator')
     order = Order.objects.select_related('cargo').get(pk=order_id)
+    if IntakeOccurrence.objects.filter(order=order).exists():
+        raise services.Conflict('INTAKE_REQUIRES_BOUND_PLACEMENT')
     observation = Observation.objects.get(pk=observation_id)
     plan = Plan.objects.filter(pk=plan_id, order=order).first() if plan_id is not None else None
     _reject_blocked_order(order, production=client is None, observation=observation)
@@ -542,18 +578,7 @@ def cancel_cell_plan_dispatch(actor, *, dispatch_id: int, reason: str, client=No
     return row
 
 
-AUTO_DISPATCH_USERNAME = 'harbor-automatic'
 _auto_hold_reason: dict[int, str] = {}
-
-
-def _automatic_actor():
-    """A system user that never logs in, so automatic proposals stay apart from named people (ADR 0034 point 6)."""
-    from django.contrib.auth import get_user_model
-    user, created = get_user_model().objects.get_or_create(username=AUTO_DISPATCH_USERNAME, defaults={'is_active': False})
-    if created:
-        user.set_unusable_password()
-        user.save(update_fields=['password'])
-    return user
 
 
 @serialized
@@ -576,7 +601,7 @@ def auto_dispatch_next(*, client=None, production: bool = True) -> CellPlanDispa
                 or plan.order_version != order.version):
             continue
         try:
-            row = _submit_harbor_plan(_automatic_actor(), plan_id=plan.pk, robot_id=None, client=client, production=production)
+            row = _submit_harbor_plan(automatic_actor(), plan_id=plan.pk, robot_id=None, client=client, production=production)
         except (services.Conflict, ValidationError) as error:
             reason = str(getattr(error, 'message', '') or error)
             if _auto_hold_reason.get(plan.pk) != reason:  # record each reason once, not every tick
@@ -594,7 +619,7 @@ def auto_dispatch_next(*, client=None, production: bool = True) -> CellPlanDispa
 @serialized
 def propose_automatically(plan: Plan, *, client=None) -> CellPlanDispatch:
     """Send one Harbor-made plan (e.g. an authorized rearrangement) as the automatic user, behind every cell-plan gate."""
-    return _submit_harbor_plan(_automatic_actor(), plan_id=plan.pk, robot_id=None, client=client, production=client is None)
+    return _submit_harbor_plan(automatic_actor(), plan_id=plan.pk, robot_id=None, client=client, production=client is None)
 
 
 def tick(registry, *, now=None) -> dict[int, str]:

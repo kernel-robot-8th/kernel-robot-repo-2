@@ -81,6 +81,8 @@ def tick(registry, *, now):
     result = intake.poll(client, connection=registry.config['origin'], now=now)
     try:
         from harbor_web.port_event_projection import project_stored_events
+        from harbor_web.intake_occurrences import project_occurrences
+        project_occurrences(intake)
         project_stored_events(intake)
     except Exception:
         logger.exception('Port event inventory projection failed; poll cursor preserved')

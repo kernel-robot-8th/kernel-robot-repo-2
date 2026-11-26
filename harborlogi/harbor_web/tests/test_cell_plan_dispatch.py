@@ -240,6 +240,66 @@ class CellPlanDispatchTests(TestCase):
         self.assertEqual(client.expected_principal, 'cell-app-service')
         self.assertEqual(client.expected_role, 'service')
 
+    def _inbound_plan(self, code='C3', sequence=2):
+        cargo = services.register_cargo(self.operator, code=code, name='incoming', weight_kg=2,
+                                       volume_m3='0.012', destination='yard', length_cells=3)
+        order = services.create_order(self.operator, cargo=cargo, kind='INBOUND', priority_group=2,
+                                      sequence=sequence, tie_policy='FIXED')
+        return services.make_plan(self.operator, order_id=order.pk, expected_version=order.version,
+                                  observation_id=self.observation.pk)
+
+    def test_inbound_preview_and_dispatch_use_the_decided_alternative(self):
+        from harbor_web.inbound_decision import decide_placement
+
+        plan = self._inbound_plan()
+        decision = decide_placement(self.operator, plan_id=plan.pk, expected_version=plan.order_version,
+                                    alternative_rank=1)
+        selected = decision.detail['recommendation']
+        dst = '{area_id}-r{row}-c{column}-l{level}'.format(**selected)
+        self.assertNotEqual(selected, plan.result['recommendation'])
+        client = _FakeCellPlanClient()
+        preview = cell_plan_dispatch.preview_harbor_plan(self.operator, plan_id=plan.pk, client=client)
+        row = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=plan.pk, client=client)
+        self.assertEqual(preview.moves[0].dst_site, dst)
+        self.assertEqual(client.calls[0][1]['steps'][0]['dst_site'], dst)
+        self.assertEqual(row.planned_steps[0]['dst_site'], dst)
+
+    def test_dispatch_rechecks_decided_destination_against_prior_submission(self):
+        from harbor_web.inbound_decision import decide_placement
+
+        first = self._inbound_plan()
+        second = self._inbound_plan('C4', sequence=3)
+        first = services.make_plan(self.operator, order_id=first.order_id, expected_version=first.order_version,
+                                   observation_id=self.observation.pk)
+        # The two saved rankings place the same candidate at different ranks.
+        ranked = first.result['alternatives'][0]
+        first.result['recommendation'], ranked['placement'] = ranked['placement'], first.result['recommendation']
+        from harbor_web.models import Plan
+        first = Plan.objects.create(created_by=self.operator, order=first.order, order_version=first.order_version,
+                                    observation=self.observation, condition=self.condition,
+                                    queue_digest=first.queue_digest, result=first.result)
+        chosen = decide_placement(self.operator, plan_id=second.pk, expected_version=second.order_version,
+                                  alternative_rank=1).detail['recommendation']
+        addr = '{area_id}-r{row}-c{column}-l{level}'
+        self.assertEqual(addr.format(**chosen), addr.format(**first.result['recommendation']))
+        client = _FakeCellPlanClient()
+        sent = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=first.pk, client=client)
+        self.assertEqual(sent.request_payload['steps'][0]['dst_site'], addr.format(**chosen))
+        with self.assertRaisesMessage(services.Conflict, 'INBOUND_DESTINATION_RESERVED'):
+            cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=second.pk, client=client)
+        self.assertFalse(CellPlanDispatch.objects.filter(plan=second).exists())
+        self.assertEqual(len(client.calls), 1)
+
+    def test_superseded_inbound_plan_is_rejected_before_submission(self):
+        plan = self._inbound_plan()
+        services.make_plan(self.operator, order_id=plan.order_id, expected_version=plan.order_version,
+                           observation_id=self.observation.pk)
+        client = _FakeCellPlanClient()
+        with self.assertRaises(services.Conflict):
+            cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=plan.pk, client=client)
+        self.assertFalse(client.calls)
+        self.assertFalse(CellPlanDispatch.objects.filter(plan=plan).exists())
+
     def test_dual_mode_dispatch_and_sync_lifecycle(self):
         client = _FakeCellPlanClient()
         harbor_row = cell_plan_dispatch.dispatch_harbor_plan(self.operator, plan_id=self.plan.pk, client=client)

@@ -71,6 +71,179 @@ class PortEventProjectionTests(TestCase):
             observed_at='2026-11-22T09:00:00Z',
         ))
 
+    def test_occurrence_receipt_dispatch_observation_replay_and_repeat(self):
+        from django.conf import settings
+        from harbor_web.cell_plan_dispatch import auto_dispatch_next
+        from datetime import timedelta
+        from harbor_web.models import IntakeOccurrence, IntakeProjectionCursor, Order, Plan
+        from harbor_web.runtime_models import DeploymentState
+        from harbor_web.tests.test_cell_plan_dispatch import _FakeCellPlanClient
+        DeploymentState.objects.get_or_create(pk=1, defaults={'mode': settings.MODE})
+        yard = dict(schema='grid-placement-v1', observed_areas=['yard', 'temp_a', 'temp_b', 'stand'],
+                    holdings=[], placements=[])
+        legacy = IntakeLedger(self.path)
+        # Harbor's manifest clock is ahead of Fleet's RFID clock.
+        legacy.expect('C1', now=self.now + timedelta(minutes=2))
+        def event(kind, char, occurrence, *, identity='observed', **fields):
+            self.fleet.events.append(dict(event_id=char * 64, kind='container.' + kind,
+                observation_ref='observation-' + char, object_ref='C1', identity=identity,
+                observed_at=timezone.now().isoformat(), intake_occurrence_id=occurrence, **fields))
+            intake_loop.tick(self.registry, now=timezone.now())
+        event('received_at_intake', 'a', 'first', intake_point='belt')
+        self.assertEqual(legacy.read('C1')['state'], 'RECEIVED_AT_INTAKE')
+        self.fleet.events.append(dict(event_id='0'*64, kind='container.stored', observation_ref='old-unbound',
+            object_ref='C1', identity='observed', slot_ref='yard-r1-c4-l1', observed_at=timezone.now().isoformat()))
+        intake_loop.tick(self.registry, now=timezone.now())
+        self.assertEqual(legacy.read('C1')['state'], 'RECEIVED_AT_INTAKE')
+        receipt = IntakeOccurrence.objects.get(pk='first')
+        self.assertEqual(receipt.status, 'WAITING_FOR_YARD')
+        self.assertEqual(Order.objects.count(), 1)
+        partial = dict(yard, observed_areas=['yard'])
+        def import_partial(revision, captured):
+            return Observation.objects.create(created_by=self.user, source_id='yard', source_revision=revision,
+                observed_at=captured, provenance='DECLARED', condition=self.condition, payload=partial)
+        import_partial('incomplete', timezone.now())
+        intake_loop.tick(self.registry, now=timezone.now())
+        self.assertFalse(Plan.objects.filter(order=receipt.order).exists())
+        full = services.record_observation(self.user, source_id='yard', source_revision='one', observed_at=timezone.now(),
+            provenance='DECLARED', condition=self.condition, payload=yard)
+        import_partial('delayed-old', self.now)
+        intake_loop.tick(self.registry, now=timezone.now())
+        plan = Plan.objects.filter(order=receipt.order).latest('pk')
+        self.assertEqual(plan.observation, full)
+        fleet = _FakeCellPlanClient()
+        with mock.patch('harbor_web.readiness.first_unmet_cell_plan', return_value='READINESS_WORKCELL_INCIDENT_HOLD'):
+            self.assertIsNone(auto_dispatch_next(client=fleet, production=True))
+        page = self.client.get('/inventory/')
+        rec = plan.result['recommendation']
+        target = '{area_id}-r{row}-c{column}-l{level}'.format(**rec)
+        self.assertContains(page, target)
+        self.assertContains(page, 'READINESS_WORKCELL_INCIDENT_HOLD')
+        self.assertContains(page, '적재 결과 대기')
+        self.assertContains(page, '관측 대기')
+        self.assertFalse(fleet.calls)
+        dispatch = auto_dispatch_next(client=fleet, production=False)
+        self.assertEqual(dispatch.plan_id, plan.pk)
+        self.assertEqual(dispatch.request_payload['intake_occurrence_id'], 'first')
+        self.assertEqual(dispatch.request_payload['placement_attempt_id'], dispatch.request_key)
+        self.assertIs(dispatch.request_payload['propose'], True)
+        for commercial_field in ('shipper_name', 'shipper_tier', 'destination', 'weight_kg', 'volume_m3',
+                                 'tag_value', 'color', 'color_confirmed', 'nominal_length_ft', 'container_type', 'goods_contents'):
+            self.assertNotIn(f'"{commercial_field}"', json.dumps(dispatch.request_payload))
+        self.assertContains(self.client.get('/inventory/'), '제안 접수 · 승인 대기')
+        requested = dispatch.request_payload['steps'][0]['dst_site']
+        slot = 'yard-r1-c4-l1' if requested != 'yard-r1-c4-l1' else 'yard-r1-c1-l1'
+        import_partial('partial-after-submit', timezone.now())
+        captured = timezone.now()
+        event('stored', 'b', 'first', slot_ref=slot, placement_attempt_id=dispatch.request_key)
+        receipt.refresh_from_db()
+        self.assertEqual((receipt.status, legacy.read('C1')['state']), ('YARD_CONFLICT', 'RECEIVED_AT_INTAKE'))
+        self.assertFalse(Observation.objects.filter(provenance='PORT_EVENT').exists())
+        services.record_observation(self.user, source_id='yard', source_revision='recovered', observed_at=captured,
+            provenance='DECLARED', condition=self.condition, payload=yard)
+        intake_loop.tick(self.registry, now=timezone.now())
+        receipt.refresh_from_db()
+        self.assertEqual(legacy.read('C1')['state'], 'COMPLETED')
+        self.assertEqual((receipt.status, receipt.observed_slot), ('SLOT_MISMATCH', slot))
+        html = self.client.get('/inventory/')
+        self.assertContains(html, requested)
+        self.assertContains(html, slot)
+        self.assertContains(html, '요청·관측 위치 불일치')
+        intake_loop.tick(self.registry, now=timezone.now())
+        dispatch.state = 'COMPLETED'
+        dispatch.save(update_fields=['state', 'updated_at'])
+        services.record_observation(self.user, source_id='yard', source_revision='after-outbound', observed_at=timezone.now(),
+            provenance='DECLARED', condition=self.condition, payload=yard)
+        event('received_at_intake', 'c', 'second', intake_point='belt')
+        self.assertEqual(Order.objects.count(), 2)
+        self.assertEqual((legacy.read('C1')['state'], legacy.read('C1')['slot_ref']), ('RECEIVED_AT_INTAKE', None))
+        second = IntakeOccurrence.objects.get(pk='second')
+        second_dispatch = auto_dispatch_next(client=_FakeCellPlanClient(), production=False)
+        self.assertEqual(second_dispatch.order_id, second.order_id)
+        event('stored', 'd', 'second', slot_ref=slot, placement_attempt_id=dispatch.request_key)
+        self.assertFalse(IntakeOccurrence.objects.get(pk='second').stored_event_id)
+        event('stored', 'e', 'first', slot_ref=slot, placement_attempt_id=dispatch.request_key)
+        self.assertEqual(Observation.objects.filter(provenance='PORT_EVENT').count(), 1)
+        event('stored', 'f', 'second', slot_ref=second_dispatch.request_payload['steps'][0]['dst_site'],
+            placement_attempt_id=second_dispatch.request_key, identity='attested')
+        second.refresh_from_db()
+        self.assertEqual(second.status, 'STORED')
+        self.assertEqual(second.result_identity, 'attested')
+        self.assertEqual((legacy.read('C1')['state'], legacy.read('C1')['slot_ref']), ('COMPLETED', second.observed_slot))
+        self.assertContains(self.client.get('/inventory/'), 'RFID 작업 추적 · 놓기 위치 검증')
+        self.assertEqual(Observation.objects.filter(provenance='PORT_EVENT').count(), 2)
+        cursor = IntakeProjectionCursor.objects.get()
+        self.assertEqual(legacy.occurrence_batch(cursor.sequence, cursor.pending), [])
+        cursor.delete()
+        intake_loop.tick(self.registry, now=timezone.now())
+        self.assertEqual((legacy.read('C1')['slot_ref'], IntakeOccurrence.objects.count()), (second.observed_slot, 2))
+
+    def test_receipt_binds_unique_scheduled_order_and_retries_unknown_cargo(self):
+        from harbor_web.models import Cargo, CargoTag, IntakeOccurrence, Order
+        first = services.create_order(self.user, kind='INBOUND', cargo=Cargo.objects.get(code='C1'),
+            priority_group=1, sequence=1, tie_policy='FIXED')
+        for cargo, occurrence, digit in [('C1', 'scheduled', '1'), ('C4', 'unregistered', '2')]:
+            self.fleet.events.append(dict(event_id=digit*64, kind='container.received_at_intake',
+                observation_ref='obs-' + digit, object_ref=cargo, identity='observed', intake_point='belt',
+                observed_at=timezone.now().isoformat(), intake_occurrence_id=occurrence))
+        intake_loop.tick(self.registry, now=timezone.now())
+        self.assertEqual(IntakeOccurrence.objects.get(pk='scheduled').order_id, first.pk)
+        self.assertEqual(IntakeOccurrence.objects.get(pk='unregistered').status, 'CARGO_UNKNOWN')
+        self.assertFalse(Cargo.objects.filter(code='C4').exists())
+        registered = services.register_cargo(self.user, code='C4', name='C4', weight_kg=7, volume_m3=1,
+            shipper_name='시험 화주', shipper_tier=2, tag_value='C4-test-tag', destination='Busan', length_cells=3,
+            color='orange', color_confirmed=False)
+        intake_loop.tick(self.registry, now=timezone.now())
+        original = IntakeOccurrence.objects.get(pk='unregistered').order
+        repeat = dict(kind='container.received_at_intake', object_ref='C4', identity='observed',
+                      intake_point='belt', event_id='3'*64, observation_ref='obs-3',
+                      intake_occurrence_id='repeat-C4', observed_at=timezone.now().isoformat())
+        self.fleet.events.append(repeat)
+        intake_loop.tick(self.registry, now=timezone.now())
+        intake_loop.tick(self.registry, now=timezone.now())
+        latest = IntakeOccurrence.objects.get(pk='repeat-C4').order
+        self.assertNotEqual(original.pk, latest.pk)
+        self.assertEqual((original.cargo_id, latest.cargo_id), (registered.pk, registered.pk))
+        self.assertEqual((original.priority_group, latest.priority_group), (2, 2))
+        self.assertEqual((latest.cargo.shipper_name, latest.cargo.destination, latest.cargo.weight_kg),
+                         ('시험 화주', 'Busan', 7))
+        self.assertEqual(CargoTag.objects.get(tag_value='C4-test-tag').cargo_id, registered.pk)
+        self.assertEqual(Order.objects.count(), 3)
+        self.assertEqual((latest.cargo.current_commercial.color, latest.cargo.current_commercial.color_confirmed),
+                         ('orange', False))
+        page = self.client.get('/inventory/')
+        self.assertContains(page, '주황')
+        self.assertContains(page, '색 확인 전')
+        self.assertContains(page, '시험 화주')
+        self.assertContains(page, f'/cargo/{registered.pk}/history/')
+        self.assertContains(page, f'/cargo/{registered.pk}/commercial/')
+        self.assertContains(page, f'/requests/{latest.pk}/contents/')
+        self.assertContains(page, f'/requests/{original.pk}/contents/')
+        profile_url = f'/cargo/{registered.pk}/commercial/'
+        response = self.client.post(profile_url, dict(expected_revision=0, nominal_length_ft=40,
+            container_type='냉장', color='sky', color_confirmed='on'))
+        self.assertEqual(response.status_code, 302)
+        from harbor_web.commercial import goods_digest
+        for order, contents in ((original, '첫 입고 바나나'), (latest, '둘째 입고 사과')):
+            response = self.client.post(f'/requests/{order.pk}/contents/',
+                dict(expected_digest=goods_digest(''), goods_contents=contents))
+            self.assertEqual(response.status_code, 302)
+        intake_loop.tick(self.registry, now=timezone.now())
+        rows = self.client.get('/inventory/').context['intake_occurrences']
+        indexed = {row['receipt'].pk: row for row in rows}
+        self.assertEqual(indexed['unregistered']['receipt'].order.goods_contents, '첫 입고 바나나')
+        self.assertEqual(indexed['repeat-C4']['receipt'].order.goods_contents, '둘째 입고 사과')
+        page = self.client.get('/inventory/')
+        for label in ('첫 입고 바나나', '둘째 입고 사과', '40 ft', '냉장', '하늘', '색 확인됨'):
+            self.assertContains(page, label)
+        field = User.objects.create_user('field-reader')
+        field.groups.add(Group.objects.get_or_create(name='field')[0])
+        self.client.force_login(field)
+        field_page = self.client.get('/inventory/')
+        self.assertContains(field_page, 'repeat-C4')
+        self.assertNotContains(field_page, '둘째 입고 사과')
+        self.assertNotContains(field_page, profile_url)
+
     def test_day1_empty_map_stored_event_projects_and_renders_on_inventory(self):
         ev_id = 'a' * 64
         self._expect_stored('C1', 'yard-r1-c1-l1', ev_id)
