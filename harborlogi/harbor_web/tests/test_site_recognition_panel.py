@@ -117,8 +117,16 @@ class SiteRecognitionPanelTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(mock_read.call_count, 1)
         html = resp.content.decode('utf-8')
-        self.assertContains(resp, 'ROSY 인식 · 14:02 · omx_overhead · 37자리 중 1자리')
-        self.assertContains(resp, '일치 1자리')
+        self.assertEqual(
+            resp.context['site_recognition']['summary_line'],
+            'ROSY 인식 · 14:02 · omx_overhead · 37자리 중 1자리',
+        )
+        self.assertEqual(resp.context['site_recognition']['match_count'], 1)
+        self.assertEqual(resp.context['site_recognition']['mismatch_count'], 0)
+        # All recognized sites match: panel is hidden on /inventory/.
+        self.assertNotContains(resp, 'id="site-recognition"')
+        self.assertNotContains(resp, 'data-site-recognition')
+        self.assertTemplateNotUsed(resp, 'site_recognition_panel.html')
         self.assertNotContains(resp, 'secret-service-token')
         self.assertIsNone(re.search(r'\sstyle=', html))
         _assert_glossary_clean(self, html)
@@ -129,7 +137,9 @@ class SiteRecognitionPanelTests(TestCase):
             resp_off = self.client.get('/inventory/')
         self.assertEqual(resp_off.status_code, 200)
         mock_read_off.assert_not_called()
-        self.assertContains(resp_off, 'ROSY 인식 연동 전')
+        self.assertEqual(resp_off.context['site_recognition']['status'], 'ROSY 인식 연동 전')
+        self.assertNotContains(resp_off, 'id="site-recognition"')
+        self.assertNotContains(resp_off, 'ROSY 인식 연동 전')
 
     def test_404_not_yet_observed_and_missing_api_messages(self):
         not_obs = HTTPError(
@@ -143,7 +153,9 @@ class SiteRecognitionPanelTests(TestCase):
                 patch('harbor.rosy_http.RosyClient.site_recognition', side_effect=not_obs):
             resp = self.client.get('/inventory/')
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'ROSY 인식 스냅샷 수신 대기')
+        self.assertEqual(resp.context['site_recognition']['status'], 'ROSY 인식 스냅샷 수신 대기')
+        self.assertNotContains(resp, 'id="site-recognition"')
+        self.assertNotContains(resp, 'ROSY 인식 스냅샷 수신 대기')
         _assert_glossary_clean(self, resp.content.decode('utf-8'))
 
         clear_site_recognition_cache()
@@ -158,7 +170,9 @@ class SiteRecognitionPanelTests(TestCase):
                 patch('harbor.rosy_http.RosyClient.site_recognition', side_effect=missing_api):
             resp2 = self.client.get('/inventory/')
         self.assertEqual(resp2.status_code, 200)
-        self.assertContains(resp2, 'ROSY에 아직 인식 API 없음')
+        self.assertEqual(resp2.context['site_recognition']['status'], 'ROSY에 아직 인식 API 없음')
+        self.assertNotContains(resp2, 'id="site-recognition"')
+        self.assertNotContains(resp2, 'ROSY에 아직 인식 API 없음')
         _assert_glossary_clean(self, resp2.content.decode('utf-8'))
 
     def test_cache_calls_rosy_once_across_two_gets_and_keys_by_token_and_ttl(self):
@@ -269,7 +283,9 @@ class SiteRecognitionPanelTests(TestCase):
         self.assertEqual(inv.status_code, 200)
         self.assertEqual(alerts.status_code, 200)
         self.assertEqual(seen_timeouts, [2])
-        self.assertContains(inv, 'ROSY 인식 연결 오류')
+        self.assertEqual(inv.context['site_recognition']['status'], 'ROSY 인식 연결 오류')
+        self.assertNotContains(inv, 'id="site-recognition"')
+        self.assertNotContains(inv, 'ROSY 인식 연결 오류')
         self.assertEqual([a for a in alerts.context['alerts'] if a['kind'] == '인식 불일치'], [])
 
 
