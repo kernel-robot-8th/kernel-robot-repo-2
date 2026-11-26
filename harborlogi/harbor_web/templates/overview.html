@@ -52,6 +52,7 @@
               <span class="board-job-label">지금</span>
               {% if board.current_job %}
                 <div class="board-job-head">{% if board.current_job.href %}<a class="board-job-title" href="{{ board.current_job.href }}">{{ board.current_job.title }}</a>{% else %}<strong class="board-job-title">{{ board.current_job.title }}</strong>{% endif %}</div>
+                {% if board.current_job.eta_text %}<span class="board-job-eta{% if board.current_job.eta_late %} is-late{% endif %}">{{ board.current_job.eta_text }}</span>{% endif %}
                 <span class="board-pill tone-{{ board.current_job.tone }}">{{ board.current_job.state }}</span>
                 {% if board.current_job.source and board.current_job.destination %}<p class="board-job-route">{% if board.current_job.cargo %}<span class="board-job-cargo">{{ board.current_job.cargo }}</span> · {% endif %}{{ board.current_job.source }} → {{ board.current_job.destination }}{% if board.current_job.arm %} · 팔 {{ board.current_job.arm }}{% endif %}</p>{% elif board.current_job.arm %}<p class="board-job-meta">팔 {{ board.current_job.arm }}</p>{% endif %}
               {% else %}
@@ -63,6 +64,7 @@
               <span class="board-job-label">다음 {{ forloop.counter }}</span>
               <span class="chip">{{ job.kind_label }}</span>
               {% if job.href %}<a class="board-next-title" href="{{ job.href }}">{{ job.title }}</a>{% else %}<strong class="board-next-title">{{ job.title }}</strong>{% endif %}
+              {% if job.eta_text %}<span class="board-job-eta{% if job.eta_late %} is-late{% endif %}">{{ job.eta_text }}</span>{% endif %}
               <span class="board-pill tone-{{ job.tone }}">{{ job.state }}</span>
               {% if job.route_text or job.arm %}<p class="board-job-route">{{ job.route_text }}{% if job.arm %}{% if job.route_text %} · {% endif %}팔 {{ job.arm }}{% endif %}</p>{% endif %}
             </li>

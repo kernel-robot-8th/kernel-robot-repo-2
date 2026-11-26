@@ -18,6 +18,8 @@ from harbor_web.order_queue import (
     _closed_sequence_top,
     open_outbound_orders,
     open_schedule_orders,
+    parse_entries,
+    parse_lanes,
     running_order_ids,
     tier_of,
 )
@@ -25,7 +27,6 @@ from harbor_web.page_helpers import selected_observation
 from harbor_web.plan_service import DECIDE_ACTION, _outbound_schedule
 from harbor_web.presentation import reason_text
 from harbor_web.site_config import spatial_policy, spatial_snapshot
-from harbor_web.views import parse_entries, parse_lanes
 from harbor_web.yard_rows import place_context, placement_text
 
 _SHORT_HOLD_REASONS = {

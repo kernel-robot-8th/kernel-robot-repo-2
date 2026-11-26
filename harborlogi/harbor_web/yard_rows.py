@@ -123,9 +123,10 @@ def place_context(payload):
                             frozenset(a['area_id'] for a in areas if a['levels'] == 1))
 
 
-def _spatial(observation, targets, rehandles):
+def _spatial(observation, targets, rehandles, *, snapshot=None):
     payload = observation.condition.payload
-    return rows_from_snapshot(services.spatial_snapshot(observation), labels=_labels(payload),
+    resolved = snapshot if snapshot is not None else services.spatial_snapshot(observation)
+    return rows_from_snapshot(resolved, labels=_labels(payload),
                               temporary=payload['temporary_bays'], outbound=_outbound_areas(payload), targets=targets,
                               rehandles=rehandles, presentation=area_presentation(payload), slot=slot_size(payload),
                               transpose=bool(payload.get('slot_cells')))
@@ -152,9 +153,9 @@ def slot_map_from_stage(stage, payload):
                      transpose=bool(payload.get('slot_cells')))
 
 
-def _bays(observation, targets, rehandles):
+def _bays(observation, targets, rehandles, *, snapshot=None):
     """Older bay observations have no grid: each bay is one lane with one slot, bottom to top."""
-    snapshot = services.snapshot(observation)
+    snapshot = snapshot if snapshot is not None else services.snapshot(observation)
     policy = observation.condition.payload
     temporary, outbound = set(policy['temporary_bays']), _outbound_areas(policy)
 
@@ -176,13 +177,13 @@ def _bays(observation, targets, rehandles):
     return dict(yard=yard, left=[], right=[], below=below, dimensions=f'적재 자리 {len(lanes)}곳')
 
 
-def yard_rows(observation, *, targets=(), rehandles=()):
+def yard_rows(observation, *, targets=(), rehandles=(), snapshot=None):
     """None without an observation. ``targets``/``rehandles`` only mark cargo; they come from stored plans."""
     if observation is None:
         return None
     if observation.payload.get('schema') == 'grid-placement-v1':
-        return _spatial(observation, set(targets), set(rehandles) - set(targets))
-    return _bays(observation, set(targets), set(rehandles) - set(targets))
+        return _spatial(observation, set(targets), set(rehandles) - set(targets), snapshot=snapshot)
+    return _bays(observation, set(targets), set(rehandles) - set(targets), snapshot=snapshot)
 
 
 def slot_key(placement, slot=DEFAULT_SLOT):

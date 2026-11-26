@@ -38,6 +38,9 @@ export function readCardData(li) {
     shipper: li.dataset.shipper || '',
     voyage: li.dataset.voyage || '',
     cutoff: li.dataset.cutoff || '',
+    cutoffIso: li.dataset.cutoffIso || '',
+    eta: li.dataset.eta || '',
+    etaLate: li.dataset.etaLate === '1',
     planSummary: li.dataset.planSummary || '',
     href: li.dataset.href || '',
     node: li,
@@ -47,6 +50,7 @@ export function readCardData(li) {
 export function createPopoverController(board, options = {}) {
   const getControls = options.getControls || null;
   const getPlanSummary = options.getPlanSummary || null;
+  const getEta = options.getEta || null;
   const onChange = options.onChange || null;
 
   let openCardId = null;
@@ -106,13 +110,19 @@ export function createPopoverController(board, options = {}) {
     }
     const data = readCardData(li);
     const rows = [];
-    const addRow = (label, value) => {
+    const addRow = (label, value, ddClass = null) => {
       if (!value) return;
       rows.push(createEl('dt', {text: label}));
-      rows.push(createEl('dd', {text: value}));
+      rows.push(createEl('dd', {class: ddClass, text: value}));
     };
     addRow('상태', data.state);
     if (data.time) addRow('완료 시각', data.time);
+    if (!data.done) {
+      const etaInfo = getEta ? getEta(data) : {etaText: data.eta, late: data.etaLate};
+      if (etaInfo?.etaText) {
+        addRow('시각', etaInfo.etaText, etaInfo.late ? 'wf-eta-late' : null);
+      }
+    }
     addRow('우선 단계', data.done ? data.tierName : (TIER_NAMES.get(data.tier) || data.tierName));
     addRow('화주', data.shipper);
     addRow('항차', data.voyage);

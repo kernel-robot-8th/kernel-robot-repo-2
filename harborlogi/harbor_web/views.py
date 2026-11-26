@@ -8,6 +8,7 @@ from django.views.decorators.http import require_http_methods
 from harbor_web import forms, services
 from harbor_web.auth import has_role, require_roles
 from harbor_web.cargo_history import cargo_history as build_history
+from harbor_web.order_queue import parse_entries, parse_lanes
 from harbor_web.order_timeline import order_timeline as build_timeline
 from harbor_web.page_helpers import form_error, form_page, page, paginate, selected_observation
 from harbor_web.topview_proxy import topview_context
@@ -260,31 +261,6 @@ def outbound_queue(request):
                 observation=observation, lanes=lanes, schedule_proposal=schedule_proposal, **pagination)
 
 
-def parse_entries(members):
-    """Read ``12:3,14:1`` (order id : expected version); an empty string is an empty tier; None when malformed."""
-    orders = []
-    for item in members.split(',') if members else []:
-        order_id, _, version = item.partition(':')
-        if not (order_id.isascii() and order_id.isdigit() and version.isascii() and version.isdigit()):
-            return None
-        orders.append((int(order_id), int(version)))
-    return orders
-
-
-def parse_lanes(values):
-    """Read ``FIXED|12:3,14:1`` lane fields; None when any part is malformed."""
-    lanes = []
-    for value in values:
-        policy, _, members = value.partition('|')
-        if policy not in {'FIXED', 'ANY'}:
-            return None
-        orders = parse_entries(members)
-        if orders is None:
-            return None
-        lanes.append(dict(fixed=policy == 'FIXED', orders=orders))
-    return lanes or None
-
-
 @require_roles('operator')
 @require_http_methods(['POST'])
 def outbound_reorder(request):
@@ -484,11 +460,14 @@ def inventory(request):
                     place=f"{cell['row']}행 {cell['column']}열 {level}층") for cell in cells)
     placement_rows = [dict(cargo=item['cargo_id'], place=placement_text(item, labels, slot))
                       for item in (selected.payload.get('placements', []) if selected else [])]
+    from harbor_web.camera_map_view import camera_map_context
     from harbor_web.site_places_view import site_places_context
     from harbor_web.site_recognition_view import site_recognition_context
     from harbor_web.yard_pages import yard_page_context
     from harbor_web.intake_occurrences import inventory_occurrences
-    return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices, topview=topview_context(request),
+    topview = topview_context(request)
+    return page(request, 'inventory.html', section='inventory', observation=selected, observations=choices, topview=topview,
+                camera_map=camera_map_context(scene=scene, topview=topview),
                 intake_occurrences=inventory_occurrences(), incomplete_yard=incomplete,
                 can_read_commercial=has_role(request.user, 'viewer', 'operator', 'admin'),
                 site_recognition=site_recognition_context(

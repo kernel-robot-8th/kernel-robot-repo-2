@@ -188,11 +188,25 @@
 }
 .board-job-head,
 .board-next-title {
-  flex: 1;
-  min-width: 0;
+  flex: 1 0 auto;
+  max-width: 100%;
 }
 .board-job-list .board-pill {
   margin-left: auto;
+}
+.board-job-eta {
+  font-size: var(--primitive-font-caption);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--primitive-font-strong);
+  color: var(--semantic-text-secondary);
+  white-space: nowrap;
+}
+.board-job-eta.is-late {
+  padding: var(--primitive-space-1) var(--primitive-space-2);
+  border-radius: var(--primitive-radius-small);
+  background: var(--semantic-status-danger-background);
+  color: var(--semantic-status-danger-foreground);
+  font-weight: var(--primitive-font-bold);
 }
 .board-next-item .board-job-label {
   font-size: var(--primitive-font-caption);
@@ -245,7 +259,7 @@
 @media (min-width: 1280px) {
   .yard-topview.board-even,
   .board-even .yard-topview {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(15rem, 18rem);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(17rem, 20rem);
     grid-template-areas: "yard topview jobs";
   }
 }

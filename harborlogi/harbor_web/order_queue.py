@@ -270,6 +270,31 @@ def open_schedule_orders():
     return Order.objects.filter(kind__in=('OUTBOUND', 'INBOUND')).exclude(pk__in=completed_order_ids())
 
 
+def parse_entries(members):
+    """Read ``12:3,14:1`` (order id : expected version); an empty string is an empty tier; None when malformed."""
+    orders = []
+    for item in members.split(',') if members else []:
+        order_id, _, version = item.partition(':')
+        if not (order_id.isascii() and order_id.isdigit() and version.isascii() and version.isdigit()):
+            return None
+        orders.append((int(order_id), int(version)))
+    return orders
+
+
+def parse_lanes(values):
+    """Read ``FIXED|12:3,14:1`` lane fields; None when any part is malformed."""
+    lanes = []
+    for value in values:
+        policy, _, members = value.partition('|')
+        if policy not in {'FIXED', 'ANY'}:
+            return None
+        orders = parse_entries(members)
+        if orders is None:
+            return None
+        lanes.append(dict(fixed=policy == 'FIXED', orders=orders))
+    return lanes or None
+
+
 def queue_digest():
     # REARRANGE orders are not queue entries: they must not invalidate other plans.
     rows = list(Order.objects.exclude(kind='REARRANGE').order_by('pk').values('id', 'cargo_id', 'kind', 'priority_group', 'sequence', 'tie_policy', 'note', 'version'))

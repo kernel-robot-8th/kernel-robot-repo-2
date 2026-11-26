@@ -2,13 +2,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import {
+  DEFAULT_CAMERA_VIEW,
   DEFAULT_FIT_PADDING,
+  VIEW_DIRECTIONS,
   badgeColorsForBox,
   computeFitDistance,
   formatBoxInfo,
+  isTopOfStack,
   layoutNameplates,
   resolveContainerBodyColor,
   resolvePriorityTier,
+  topNameplateSpec,
 } from '../harbor_web/static/harbor_web/yard-visuals.mjs';
 
 const palette = {
@@ -179,4 +183,43 @@ test('formatBoxInfo appends color confirmation status, tier, shipper, destinatio
     {where: '3행 1열 2층', rehandle: false},
   );
   assert.ok(unconfirmed.includes('하늘(색 확인 전)'));
+});
+
+test('yard 3D defaults to front view and places flat nameplates on top-of-stack container roofs along length', () => {
+  assert.equal(DEFAULT_CAMERA_VIEW, 'front');
+  assert.equal(VIEW_DIRECTIONS.front.x, 0);
+  assert.ok(VIEW_DIRECTIONS.front.y > 0 && VIEW_DIRECTIONS.front.z > 0);
+  assert.ok(VIEW_DIRECTIONS.iso.x !== 0);
+  assert.ok(VIEW_DIRECTIONS.top.y > VIEW_DIRECTIONS.top.z);
+
+  const stack = [
+    {id: 'C-1', x: 0, y: 0, z: 0, width: 1, depth: 3},
+    {id: 'C-2', x: 0, y: 0, z: 1, width: 1, depth: 3},
+    {id: 'C-9', x: 0, y: 0, z: 2, width: 1, depth: 3},
+    {id: 'C-10', x: 1, y: 0, z: 0, width: 3, depth: 1},
+  ];
+  assert.equal(isTopOfStack(stack[0], stack), false);
+  assert.equal(isTopOfStack(stack[1], stack), false);
+  assert.equal(isTopOfStack(stack[2], stack), true);
+  assert.equal(isTopOfStack(stack[3], stack), true);
+
+  // Transposed 1x3 top container: flat on roof (rotX=-PI/2), lengthwise along Z (rotZ=PI/2), visible.
+  const topSpec = topNameplateSpec(stack[2], stack);
+  assert.equal(topSpec.visible, true);
+  assert.equal(topSpec.rotX, -Math.PI / 2);
+  assert.equal(topSpec.rotZ, Math.PI / 2);
+  assert.equal(topSpec.longAxis, 'z');
+  assert.ok(topSpec.y > 0.85 && topSpec.y < 0.92);
+  assert.ok(topSpec.length > topSpec.width);
+
+  // Buried containers hide their top nameplate.
+  assert.equal(topNameplateSpec(stack[0], stack).visible, false);
+  assert.equal(topNameplateSpec(stack[1], stack).visible, false);
+
+  // Horizontal 3x1 top container: flat on roof, lengthwise along X (rotZ=0).
+  const horizSpec = topNameplateSpec(stack[3], stack);
+  assert.equal(horizSpec.visible, true);
+  assert.equal(horizSpec.rotX, -Math.PI / 2);
+  assert.equal(horizSpec.rotZ, 0);
+  assert.equal(horizSpec.longAxis, 'x');
 });

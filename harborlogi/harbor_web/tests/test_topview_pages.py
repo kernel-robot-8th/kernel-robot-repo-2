@@ -31,11 +31,10 @@ class TopviewPagesTests(TestCase):
         self.reader.sources.return_value = {'sources': ['cam-one', 'cam-two']}
 
     def pages(self):
-        for path in ('/', '/inventory/'):
-            response = self.client.get(path)
-            self.assertEqual(response.status_code, 200)
-            self.assertContains(response, 'ROSY 탑뷰', count=1)
-            yield response
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'ROSY 탑뷰', count=1)
+        yield response
 
     def test_missing_settings_are_visible_even_without_yard_observation(self):
         for key, status in (('HARBOR_FLEET_ORIGIN', 'ROSY 연동 전'), ('HARBOR_FLEET_TOKEN', 'ROSY 로그인 필요')):
@@ -116,7 +115,8 @@ class TopviewPagesTests(TestCase):
         self.reader.sources.assert_not_called()
         inventory_response = self.client.get('/inventory/')
         self.assertEqual(inventory_response.status_code, 200)
-        self.assertContains(inventory_response, 'ROSY 탑뷰', count=1)
+        self.assertContains(inventory_response, '카메라 ↔ 3D 위치 매핑', count=1)
+        self.assertNotContains(inventory_response, 'ROSY 탑뷰')
 
     def test_board_default_camera_follows_running_job_without_extra_queries(self):
         from harbor_web import services

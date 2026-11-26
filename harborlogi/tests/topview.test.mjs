@@ -7,6 +7,7 @@ import {
   resolveRotationDeg,
   displayRotationDeg,
   projectPoint,
+  projectPolygon,
   projectRoi,
   shouldShowOverlay,
   buildOverlayItems,
@@ -559,3 +560,31 @@ assert.equal(displayRotationDeg('0', 'omx_arm_s_top'), 0);
   assert.deepEqual(items.pending.map(p => p.site), ['belt-in']);
 }
 console.log('Arm S tests passed');
+
+// Polygon projection with 0° and 180° rotation and scaling.
+{
+  const quad = [[520, 380], [560, 370], [600, 470], [550, 480]];
+  const p0 = projectPolygon(quad, [640, 480], [320, 240], 0);
+  assert.equal(p0.points.length, 4);
+  assert.deepEqual(p0.points[0], {x: 260, y: 190});
+  assert.deepEqual(p0.points[2], {x: 300, y: 235});
+
+  const p180 = projectPolygon(quad, [640, 480], [320, 240], 180);
+  assert.deepEqual(p180.points[0], {x: 60, y: 50});
+  assert.deepEqual(p180.points[2], {x: 20, y: 5});
+  assert.equal(p180.cx, (60 + 40 + 20 + 45) / 4);
+  assert.equal(p180.cy, (50 + 55 + 5 + 0) / 4);
+  assert.equal(p180.pointsAttr, '60.0,50.0 40.0,55.0 20.0,5.0 45.0,0.0');
+
+  const doc = {
+    image: [640, 480],
+    points: [
+      {site: 'temp_a:r1-s1', label: '임시 A 1레인', short_label: 'A1', zone: 'temp_a', kind: 'slot', roi: null, polygon: quad},
+    ],
+  };
+  const items = buildOverlayItems(doc, [320, 240], 180);
+  assert.equal(items.slots.length, 1);
+  assert.equal(items.pending.length, 0);
+  assert.equal(items.slots[0].polygon.pointsAttr, p180.pointsAttr);
+}
+console.log('Polygon projection tests passed');

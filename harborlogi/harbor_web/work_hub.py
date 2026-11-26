@@ -1,4 +1,6 @@
 """Read-only work hub built from registered orders and saved execution records."""
+from datetime import timedelta
+
 from django.core.exceptions import ValidationError
 from django.db.models import CharField, Exists, OuterRef, Q, Subquery
 from django.db.models.functions import Cast
@@ -11,54 +13,105 @@ from harbor_web.presentation import reason_text
 from harbor_web.rearrangement import current_authorization
 from harbor_web.page_helpers import page
 from harbor_web.reorder_validate import _latest_footprints, _simulate_orders, short_hold_reason
-from harbor_web.site_config import spatial_policy, spatial_snapshot
+from harbor_web.site_config import move_seconds_estimate, spatial_policy, spatial_snapshot
 from harbor_web.work_state import work_state, shown_state
 from harbor_web.yard_rows import place_context, placement_text
 
 SIMULATION_LIMIT = 8
+_OBSERVATION_UNSET = object()
 
 
-def _apply_schedule_simulation(schedule, *, now):
+def format_eta(eta_at):
+    if eta_at is None:
+        return '—'
+    return timezone.localtime(eta_at).strftime('%H:%M')
+
+
+_format_eta = format_eta
+
+
+def _apply_schedule_etas(schedule, *, base_time, move_seconds, step_moves_by_id):
+    """Attach per-task ETA and cutoff overrun flag using already-computed move counts (no DB writes)."""
+    for row in schedule:
+        row['eta_at'] = None
+        row['eta_text'] = format_eta(None)
+        row['eta_iso'] = ''
+        row['eta_late'] = False
+    ordered = sorted(schedule, key=lambda row: row['state'] != '진행 중')[:SIMULATION_LIMIT]
+    cumulative_moves = 0
+    for row in ordered:
+        if row.get('sim_status') != 'READY':
+            continue
+        eta_at = base_time + timedelta(seconds=cumulative_moves * move_seconds)
+        row['eta_at'] = eta_at
+        row['eta_text'] = format_eta(eta_at)
+        row['eta_iso'] = timezone.localtime(eta_at).isoformat()
+        cutoff = row['order'].cutoff_at
+        row['eta_late'] = bool(cutoff is not None and eta_at > cutoff)
+        cumulative_moves += step_moves_by_id.get(row['order'].pk, 0)
+
+
+def _apply_schedule_simulation(
+    schedule,
+    *,
+    now,
+    base_time,
+    observation=_OBSERVATION_UNSET,
+    snapshot=None,
+    outbound_ranks=None,
+    reservation_entries=None,
+):
     """Simulate the first SIMULATION_LIMIT pending schedule entries in memory without writing to DB."""
+    move_sec = move_seconds_estimate()
     for row in schedule:
         row['card_place'] = row['place']
         row['card_place_kind'] = 'place' if row['place'] else ''
         row['sim_status'] = None
+        row['eta_at'] = None
+        row['eta_text'] = format_eta(None)
+        row['eta_iso'] = ''
+        row['eta_late'] = False
     if not schedule:
-        return
-    observation = Observation.objects.select_related('condition').order_by('-pk').first()
+        return move_sec
+    if observation is _OBSERVATION_UNSET:
+        observation = Observation.objects.select_related('condition').order_by('-pk').first()
     if observation is None or not isinstance(observation.payload, dict) or observation.payload.get('schema') != 'grid-placement-v1':
-        return
+        return move_sec
+    move_sec = move_seconds_estimate(observation.condition.payload)
     try:
-        snapshot = spatial_snapshot(observation)
+        resolved_snapshot = snapshot if snapshot is not None else spatial_snapshot(observation)
         policy = spatial_policy(observation.condition.payload)
     except (ValueError, ValidationError):
-        return
-    window = schedule[:SIMULATION_LIMIT]
+        return move_sec
+    ordered_schedule = sorted(schedule, key=lambda row: row['state'] != '진행 중')
+    window = ordered_schedule[:SIMULATION_LIMIT]
     window_orders = [row['order'] for row in window]
     inbound_orders = [order for order in window_orders if order.kind == 'INBOUND']
     footprints = _latest_footprints(inbound_orders)
-    outbound_ranks = _outbound_schedule()
+    ranks = _outbound_schedule() if outbound_ranks is None else outbound_ranks
     try:
         result = _simulate_orders(
-            snapshot,
+            resolved_snapshot,
             policy,
             window_orders,
             footprints=footprints,
             now=now,
-            schedule=outbound_ranks,
+            schedule=ranks,
             observation=observation,
+            reservation_entries=reservation_entries,
         )
     except (ValueError, ValidationError):
-        return
+        return move_sec
     step_by_id = {item['id']: item for item in result['items']}
     missing_codes = set(result['missing'])
+    step_moves_by_id = {}
     for row in window:
         order = row['order']
         step = step_by_id.get(order.pk)
         if step is not None:
             if step['ok']:
                 row['sim_status'] = 'READY'
+                step_moves_by_id[order.pk] = (step['moves'] or 1) if order.kind == 'INBOUND' else step['moves']
                 if order.kind == 'INBOUND':
                     row['card_place'] = step['place']
                     row['card_place_kind'] = 'place'
@@ -101,11 +154,54 @@ def _apply_schedule_simulation(schedule, *, now):
             row['card_place'] = '계산 전'
             row['card_place_kind'] = 'uncomputed'
             row['plan_summary'] = '계산 전'
-    for row in schedule[SIMULATION_LIMIT:]:
+    for row in ordered_schedule[SIMULATION_LIMIT:]:
         row['sim_status'] = 'UNCOMPUTED'
         row['card_place'] = '계산 전'
         row['card_place_kind'] = 'uncomputed'
         row['plan_summary'] = '계산 전'
+    _apply_schedule_etas(schedule, base_time=base_time, move_seconds=move_sec, step_moves_by_id=step_moves_by_id)
+    return move_sec
+
+
+def schedule_etas_for_orders(
+    orders,
+    *,
+    observation,
+    now,
+    base_time,
+    running_order_id=None,
+    snapshot=None,
+    outbound_ranks=None,
+    reservation_entries=None,
+):
+    """Compute per-order ETAs reusing the work hub schedule simulation without DB writes."""
+    rows = [
+        dict(
+            order=order,
+            place=None,
+            state='진행 중' if (running_order_id is not None and order.pk == running_order_id) else '대기',
+        )
+        for order in orders
+        if order.kind in ('OUTBOUND', 'INBOUND')
+    ]
+    _apply_schedule_simulation(
+        rows,
+        now=now,
+        base_time=base_time,
+        observation=observation,
+        snapshot=snapshot,
+        outbound_ranks=outbound_ranks,
+        reservation_entries=reservation_entries,
+    )
+    return {
+        row['order'].pk: dict(
+            eta_at=row['eta_at'],
+            eta_text=row['eta_text'],
+            eta_iso=row['eta_iso'],
+            eta_late=row['eta_late'],
+        )
+        for row in rows
+    }
 
 
 def hub_context(*, now=None):
@@ -183,6 +279,7 @@ def hub_context(*, now=None):
             shipper=order.cargo.shipper_name if order.cargo_id else '',
             voyage=order.voyage_code,
             cutoff_text=timezone.localtime(order.cutoff_at).strftime('%m-%d %H:%M') if order.cutoff_at else '',
+            cutoff_iso=timezone.localtime(order.cutoff_at).isoformat() if order.cutoff_at else '',
             href=href)
         row['place'] = None
         if (order.kind == 'INBOUND' and plan and plan.order_version == order.version
@@ -222,10 +319,17 @@ def hub_context(*, now=None):
         next_row['is_next'] = True
     if past and upcoming and upcoming[0]['state'] == '대기':
         past[-1]['state'] = '완료 · 다음 작업 대기 중'
+    running_row = next((row for row in upcoming if row['state'] == '진행 중'), None)
+    if running_row is not None and running_row['command'] is not None:
+        eta_base = running_row['command'].created_at
+    elif running_row is not None and running_row['cell_plan_dispatch'] is not None:
+        eta_base = running_row['cell_plan_dispatch'].created_at
+    else:
+        eta_base = now
     schedule = [row for row in pending if row['order'].kind in ('OUTBOUND', 'INBOUND')]
     for idx, row in enumerate(schedule, start=1):
         row['seq_num'] = idx
-    _apply_schedule_simulation(schedule, now=now)
+    move_sec = _apply_schedule_simulation(schedule, now=now, base_time=eta_base)
     schedule_tiers = [
         dict(group=group, name=name, rows=[row for row in schedule if row['tier'] == group])
         for group, name in TIERS
@@ -234,6 +338,8 @@ def hub_context(*, now=None):
         done_rows=past,
         schedule=schedule,
         schedule_tiers=schedule_tiers,
+        eta_base_iso=timezone.localtime(eta_base).isoformat(),
+        move_seconds_estimate=int(move_sec) if float(move_sec).is_integer() else move_sec,
         outbound=[row for row in pending if row['order'].kind == 'OUTBOUND'],
         inbound=[row for row in pending if row['order'].kind == 'INBOUND'],
         rearrangements=[row for row in pending if row['order'].kind == 'REARRANGE'],

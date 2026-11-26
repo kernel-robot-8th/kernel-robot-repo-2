@@ -1,0 +1,157 @@
+{
+  "schema": "harbor.site-3d-layout.v1",
+  "status": "planned_unverified",
+  "plane": {
+    "x_min": -1.37,
+    "x_max": 1.37,
+    "y_min": -0.76,
+    "y_max": 0.76,
+    "pixels_per_meter": 400,
+    "image": [1096, 608]
+  },
+  "tier_height_m": 0.04,
+  "arms": {
+    "arm_a": [0.55, 0.36],
+    "arm_b": [0.96, 0.37],
+    "arm_s": [0.96, -0.04]
+  },
+  "stops": {
+    "S1": [-0.67, -0.14],
+    "S2": [0.31, -0.13],
+    "S4": [0.16, -0.47],
+    "S5": [0.9, -0.48],
+    "J_in": [0.31, -0.25],
+    "J_out": [-0.67, -0.25]
+  },
+  "vehicle": {
+    "id": "rosy_42",
+    "label": "Pinky",
+    "stop": "S3",
+    "xy": [0.72, -0.19]
+  },
+  "plates": {
+    "yard": {
+      "rows": [1, 2, 3],
+      "cols": [1, 4],
+      "tiers": 3,
+      "u_by_row": [853, 876, 899],
+      "v_by_slot": [78, 138],
+      "size_m": [0.052, 0.04, 0.13]
+    },
+    "temp_a": {
+      "rows": [1, 2, 3],
+      "cols": [1],
+      "tiers": 3,
+      "u_by_row": [795, 812, 829],
+      "v_by_slot": [112],
+      "size_m": [0.042, 0.04, 0.12]
+    },
+    "temp_b": {
+      "rows": [1, 2, 3],
+      "cols": [1],
+      "tiers": 3,
+      "u_by_row": [925, 942, 959],
+      "v_by_slot": [112],
+      "size_m": [0.042, 0.04, 0.12]
+    },
+    "stand": {
+      "rows": [1],
+      "cols": [1],
+      "tiers": 1,
+      "u_by_row": [812],
+      "v_by_slot": [262],
+      "size_m": [0.09, 0.04, 0.14]
+    }
+  },
+  "conveyor": {
+    "body_uv": [872, 272],
+    "body_y_m": 0.02,
+    "body_size_m": [0.07, 0.03, 0.36],
+    "belt": {
+      "uv": [872, 205],
+      "size_m": [0.05, 0.05, 0.05]
+    },
+    "belt-in": {
+      "uv": [872, 340]
+    }
+  },
+  "zone_labels": [
+    {"zone": "yard", "label": "야드", "uv": [876, 60]},
+    {"zone": "temp_a", "label": "임시 판 A", "uv": [812, 60]},
+    {"zone": "temp_b", "label": "임시 판 B", "uv": [942, 60]},
+    {"zone": "stand", "label": "반출대", "uv": [812, 300]},
+    {"zone": "belt", "label": "컨베이어", "uv": [905, 272]}
+  ],
+  "overview": {
+    "pos": [0.5, 1.26, 1.36],
+    "target": [0.55, 0.08, -0.02],
+    "fov": 48
+  },
+  "cameras": {
+    "top": {
+      "name": "탑뷰",
+      "default_source_id": "omx_overhead",
+      "source_ids": ["top", "omx_overhead"],
+      "view_mode": "raw",
+      "flip": true,
+      "aspect": [4, 3],
+      "pose": {
+        "pos": [0.7975, 0.6149, -0.4175],
+        "target": [0.7975, 0.0, -0.4175],
+        "fov": 60,
+        "up": [0, 0, 1],
+        "view_up": [0, 0, -1],
+        "far": 0.6149
+      },
+      "tag_offset": [0.25, 0.05, 0.0]
+    },
+    "side": {
+      "name": "사이드뷰",
+      "default_source_id": "omx_side",
+      "source_ids": ["side", "omx_side"],
+      "view_mode": "raw",
+      "flip": false,
+      "aspect": [4, 3],
+      "pose": {
+        "pos": [0.82, 0.1, -0.99],
+        "target": [0.82, 0.05, -0.19],
+        "fov": 47,
+        "up": [0, 1, 0],
+        "far": 0.9
+      },
+      "tag_offset": [0.0, 0.08, 0.0]
+    },
+    "bird": {
+      "name": "버드뷰",
+      "default_source_id": "ceiling_north",
+      "source_ids": ["ceiling_north"],
+      "view_mode": "map",
+      "flip": false,
+      "aspect": [16, 9],
+      "pose": {
+        "pos": [0.0, 1.3164, 0.0],
+        "target": [0.0, 0.0, 0.0],
+        "fov": 60,
+        "up": [0, 0, -1],
+        "far": 1.32
+      },
+      "tag_offset": [0.0, 0.05, 0.0]
+    },
+    "arms": {
+      "name": "S암",
+      "default_source_id": "omx_arm_s_top",
+      "source_ids": ["arm_s_top", "omx_arm_s_top"],
+      "view_mode": "raw",
+      "flip": false,
+      "aspect": [4, 3],
+      "pose": {
+        "pos": [0.86, 0.6, 0.06],
+        "target": [0.86, 0.0, 0.06],
+        "fov": 60,
+        "up": [0, 0, -1],
+        "far": 0.6
+      },
+      "tag_offset": [0.0, 0.05, 0.12]
+    }
+  }
+}

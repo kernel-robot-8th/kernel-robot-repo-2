@@ -36,13 +36,52 @@ class TopviewSitePixelsTests(unittest.TestCase):
         all_refs = {ref for pt in loaded['points'] if pt['kind'] == 'slot' for ref in pt['wire_refs']}
         self.assertEqual(all_refs, canonical_cell_wire_refs())
 
-        # Every slot, both temp plates and the stand are in the deployed omx_overhead frame.
+        # Temp plates use 4-point fanned polygons; yard & stand use ROI boxes; belt uses pick point.
         for row in (1, 2, 3):
-            self.assertEqual(len(points_by_site[f'temp_a:r{row}-s1']['roi']), 4)
-            self.assertEqual(len(points_by_site[f'temp_b:r{row}-s1']['roi']), 4)
-        self.assertEqual(points_by_site['stand:r1-s1']['roi'], [412.0, 55.0, 518.0, 125.0])
+            self.assertEqual(len(points_by_site[f'temp_a:r{row}-s1']['polygon']), 4)
+            self.assertEqual(len(points_by_site[f'temp_b:r{row}-s1']['polygon']), 4)
+            self.assertIsNone(points_by_site[f'temp_a:r{row}-s1']['roi'])
+            self.assertIsNone(points_by_site[f'temp_b:r{row}-s1']['roi'])
+        self.assertEqual(points_by_site['stand:r1-s1']['roi'], [408.0, 60.0, 517.0, 134.0])
         self.assertEqual(points_by_site['belt']['kind'], 'pick')
-        self.assertEqual(points_by_site['belt']['point'], [311.0, 125.0])
+        self.assertEqual(points_by_site['belt']['point'], [310.0, 103.0])
+
+    def test_polygon_validation_accepts_canonical_quad_and_rejects_bad_polygons(self):
+        base = json.loads(DEFAULT_SITE_PIXELS_PATH.read_text(encoding='utf-8'))
+        doc = copy.deepcopy(base)
+        doc['points'] = [
+            {
+                'site': 'temp_a:r1-s1',
+                'label': '임시 A 1레인',
+                'wire_refs': ['temp_a-r1-c1-l1', 'temp_a-r1-c1-l2', 'temp_a-r1-c1-l3'],
+                'polygon': [[521, 376], [559, 370], [595, 476], [552, 479]],
+            },
+            {
+                'site': 'temp_a:r2-s1',
+                'label': '범위 밖 다각형',
+                'wire_refs': ['temp_a-r2-c1-l1', 'temp_a-r2-c1-l2', 'temp_a-r2-c1-l3'],
+                'polygon': [[468, 381], [700, 380], [528, 479], [476, 479]],
+            },
+            {
+                'site': 'temp_a:r3-s1',
+                'label': '일직선 다각형',
+                'wire_refs': ['temp_a-r3-c1-l1', 'temp_a-r3-c1-l2', 'temp_a-r3-c1-l3'],
+                'polygon': [[10, 10], [20, 20], [30, 30]],
+            },
+            {
+                'site': 'temp_x:r1-s1',
+                'label': '비정본 구역 다각형',
+                'wire_refs': ['temp_a-r1-c1-l1'],
+                'polygon': [[10, 10], [50, 10], [50, 50], [10, 50]],
+            },
+        ]
+        with self.assertLogs('harbor.topview_site_pixels', level='WARNING') as logs:
+            validated = validate_topview_site_pixels(doc)
+        self.assertEqual([pt['site'] for pt in validated['points']], ['temp_a:r1-s1'])
+        self.assertEqual(len(validated['points'][0]['polygon']), 4)
+        joined = '\n'.join(logs.output)
+        for bad_site in ('temp_a:r2-s1', 'temp_a:r3-s1', 'temp_x:r1-s1'):
+            self.assertIn(bad_site, joined)
 
     def test_non_canonical_sites_and_wire_refs_are_discarded_and_logged(self):
         base = json.loads(DEFAULT_SITE_PIXELS_PATH.read_text(encoding='utf-8'))
@@ -100,21 +139,53 @@ class TopviewSitePixelsTests(unittest.TestCase):
 
 
 class SideviewSitePixelsTests(unittest.TestCase):
-    def test_committed_side_config_lists_both_slots_of_each_tier_and_all_temp_lanes(self):
+    def test_committed_side_config_lists_yard_tiers_only_and_excludes_temp_plates(self):
         loaded = load_sideview_site_pixels()
         self.assertEqual((loaded['source_id'], loaded['image'], loaded['status']),
                          ('omx_side', [640, 480], 'planned_unverified'))
         self.assertTrue(loaded['reference_frame'])
         by_site = {pt['site']: pt for pt in loaded['points']}
-        self.assertEqual(len(by_site), 15)
+        self.assertEqual(len(by_site), 9)
+        self.assertTrue(all(pt['zone'] == 'yard' for pt in loaded['points']))
+        self.assertFalse(any(pt['zone'] in ('temp_a', 'temp_b') for pt in loaded['points']))
         self.assertEqual(by_site['side:yard-r2-t3']['wire_refs'], ['yard-r2-c1-l3', 'yard-r2-c4-l3'])
-        self.assertEqual(by_site['side:temp_b-t1']['wire_refs'],
-                         [f'temp_b-r{r}-c1-l1' for r in (1, 2, 3)])
+        # Bottom container (t1) sits higher in the frame than the old 375..460 range.
+        self.assertEqual(by_site['side:yard-r2-t1']['roi'][1:], [295.0, 312.0, 385.0])
+        self.assertEqual(by_site['side:yard-r2-t2']['roi'][1:], [210.0, 312.0, 295.0])
+        self.assertEqual(by_site['side:yard-r2-t3']['roi'][1:], [125.0, 312.0, 210.0])
         refs = {ref for pt in loaded['points'] for ref in pt['wire_refs']}
-        self.assertEqual(len(refs), 36)  # yard 18 + temp_a/b 18 (the stand is not visible)
+        self.assertEqual(len(refs), 18)  # yard 18 only (temp_a/temp_b excluded on side camera)
         self.assertTrue(refs < canonical_cell_wire_refs())
         self.assertTrue(all(pt['kind'] == 'tier' and len(pt['roi']) == 4 for pt in loaded['points']))
         self.assertEqual(DEFAULT_SIDE_PIXELS_PATH.name, 'sideview-site-pixels.json')
+
+    def test_side_temp_entries_are_excluded_by_loader(self):
+        doc = json.loads(DEFAULT_SIDE_PIXELS_PATH.read_text(encoding='utf-8'))
+        doc['points'].extend([
+            {
+                'site': 'side:temp_a-t1',
+                'label': '임시 A 1단',
+                'zone': 'temp_a',
+                'kind': 'tier',
+                'wire_refs': ['temp_a-r1-c1-l1', 'temp_a-r2-c1-l1', 'temp_a-r3-c1-l1'],
+                'roi': [490, 300, 572, 385],
+            },
+            {
+                'site': 'side:temp_b-t1',
+                'label': '임시 B 1단',
+                'zone': 'temp_b',
+                'kind': 'tier',
+                'wire_refs': ['temp_b-r1-c1-l1', 'temp_b-r2-c1-l1', 'temp_b-r3-c1-l1'],
+                'roi': [0, 300, 55, 385],
+            },
+        ])
+        with self.assertLogs('harbor.topview_site_pixels', level='WARNING') as logs:
+            validated = validate_topview_site_pixels(doc)
+        self.assertEqual(len(validated['points']), 9)
+        self.assertFalse(any(pt['zone'] in ('temp_a', 'temp_b') for pt in validated['points']))
+        joined = '\n'.join(logs.output)
+        self.assertIn('side:temp_a-t1', joined)
+        self.assertIn('side:temp_b-t1', joined)
 
     def test_invalid_side_wire_refs_are_dropped_and_logged(self):
         doc = json.loads(DEFAULT_SIDE_PIXELS_PATH.read_text(encoding='utf-8'))

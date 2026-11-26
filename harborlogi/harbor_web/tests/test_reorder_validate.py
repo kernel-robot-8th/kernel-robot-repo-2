@@ -777,3 +777,195 @@ class SeedScheduleValidateTests(TestCase):
         # C-8 must skip C-5's reserved slot '2행 2열 2층'
         self.assertNotEqual(by_code['C-8']['card_place'], reserved_label)
         self.assertEqual(by_code['C-8']['card_place'], '2행 3열 2층')
+
+    def test_schedule_and_yard_upcoming_show_eta_from_moves_and_cutoff_warning(self):
+        from datetime import datetime, timedelta, timezone as dt_timezone
+        import re
+        from harbor_web.site_config import DEFAULT_MOVE_SECONDS_ESTIMATE, MOVE_SECONDS_ESTIMATE_DESCRIPTION
+        from harbor_web.work_hub import SIMULATION_LIMIT
+
+        self.assertEqual(DEFAULT_MOVE_SECONDS_ESTIMATE, 60)
+        self.assertIn('실측 전 기본값', MOVE_SECONDS_ESTIMATE_DESCRIPTION)
+
+        obs = Observation.objects.select_related('condition').order_by('-pk').first()
+        base_now = obs.observed_at + timedelta(minutes=2)
+        Order.objects.filter(pk=Order.objects.order_by('priority_group', 'sequence', 'pk').first().pk).update(
+            cutoff_at=base_now + timedelta(hours=3),
+        )
+        # Set a tight cutoff on the 2nd task so cumulative moves push its ETA past cutoff_at.
+        ordered = list(Order.objects.filter(kind__in=('OUTBOUND', 'INBOUND')).order_by('priority_group', 'sequence', 'pk'))
+        first_order, second_order, third_order = ordered[0], ordered[1], ordered[2]
+        Order.objects.filter(pk=second_order.pk).update(cutoff_at=base_now + timedelta(seconds=30))
+        Order.objects.filter(pk=third_order.pk).update(cutoff_at=base_now + timedelta(hours=4))
+
+        before_counts = (Order.objects.count(), Plan.objects.count(), Command.objects.count(), Audit.objects.count())
+        with timezone.override('Asia/Seoul'), patch('django.utils.timezone.now', return_value=base_now):
+            board_resp = self.client.get('/')
+            work_resp = self.client.get('/work/')
+            yard_resp = self.client.get('/inventory/')
+
+        self.assertEqual((board_resp.status_code, work_resp.status_code, yard_resp.status_code), (200, 200, 200))
+        self.assertEqual(
+            (Order.objects.count(), Plan.objects.count(), Command.objects.count(), Audit.objects.count()),
+            before_counts,
+        )
+
+        schedule = work_resp.context['schedule']
+        self.assertEqual(len(schedule), 22)
+        expected_first_hm = timezone.localtime(base_now).strftime('%H:%M')
+        self.assertEqual(schedule[0]['eta_text'], expected_first_hm)
+        self.assertFalse(schedule[0]['eta_late'])
+        # 2nd task starts after 1st task's moves * 60s -> strictly later than +30s cutoff -> late warning.
+        self.assertGreater(schedule[1]['eta_at'], base_now)
+        self.assertTrue(schedule[1]['eta_late'])
+        self.assertFalse(schedule[2]['eta_late'])
+        # 9th onward (index >= 8) must display '—' and never late.
+        for row in schedule[SIMULATION_LIMIT:]:
+            self.assertEqual(row['eta_text'], '—')
+            self.assertFalse(row['eta_late'])
+
+        work_html = work_resp.content.decode()
+        work_flow_html = work_html.split('id="wk-flow"', 1)[1].split('id="work-inbound"', 1)[0]
+        self.assertIn(f'>{expected_first_hm}<', work_flow_html)
+        self.assertIn('>—<', work_flow_html)
+        self.assertNotIn('예상', work_flow_html)
+        self.assertIn('wf-eta-late', work_html)
+        self.assertIn('data-eta-late="1"', work_html)
+        self.assertIsNone(re.search(r'\sstyle=', work_html))
+        popover_js = (ROOT / 'harbor_web/static/harbor_web/schedule-popover.js').read_text(encoding='utf-8')
+        self.assertNotIn('예상', popover_js)
+
+        # Yard upcoming list matches ETA formula & cutoff warning class, without '예상'.
+        upcoming = yard_resp.context['upcoming']
+        self.assertEqual(upcoming[0]['eta_text'], expected_first_hm)
+        self.assertTrue(upcoming[1]['eta_late'])
+        for item in upcoming[SIMULATION_LIMIT:]:
+            self.assertEqual(item['eta_text'], '—')
+            self.assertFalse(item['eta_late'])
+        yard_html = yard_resp.content.decode()
+        yard_upcoming_html = yard_html.split('class="yard-upcoming-list"', 1)[1].split('</ul>', 1)[0]
+        self.assertNotIn('예상', yard_upcoming_html)
+        self.assertIn('yard-upcoming-eta is-late', yard_html)
+        self.assertIsNone(re.search(r'\sstyle=', yard_html))
+
+        # Situation board ('/') matches schedule & yard order, ETA values, and cutoff warning without '예상'.
+        board = board_resp.context['board']
+        board_jobs = [board['current_job'], *board['next_jobs']]
+        self.assertEqual(len(board_jobs), 6)
+        self.assertEqual(
+            [job['title'] for job in board_jobs],
+            [f"{row['order'].cargo.code} {row['kind']}" for row in schedule[:6]],
+        )
+        self.assertEqual(
+            [(job['eta_at'], job['eta_text'], job['eta_late']) for job in board_jobs],
+            [(row['eta_at'], row['eta_text'], row['eta_late']) for row in schedule[:6]],
+        )
+        self.assertEqual(
+            [(job['eta_at'], job['eta_text'], job['eta_late']) for job in board_jobs],
+            [(item['eta_at'], item['eta_text'], item['eta_late']) for item in upcoming[:6]],
+        )
+        board_html = board_resp.content.decode()
+        board_list_html = board_html.split('class="board-job-list"', 1)[1].split('</ol>', 1)[0]
+        self.assertIn(f'>{expected_first_hm}<', board_list_html)
+        self.assertIn('board-job-eta is-late', board_list_html)
+        self.assertNotIn('예상', board_list_html)
+        self.assertIsNone(re.search(r'\sstyle=', board_html))
+
+        # Custom MOVE_SECONDS_ESTIMATE setting scales ETA proportionally.
+        with self.settings(MOVE_SECONDS_ESTIMATE=180), \
+                timezone.override('Asia/Seoul'), \
+                patch('django.utils.timezone.now', return_value=base_now):
+            custom_resp = self.client.get('/work/')
+        custom_sched = custom_resp.context['schedule']
+        delta_60 = (schedule[1]['eta_at'] - base_now).total_seconds()
+        delta_180 = (custom_sched[1]['eta_at'] - base_now).total_seconds()
+        self.assertEqual(delta_180, delta_60 * 3)
+
+        # Running command start time (created_at) overrides wall-clock now as ETA base on both /work/ and /.
+        running_started = base_now - timedelta(minutes=10)
+        plan = services.make_plan(
+            self.operator, order_id=first_order.pk, expected_version=first_order.version,
+            observation_id=obs.pk, now=base_now,
+        )
+        with patch('django.utils.timezone.now', return_value=running_started):
+            Command.objects.create(
+                order=first_order, plan=plan, actor=self.operator, plan_version=1,
+                ledger_identity='eta-running-1', fleet_origin='test', fleet_principal='test',
+                body_digest='a' * 64, binding={}, state='RECONCILED',
+            )
+        with timezone.override('Asia/Seoul'), patch('django.utils.timezone.now', return_value=base_now):
+            running_resp = self.client.get('/work/')
+            running_board_resp = self.client.get('/')
+        run_sched = running_resp.context['schedule']
+        expected_run_hm = timezone.localtime(running_started).strftime('%H:%M')
+        self.assertEqual(run_sched[0]['eta_at'], running_started)
+        self.assertEqual(run_sched[0]['eta_text'], expected_run_hm)
+        run_board = running_board_resp.context['board']
+        self.assertEqual(run_board['current_job']['eta_at'], running_started)
+        self.assertEqual(run_board['current_job']['eta_text'], expected_run_hm)
+        self.assertEqual(
+            [(job['eta_at'], job['eta_text'], job['eta_late']) for job in [run_board['current_job'], *run_board['next_jobs']]],
+            [(row['eta_at'], row['eta_text'], row['eta_late']) for row in run_sched[:6]],
+        )
+
+    def test_move_seconds_estimate_setting_and_env_parsing(self):
+        import os
+        import subprocess
+        import sys
+        from django.conf import settings as django_settings
+        from django.core.exceptions import ImproperlyConfigured
+        from harbor_web.settings import parse_move_seconds_estimate
+        from harbor_web.site_config import move_seconds_estimate
+
+        self.assertEqual(django_settings.MOVE_SECONDS_ESTIMATE, 60)
+        self.assertIsInstance(django_settings.MOVE_SECONDS_ESTIMATE, int)
+        self.assertEqual(move_seconds_estimate(), 60.0)
+
+        for raw, expected in ((None, 60), ('', 60), ('   ', 60), ('1', 1), ('60', 60), ('120', 120)):
+            with self.subTest(raw=raw):
+                self.assertEqual(parse_move_seconds_estimate(raw), expected)
+
+        for bad in ('0', '-1', '-60', '1.5', 'abc', True):
+            with self.subTest(bad=bad), self.assertRaises(ImproperlyConfigured):
+                parse_move_seconds_estimate(bad)
+
+        with self.settings(MOVE_SECONDS_ESTIMATE=95):
+            self.assertEqual(move_seconds_estimate(), 95.0)
+            self.assertEqual(move_seconds_estimate({'move_seconds_estimate': 45}), 45.0)
+
+        base_env = {
+            k: v for k, v in os.environ.items()
+            if k != 'HARBOR_MOVE_SECONDS_ESTIMATE'
+        }
+        base_env.update(
+            HARBOR_WEB_MODE='test',
+            HARBOR_WEB_SECRET_KEY='k' * 64,
+            DJANGO_SETTINGS_MODULE='harbor_web.settings',
+        )
+
+        # Unset -> 60, valid integer >= 1 -> configured integer used by site_config.
+        for env_val, expected in ((None, '60 60.0'), ('90', '90 90.0'), ('1', '1 1.0')):
+            env = dict(base_env)
+            if env_val is not None:
+                env['HARBOR_MOVE_SECONDS_ESTIMATE'] = env_val
+            proc = subprocess.run(
+                [
+                    sys.executable, '-c',
+                    'import django; django.setup(); from django.conf import settings as s; '
+                    'from harbor_web.site_config import move_seconds_estimate; '
+                    'print(s.MOVE_SECONDS_ESTIMATE, move_seconds_estimate())',
+                ],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(), expected)
+
+        # Invalid env values (< 1 or non-integer) -> ImproperlyConfigured.
+        for bad_env in ('0', '-5', '1.5', 'not-a-number'):
+            env = dict(base_env, HARBOR_MOVE_SECONDS_ESTIMATE=bad_env)
+            proc = subprocess.run(
+                [sys.executable, '-c', 'import harbor_web.settings'],
+                env=env, capture_output=True, text=True, cwd=str(ROOT),
+            )
+            self.assertNotEqual(proc.returncode, 0, f'expected failure for {bad_env!r}')
+            self.assertIn('ImproperlyConfigured', proc.stderr)

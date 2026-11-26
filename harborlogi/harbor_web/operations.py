@@ -17,7 +17,7 @@ HANDOFF_REASONS = {
 }
 
 
-def _inventory(observation):
+def _inventory(observation, *, snapshot=None):
     if observation is None:
         return dict(known=False, cargo_count=None, occupied=None, capacity=None,
                     storage_count=None, temporary_count=None, outbound_count=None,
@@ -26,7 +26,7 @@ def _inventory(observation):
     temporary = set(policy['temporary_bays'])
     outbound = {policy['outbound_stand'], *policy.get('extra_outbound_stands', [])}
     spatial = observation.payload.get('schema') == 'grid-placement-v1'
-    snapshot = services.snapshot(observation)
+    snapshot = snapshot if snapshot is not None else services.snapshot(observation)
     areas = []
     presentation = area_presentation(policy) if spatial else {}
     slot = policy.get('slot_cells') if spatial else None  # fixed 1×3 slots: count containers, not cells (KAN-115)
@@ -132,7 +132,8 @@ def _actual(commands, now, *, cell_plans=()):
 def operations_context(observation, *, now=None):
     """Summarize one exact observation pin; registered orders and handoffs are global."""
     now = timezone.now() if now is None else now
-    inventory = _inventory(observation)
+    obs_snapshot = services.snapshot(observation) if observation is not None else None
+    inventory = _inventory(observation, snapshot=obs_snapshot)
     freshness = dict(stale=None, superseded=None, age_seconds=None)
     if observation is not None:
         age = now - observation.observed_at
@@ -209,9 +210,15 @@ def operations_context(observation, *, now=None):
         attention.append(dict(label=f"완료 인계 · 반출 이동 대조 불가 · {_cargo_label(c.order)}", count=1,
                               action='원래 작업 대조', href=f'/work/{c.pk}/'))
     targets = {row['target'] for row in rows if row['target']}
-    yard = yard_rows(observation, targets=targets, rehandles={c for row in rows for c in row['rehandles']})
+    yard = yard_rows(
+        observation,
+        targets=targets,
+        rehandles={c for row in rows for c in row['rehandles']},
+        snapshot=obs_snapshot,
+    )
     return dict(observation=observation, inventory=inventory, freshness=freshness, attention=attention,
         attention_view=[_attention_view(item, observation, commands) for item in attention], yard=yard,
+        _snapshot=obs_snapshot,
         attention_total=sum(item['count'] for item in attention),
         orders=dict(inbound=counts.get('INBOUND', 0), outbound=counts.get('OUTBOUND', 0), scope='전체 등록 지시'),
         workload=dict(plans=rows, ready_count=ready, hold_count=hold, excluded_count=excluded,
