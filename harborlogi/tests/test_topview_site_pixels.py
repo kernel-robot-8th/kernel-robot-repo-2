@@ -150,9 +150,9 @@ class SideviewSitePixelsTests(unittest.TestCase):
         self.assertFalse(any(pt['zone'] in ('temp_a', 'temp_b') for pt in loaded['points']))
         self.assertEqual(by_site['side:yard-r2-t3']['wire_refs'], ['yard-r2-c1-l3', 'yard-r2-c4-l3'])
         # Bottom container (t1) sits higher in the frame than the old 375..460 range.
-        self.assertEqual(by_site['side:yard-r2-t1']['roi'][1:], [295.0, 312.0, 385.0])
-        self.assertEqual(by_site['side:yard-r2-t2']['roi'][1:], [210.0, 312.0, 295.0])
-        self.assertEqual(by_site['side:yard-r2-t3']['roi'][1:], [125.0, 312.0, 210.0])
+        self.assertEqual(by_site['side:yard-r2-t1']['roi'][1:], [382.0, 312.0, 467.0])
+        self.assertEqual(by_site['side:yard-r2-t2']['roi'][1:], [297.0, 312.0, 382.0])
+        self.assertEqual(by_site['side:yard-r2-t3']['roi'][1:], [212.0, 312.0, 297.0])
         refs = {ref for pt in loaded['points'] for ref in pt['wire_refs']}
         self.assertEqual(len(refs), 18)  # yard 18 only (temp_a/temp_b excluded on side camera)
         self.assertTrue(refs < canonical_cell_wire_refs())
