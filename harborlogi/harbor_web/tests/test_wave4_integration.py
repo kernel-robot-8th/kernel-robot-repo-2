@@ -9,7 +9,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.db import IntegrityError, connection, transaction
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TestCase, TransactionTestCase
 
 from harbor.port_events import IntakeLedger, parse_event
 from harbor.rosy_http import RosyClient
@@ -300,3 +302,206 @@ class Wave4HarborIntegrationTests(TestCase):
             resp = self.client.post(f'/work/{command.pk}/', {'action': 'arm_recovery_request', 'expected_version': command.version})
             self.assertEqual(resp.status_code, 302)
             mock_req.assert_called_once()
+
+    def test_loaded_event_id_partial_unique_constraint_allows_empty_and_blocks_duplicates(self):
+        # Multiple dispatches with empty loaded_event_id are allowed.
+        self._pickup_arrived_dispatch('empty-1', stand_zone_id='stand-1', loaded_event_id='')
+        self._pickup_arrived_dispatch('empty-2', stand_zone_id='stand-2', loaded_event_id='')
+
+        # Claiming a non-empty loaded_event_id once succeeds; claiming it again fails at DB level.
+        self._pickup_arrived_dispatch(
+            'claimed-1', stand_zone_id='stand-3', state='CANCELLED', loaded_event_id=_EVENT_ID,
+        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self._pickup_arrived_dispatch(
+                'claimed-2', stand_zone_id='stand-4', state='EXITED', loaded_event_id=_EVENT_ID,
+            )
+
+    def test_clock_skew_tolerance_default_and_env_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / 'intake.sqlite3'
+            intake = IntakeLedger(ledger_path)
+            registry, transport = self._tick_registry(ledger_path)
+
+            # Default 30s: 31s before created_at is rejected as stale.
+            d_stale = self._pickup_arrived_dispatch('skew-stale', stand_zone_id='stand-1')
+            ev_stale = '1' * 64
+            self._ledger_event(
+                intake, event_id=ev_stale,
+                observed_at=(d_stale.created_at - timedelta(seconds=31)).isoformat(),
+            )
+            with patch.dict(os.environ, {'HARBOR_LEDGER_PATH': str(ledger_path)}, clear=False):
+                os.environ.pop('HARBOR_PORT_EVENT_CLOCK_SKEW_S', None)
+                res = outbound_loop.tick(registry)
+            self.assertNotIn(d_stale.pk, res)
+            d_stale.refresh_from_db()
+            self.assertEqual(d_stale.state, 'PICKUP_ARRIVED')
+
+            # Default 30s: 20s before created_at is accepted within skew tolerance.
+            ev_within = '2' * 64
+            self._ledger_event(
+                intake, event_id=ev_within,
+                observed_at=(d_stale.created_at - timedelta(seconds=20)).isoformat(),
+            )
+            with patch.dict(os.environ, {'HARBOR_LEDGER_PATH': str(ledger_path)}, clear=False):
+                res = outbound_loop.tick(registry)
+            self.assertEqual(res[d_stale.pk], 'EXIT_PROPOSED')
+            d_stale.refresh_from_db()
+            self.assertEqual(d_stale.loaded_event_id, ev_within)
+
+            # Custom HARBOR_PORT_EVENT_CLOCK_SKEW_S=10: 15s before rejected, 5s before accepted.
+            d_custom = self._pickup_arrived_dispatch('skew-custom', stand_zone_id='stand-2')
+            ev_too_old = '3' * 64
+            self._ledger_event(
+                intake, event_id=ev_too_old,
+                observed_at=(d_custom.created_at - timedelta(seconds=15)).isoformat(),
+            )
+            with patch.dict(
+                os.environ,
+                {'HARBOR_LEDGER_PATH': str(ledger_path), 'HARBOR_PORT_EVENT_CLOCK_SKEW_S': '10'},
+                clear=False,
+            ):
+                res = outbound_loop.tick(registry)
+            self.assertNotIn(d_custom.pk, res)
+
+            ev_ok = '4' * 64
+            self._ledger_event(
+                intake, event_id=ev_ok,
+                observed_at=(d_custom.created_at - timedelta(seconds=5)).isoformat(),
+            )
+            with patch.dict(
+                os.environ,
+                {'HARBOR_LEDGER_PATH': str(ledger_path), 'HARBOR_PORT_EVENT_CLOCK_SKEW_S': '10'},
+                clear=False,
+            ):
+                res = outbound_loop.tick(registry)
+            self.assertEqual(res[d_custom.pk], 'EXIT_PROPOSED')
+            d_custom.refresh_from_db()
+            self.assertEqual(d_custom.loaded_event_id, ev_ok)
+
+            # HARBOR_PORT_EVENT_CLOCK_SKEW_S=0 enforces strict observed >= created_at.
+            d_zero = self._pickup_arrived_dispatch('skew-zero', stand_zone_id='stand-3')
+            ev_zero = '5' * 64
+            self._ledger_event(
+                intake, event_id=ev_zero,
+                observed_at=(d_zero.created_at - timedelta(seconds=1)).isoformat(),
+            )
+            with patch.dict(
+                os.environ,
+                {'HARBOR_LEDGER_PATH': str(ledger_path), 'HARBOR_PORT_EVENT_CLOCK_SKEW_S': '0'},
+                clear=False,
+            ):
+                res = outbound_loop.tick(registry)
+            self.assertNotIn(d_zero.pk, res)
+
+            # Invalid or negative HARBOR_PORT_EVENT_CLOCK_SKEW_S falls back to default 30s.
+            for bad_val in ('-10', 'not-a-number', 'nan'):
+                with self.subTest(skew=bad_val), patch.dict(
+                    os.environ, {'HARBOR_PORT_EVENT_CLOCK_SKEW_S': bad_val}, clear=False
+                ):
+                    self.assertEqual(outbound_loop._port_event_clock_skew(), timedelta(seconds=30))
+
+    def test_already_claimed_event_within_skew_window_never_matches_next_dispatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / 'intake.sqlite3'
+            intake = IntakeLedger(ledger_path)
+            registry, transport = self._tick_registry(ledger_path)
+
+            ev_first = '6' * 64
+            ev_second = '7' * 64
+            prior = self._pickup_arrived_dispatch('prior-exited', stand_zone_id='stand-1')
+            # First dispatch claims ev_first and completes (EXITED).
+            self._ledger_event(intake, event_id=ev_first, observed_at=prior.created_at.isoformat())
+            with patch.dict(os.environ, {'HARBOR_LEDGER_PATH': str(ledger_path)}, clear=False):
+                os.environ.pop('HARBOR_PORT_EVENT_CLOCK_SKEW_S', None)
+                res = outbound_loop.tick(registry)
+            self.assertEqual(res[prior.pk], 'EXIT_PROPOSED')
+            OutboundDispatch.objects.filter(pk=prior.pk).update(state='EXITED')
+
+            # Second dispatch arrives right after; ev_first is still within the 30s skew window,
+            # but must NEVER match because prior already claimed it.
+            later = self._pickup_arrived_dispatch('later-after-exit', stand_zone_id='stand-1')
+            transport.prepared.clear()
+            with patch.dict(os.environ, {'HARBOR_LEDGER_PATH': str(ledger_path)}, clear=False):
+                res = outbound_loop.tick(registry)
+            self.assertNotIn(later.pk, res)
+            later.refresh_from_db()
+            self.assertEqual(later.state, 'PICKUP_ARRIVED')
+            self.assertEqual(later.loaded_event_id, '')
+            self.assertEqual(transport.prepared, [])
+
+            # Once a new unclaimed event arrives, the second dispatch skips ev_first and claims ev_second.
+            self._ledger_event(
+                intake, event_id=ev_second,
+                observed_at=(later.created_at - timedelta(seconds=10)).isoformat(),
+            )
+            with patch.dict(os.environ, {'HARBOR_LEDGER_PATH': str(ledger_path)}, clear=False):
+                res = outbound_loop.tick(registry)
+            self.assertEqual(res[later.pk], 'EXIT_PROPOSED')
+            later.refresh_from_db()
+            self.assertEqual(later.loaded_event_id, ev_second)
+
+
+class OutboundLoadedEventMigrationTests(TransactionTestCase):
+    def test_migration_0031_deduplicates_existing_loaded_event_ids_and_enforces_constraint(self):
+        before = [('harbor_web', '0030_commercial_manifest')]
+        after = [('harbor_web', '0031_outbound_dispatch_unique_loaded_event_id')]
+        executor = MigrationExecutor(connection)
+        executor.migrate(before)
+        try:
+            apps = executor.loader.project_state(before).apps
+            User = apps.get_model('auth', 'User')
+            Cargo = apps.get_model('harbor_web', 'Cargo')
+            Condition = apps.get_model('harbor_web', 'Condition')
+            Order = apps.get_model('harbor_web', 'Order')
+            Observation = apps.get_model('harbor_web', 'Observation')
+            Plan = apps.get_model('harbor_web', 'Plan')
+            CommandModel = apps.get_model('harbor_web', 'Command')
+            OD = apps.get_model('harbor_web', 'OutboundDispatch')
+
+            user = User.objects.create(username='mig-op')
+            cargo = Cargo.objects.create(
+                created_by=user, code='MIG-C1', name='MIG-C1',
+                weight_kg=Decimal('1.000'), volume_m3=Decimal('1.0000'), destination='out',
+            )
+            cond = Condition.objects.create(created_by=user, name='c', calibration_ref='ref', payload={})
+            order = Order.objects.create(created_by=user, kind='OUTBOUND', cargo=cargo)
+            obs = Observation.objects.create(
+                created_by=user, source_id='s', source_revision='1', observed_at=_NOW,
+                provenance='DECLARED', payload={}, condition=cond,
+            )
+
+            def make_od(idx, state):
+                plan = Plan.objects.create(
+                    created_by=user, order=order, order_version=1, observation=obs, condition=cond,
+                    queue_digest='0' * 64, result={'status': 'READY', 'moves': []},
+                )
+                cmd = CommandModel.objects.create(
+                    plan=plan, order=order, actor=user, plan_version=1,
+                    ledger_identity=f'mig-{idx}', fleet_origin='http://127.0.0.1:8000',
+                    fleet_principal='harbor-service', body_digest='d' * 64, binding={}, state='COMPLETED',
+                )
+                return OD.objects.create(
+                    command=cmd, cargo=cargo, actor=user,
+                    stand_zone_id=f'stand-{idx}', pickup_stop_id='S_OUT', exit_stop_id='S_EXIT',
+                    site_places_digest='c' * 64, candidate_robot_ids=['rosy_46'],
+                    state=state, assigned_vehicle_id='rosy_46', loaded_event_id=_EVENT_ID,
+                )
+
+            first = make_od(1, 'EXITED')
+            cancelled_dup = make_od(2, 'CANCELLED')
+            exited_dup = make_od(3, 'EXITED')
+
+            forward = MigrationExecutor(connection)
+            forward.migrate(after)
+
+            first_after = OutboundDispatch.objects.get(pk=first.pk)
+            cancelled_after = OutboundDispatch.objects.get(pk=cancelled_dup.pk)
+            exited_after = OutboundDispatch.objects.get(pk=exited_dup.pk)
+            self.assertEqual(first_after.loaded_event_id, _EVENT_ID)
+            self.assertEqual(cancelled_after.loaded_event_id, '')
+            self.assertTrue(exited_after.loaded_event_id.startswith(f'dup-{exited_dup.pk}:'))
+            self.assertNotEqual(exited_after.loaded_event_id, _EVENT_ID)
+        finally:
+            cleanup = MigrationExecutor(connection)
+            cleanup.migrate(cleanup.loader.graph.leaf_nodes())
