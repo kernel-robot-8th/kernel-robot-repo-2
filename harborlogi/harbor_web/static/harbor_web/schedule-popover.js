@@ -43,6 +43,8 @@ export function readCardData(li) {
     etaLate: li.dataset.etaLate === '1',
     planSummary: li.dataset.planSummary || '',
     href: li.dataset.href || '',
+    actionLabel: li.dataset.actionLabel || '',
+    actionHref: li.dataset.actionHref || '',
     node: li,
   };
 }
@@ -115,7 +117,7 @@ export function createPopoverController(board, options = {}) {
       rows.push(createEl('dt', {text: label}));
       rows.push(createEl('dd', {class: ddClass, text: value}));
     };
-    addRow('상태', data.state);
+    if (data.state && data.state !== '대기') addRow('상태', data.state);
     if (data.time) addRow('완료 시각', data.time);
     if (!data.done) {
       const etaInfo = getEta ? getEta(data) : {etaText: data.eta, late: data.etaLate};
@@ -148,6 +150,14 @@ export function createPopoverController(board, options = {}) {
 
     const body = createEl('dl', {class: 'wf-pop-meta'}, rows);
     const footChildren = [];
+    if (data.actionLabel && data.actionHref) {
+      footChildren.push(createEl('a', {
+        class: 'button quiet wf-pop-action',
+        'data-pop-action': '',
+        href: data.actionHref,
+        text: data.actionLabel,
+      }));
+    }
     if (data.href) {
       footChildren.push(createEl('a', {class: 'wf-pop-link', href: data.href, text: '자세히'}));
     }

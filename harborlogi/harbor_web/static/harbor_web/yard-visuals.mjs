@@ -196,3 +196,46 @@ export function formatBoxInfo(box, {where = '', rehandle = false} = {}) {
   if (box.cutoff) parts.push(`마감 ${box.cutoff}`);
   return parts.filter(Boolean).join(' · ');
 }
+
+/** Structured playback caption fields ({step, route, phase, percent}) for one move frame/segment. */
+export function describeMoveText(frame, segment, t, {total = 0, locate = box => '', draft = false} = {}) {
+  const clamped = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
+  const percent = Math.round(clamped * 100);
+  const move = frame?.move || null;
+  const from = segment?.from || null;
+  const to = segment?.to || null;
+  const cargo = move?.cargo_id || move?.cargo || to?.id || '';
+  const phaseLabel = move?.phase_label || move?.phase || frame?.phase || '';
+  const number = move?.number ?? frame?.index ?? 0;
+
+  let step = frame?.label || '현재 야드 배치';
+  if (draft && to) {
+    step = total > 0 && number > 0
+      ? `${number}/${total} · ${cargo} 가상 이동`
+      : `${cargo} 가상 이동`;
+  } else if (number > 0 && total > 0 && cargo) {
+    step = `${number}/${total} · ${cargo}${phaseLabel ? ` ${phaseLabel}` : ''}`;
+  } else if (number > 0 && cargo && phaseLabel) {
+    step = `${number} · ${cargo} ${phaseLabel}`;
+  }
+
+  const source = move?.source_place || (from ? locate(from) : '출발 위치 없음');
+  const destination = move?.destination_place || (to ? locate(to) : '');
+  const arm = move?.primary_arm || move?.arm || '';
+  const routePair = destination ? `${source} → ${destination}` : source;
+  const route = arm ? `팔 ${arm} · ${routePair}` : routePair;
+
+  const phase = !from && !move?.source_place
+    ? '배치 비교'
+    : segment?.instant
+      ? '즉시 전환'
+      : clamped < 0.25
+        ? '들어 올림'
+        : clamped < 0.75
+          ? '이동'
+          : clamped < 1
+            ? '내려놓기'
+            : '완료';
+
+  return {step, route, phase, percent, source, destination, cargo, arm};
+}

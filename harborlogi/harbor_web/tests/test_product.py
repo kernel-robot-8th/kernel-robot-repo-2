@@ -97,7 +97,8 @@ class ProductPagesTests(TestCase):
         self.assertEqual(len(plan.result['moves']), 3)
         response = self.client.get(f'/plans/{plan.pk}/')
         self.assertContains(response, '관측한 배치')
-        self.assertContains(response, '계획 후 예상 배치')
+        self.assertContains(response, '계획 후 배치')
+        self.assertNotContains(response, '예상')
         self.assertNotContains(response, '현재 계획의 인계 요청 준비')
         command = Command.objects.create(order=order, plan=plan, actor=self.operator, plan_version=1,
             ledger_identity='test-ledger', fleet_origin='http://127.0.0.1:9999', fleet_principal='test-principal',

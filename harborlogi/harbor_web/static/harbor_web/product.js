@@ -130,7 +130,7 @@ document.querySelectorAll('[data-yard-preview]').forEach(preview => {
     panels.forEach(panel => { panel.hidden = panel.id !== selected.getAttribute('aria-controls'); });
     if (status) status.textContent = selected.dataset.yardStage === '0'
       ? '계획 기준 관측 · 저장된 원본 배치입니다.'
-      : `${selected.textContent.trim()} 후 예상 배치 · 실제 관측·실행 상태는 바뀌지 않습니다.`;
+      : `${selected.textContent.trim()} 후 배치 · 실제 관측·실행 상태는 바뀌지 않습니다.`;
     preview.dispatchEvent(new CustomEvent('yardstagechange', {detail: {index: selected.dataset.yardStage, animate}}));
   };
   controls.forEach(button => {

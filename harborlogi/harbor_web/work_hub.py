@@ -12,18 +12,17 @@ from harbor_web.plan_service import _outbound_schedule
 from harbor_web.presentation import reason_text
 from harbor_web.rearrangement import current_authorization
 from harbor_web.page_helpers import page
-from harbor_web.reorder_validate import _latest_footprints, _simulate_orders, short_hold_reason
+from harbor_web.reorder_validate import _latest_footprints, _placement_label, _simulate_orders, short_hold_reason
 from harbor_web.site_config import move_seconds_estimate, spatial_policy, spatial_snapshot
 from harbor_web.work_state import work_state, shown_state
-from harbor_web.yard_rows import place_context, placement_text
 
-SIMULATION_LIMIT = 8
+SIMULATION_LIMIT = None
 _OBSERVATION_UNSET = object()
 
 
 def format_eta(eta_at):
     if eta_at is None:
-        return '—'
+        return ''
     return timezone.localtime(eta_at).strftime('%H:%M')
 
 
@@ -37,7 +36,9 @@ def _apply_schedule_etas(schedule, *, base_time, move_seconds, step_moves_by_id)
         row['eta_text'] = format_eta(None)
         row['eta_iso'] = ''
         row['eta_late'] = False
-    ordered = sorted(schedule, key=lambda row: row['state'] != '진행 중')[:SIMULATION_LIMIT]
+    ordered = sorted(schedule, key=lambda row: row['state'] != '진행 중')
+    if SIMULATION_LIMIT is not None:
+        ordered = ordered[:SIMULATION_LIMIT]
     cumulative_moves = 0
     for row in ordered:
         if row.get('sim_status') != 'READY':
@@ -61,7 +62,7 @@ def _apply_schedule_simulation(
     outbound_ranks=None,
     reservation_entries=None,
 ):
-    """Simulate the first SIMULATION_LIMIT pending schedule entries in memory without writing to DB."""
+    """Simulate pending schedule entries in memory without writing to DB."""
     move_sec = move_seconds_estimate()
     for row in schedule:
         row['card_place'] = row['place']
@@ -84,7 +85,7 @@ def _apply_schedule_simulation(
     except (ValueError, ValidationError):
         return move_sec
     ordered_schedule = sorted(schedule, key=lambda row: row['state'] != '진행 중')
-    window = ordered_schedule[:SIMULATION_LIMIT]
+    window = ordered_schedule if SIMULATION_LIMIT is None else ordered_schedule[:SIMULATION_LIMIT]
     window_orders = [row['order'] for row in window]
     inbound_orders = [order for order in window_orders if order.kind == 'INBOUND']
     footprints = _latest_footprints(inbound_orders)
@@ -151,14 +152,15 @@ def _apply_schedule_simulation(
             row['plan_summary'] = f"보류 · {reason_text('OUTBOUND_NOT_OBSERVED')}"
         else:
             row['sim_status'] = 'UNCOMPUTED'
-            row['card_place'] = '계산 전'
+            row['card_place'] = ''
             row['card_place_kind'] = 'uncomputed'
-            row['plan_summary'] = '계산 전'
-    for row in ordered_schedule[SIMULATION_LIMIT:]:
+            row['plan_summary'] = ''
+    tail = [] if SIMULATION_LIMIT is None else ordered_schedule[SIMULATION_LIMIT:]
+    for row in tail:
         row['sim_status'] = 'UNCOMPUTED'
-        row['card_place'] = '계산 전'
+        row['card_place'] = ''
         row['card_place_kind'] = 'uncomputed'
-        row['plan_summary'] = '계산 전'
+        row['plan_summary'] = ''
     _apply_schedule_etas(schedule, base_time=base_time, move_seconds=move_sec, step_moves_by_id=step_moves_by_id)
     return move_sec
 
@@ -286,8 +288,7 @@ def hub_context(*, now=None):
                 and plan.result.get('status') == 'READY'
                 and plan.result.get('plan_kind') == 'inbound-placement'
                 and plan.result.get('recommendation')):
-            labels, slot = place_context(plan.condition.payload)
-            row['place'] = placement_text(plan.result['recommendation'], labels, slot)
+            row['place'] = _placement_label(plan.result['recommendation'], plan.condition.payload)
         summary_parts = []
         if plan and plan.order_version == order.version and plan.result.get('status') == 'READY':
             moves = plan.result.get('moves') or []
@@ -300,16 +301,20 @@ def hub_context(*, now=None):
         if dest:
             summary_parts.append(dest)
         row['plan_summary'] = ' · '.join(summary_parts)
+        row['action_label'] = ''
+        row['action_href'] = ''
         if recorded_at:
             past.append(row)
         else:
-            # Automatic mode computes placements itself; no manual "calculate" link there.
+            # Automatic mode computes placements itself; no manual "calculate" button there.
             row['auto'] = auto_run or order.auto_replan
-            row['place_hint'] = '자동 계산 대기' if row['auto'] else '자리 결정 대기'
-            if plan and plan.order_version != order.version:
-                row['place_hint'] = '요청 바뀜 · 다시 계산'
-            elif plan and plan.result.get('status') == 'HOLD':
-                row['place_hint'] = '보류 · 요청 확인'
+            if order.kind == 'INBOUND':
+                if row['place']:
+                    row['action_label'] = '자리 결정하기'
+                    row['action_href'] = f'/plans/{plan.pk}/'
+                elif not row['auto']:
+                    row['action_label'] = '자리 계산하기'
+                    row['action_href'] = f'/requests/{order.pk}/'
             pending.append(row)
 
     past.sort(key=lambda row: (row['recorded_at'], row['order'].pk))
@@ -341,7 +346,6 @@ def hub_context(*, now=None):
         eta_base_iso=timezone.localtime(eta_base).isoformat(),
         move_seconds_estimate=int(move_sec) if float(move_sec).is_integer() else move_sec,
         outbound=[row for row in pending if row['order'].kind == 'OUTBOUND'],
-        inbound=[row for row in pending if row['order'].kind == 'INBOUND'],
         rearrangements=[row for row in pending if row['order'].kind == 'REARRANGE'],
         authorization=current_authorization(now))
 

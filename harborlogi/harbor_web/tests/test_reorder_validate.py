@@ -10,10 +10,10 @@ from django.test import TestCase
 from django.urls import resolve
 from django.utils import timezone
 
+from harbor.site_recognition import placement_to_site_ref
 from harbor_web import services
 from harbor_web.models import Audit, Cargo, CargoFootprint, CellPlanDispatch, Command, Observation, Order, Plan
 from harbor_web.order_queue import reorder_schedule
-from harbor_web.yard_rows import place_context, placement_text
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -341,8 +341,8 @@ class ReorderValidateTests(TestCase):
         )
         self.assertEqual(actual_next_plan.result['status'], 'READY')
         self.assertNotEqual(actual_next_plan.result['recommendation'], auto_plan.result['recommendation'])
-        labels, slot = place_context(self.obs.condition.payload)
-        expected_label = placement_text(actual_next_plan.result['recommendation'], labels, slot)
+        rec = actual_next_plan.result['recommendation']
+        expected_label = placement_to_site_ref(rec['area_id'], rec['row'], rec['column'], rec['level'])
         self.assertEqual(val_data['items'][0]['code'], 'IN-NEXT')
         self.assertEqual(val_data['items'][0]['place'], expected_label)
 
@@ -679,13 +679,13 @@ class SeedScheduleValidateTests(TestCase):
         self.assertEqual(len(schedule), 22)  # seed C-1..C-22
         by_code = {row['order'].cargo.code: row for row in schedule}
 
-        # Sequential destinations for the simulated window (first 8 items)
-        self.assertEqual(by_code['C-5']['card_place'], '2행 2열 2층')
-        self.assertEqual(by_code['C-8']['card_place'], '2행 3열 2층')
-        self.assertEqual(by_code['C-18']['card_place'], '2행 2열 3층')
+        # Sequential ROSY wire coordinates for the simulated inbound items
+        self.assertEqual(by_code['C-5']['card_place'], 'yard-r2-c4-l2')
+        self.assertEqual(by_code['C-8']['card_place'], 'yard-r3-c4-l2')
+        self.assertEqual(by_code['C-18']['card_place'], 'yard-r2-c4-l3')
         self.assertEqual(len({by_code['C-5']['card_place'], by_code['C-8']['card_place'], by_code['C-18']['card_place']}), 3)
-        self.assertEqual(by_code['C-6']['card_place'], '2행 1열 2층')
-        self.assertEqual(by_code['C-17']['card_place'], '2행 1열 2층')
+        self.assertEqual(by_code['C-6']['card_place'], 'yard-r1-c4-l2')
+        self.assertEqual(by_code['C-17']['card_place'], 'yard-r1-c4-l2')
 
         # Outbound cards inside the first 8 carry sequential move/rehandle summaries
         self.assertIn('이동 5회', by_code['C-1']['plan_summary'])
@@ -695,16 +695,24 @@ class SeedScheduleValidateTests(TestCase):
         self.assertIn('이동 3회', by_code['C-4']['plan_summary'])
         self.assertIn('재취급 1회', by_code['C-4']['plan_summary'])
 
-        # Remaining items beyond SIMULATION_LIMIT (8) are marked '계산 전'
-        for row in schedule[SIMULATION_LIMIT:]:
-            self.assertEqual(row['card_place'], '계산 전')
-            self.assertEqual(row['plan_summary'], '계산 전')
+        # All 22 items in the queue are simulated with no '계산 전' or '—' placeholders.
+        for row in schedule:
+            self.assertEqual(row['sim_status'], 'READY')
+            self.assertTrue(row['card_place'])
+            self.assertNotEqual(row['card_place'], '계산 전')
+            self.assertTrue(row['plan_summary'])
+            self.assertNotEqual(row['plan_summary'], '계산 전')
 
         html = resp.content.decode()
-        self.assertIn('2행 2열 2층', html)
-        self.assertIn('2행 3열 2층', html)
-        self.assertIn('2행 2열 3층', html)
-        self.assertIn('계산 전', html)
+        self.assertIn('yard-r2-c4-l2', html)
+        self.assertIn('yard-r3-c4-l2', html)
+        self.assertIn('yard-r2-c4-l3', html)
+        self.assertNotIn('입고 자리', html)
+        self.assertNotIn('id="work-inbound"', html)
+        self.assertIsNone(re.search(r'\d+행\s+\d+열\s+\d+층', html))
+        self.assertNotIn('계산 전', html)
+        self.assertNotIn('예상', html)
+        self.assertNotIn('<span class="work-state">대기</span>', html)
         body = html.split('<main', 1)[1]
         self.assertNotIn('READY', body)
         self.assertNotIn('HOLD', body)
@@ -734,12 +742,14 @@ class SeedScheduleValidateTests(TestCase):
         self.assertEqual(seventh['card_place'], '빈 자리 없음')
         self.assertEqual(seventh['card_place_kind'], 'blocked')
         self.assertIn('보관 위치가 없습니다', seventh['plan_summary'])
-        # 8th item after HOLD was not reached -> '계산 전'
-        self.assertEqual(schedule[7]['card_place'], '계산 전')
-        self.assertEqual(schedule[7]['plan_summary'], '계산 전')
+        # 8th item after HOLD was not reached -> empty (never '계산 전')
+        self.assertEqual(schedule[7]['sim_status'], 'UNCOMPUTED')
+        self.assertEqual(schedule[7]['card_place'], '')
+        self.assertEqual(schedule[7]['plan_summary'], '')
         html = resp.content.decode()
         self.assertIn('빈 자리 없음', html)
         self.assertIn('wf-place-blocked', html)
+        self.assertNotIn('계산 전', html)
         body = html.split('<main', 1)[1]
         self.assertNotIn('HOLD', body)
 
@@ -771,12 +781,12 @@ class SeedScheduleValidateTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(Plan.objects.count(), plans_before)
         by_code = {row['order'].cargo.code: row for row in resp.context['schedule']}
-        labels, slot = place_context(obs.condition.payload)
-        reserved_label = placement_text(auto_plan.result['recommendation'], labels, slot)
-        self.assertEqual(reserved_label, '2행 2열 2층')
-        # C-8 must skip C-5's reserved slot '2행 2열 2층'
+        rec = auto_plan.result['recommendation']
+        reserved_label = placement_to_site_ref(rec['area_id'], rec['row'], rec['column'], rec['level'])
+        self.assertEqual(reserved_label, 'yard-r2-c4-l2')
+        # C-8 must skip C-5's reserved slot 'yard-r2-c4-l2'
         self.assertNotEqual(by_code['C-8']['card_place'], reserved_label)
-        self.assertEqual(by_code['C-8']['card_place'], '2행 3열 2층')
+        self.assertEqual(by_code['C-8']['card_place'], 'yard-r3-c4-l2')
 
     def test_schedule_and_yard_upcoming_show_eta_from_moves_and_cutoff_warning(self):
         from datetime import datetime, timedelta, timezone as dt_timezone
@@ -819,32 +829,38 @@ class SeedScheduleValidateTests(TestCase):
         self.assertGreater(schedule[1]['eta_at'], base_now)
         self.assertTrue(schedule[1]['eta_late'])
         self.assertFalse(schedule[2]['eta_late'])
-        # 9th onward (index >= 8) must display '—' and never late.
-        for row in schedule[SIMULATION_LIMIT:]:
-            self.assertEqual(row['eta_text'], '—')
-            self.assertFalse(row['eta_late'])
+        # Every item across the entire 22-item queue gets an HH:MM ETA (no '—' or '계산 전').
+        for row in schedule:
+            self.assertRegex(row['eta_text'], r'^\d\d:\d\d$')
 
         work_html = work_resp.content.decode()
-        work_flow_html = work_html.split('id="wk-flow"', 1)[1].split('id="work-inbound"', 1)[0]
+        work_flow_html = work_html.split('id="wk-flow"', 1)[1].split('<details class="panel work-auto">', 1)[0]
         self.assertIn(f'>{expected_first_hm}<', work_flow_html)
-        self.assertIn('>—<', work_flow_html)
+        self.assertNotIn('>—<', work_flow_html)
+        self.assertNotIn('계산 전', work_flow_html)
         self.assertNotIn('예상', work_flow_html)
+        self.assertNotIn('<span class="work-state">대기</span>', work_flow_html)
         self.assertIn('wf-eta-late', work_html)
         self.assertIn('data-eta-late="1"', work_html)
         self.assertIsNone(re.search(r'\sstyle=', work_html))
         popover_js = (ROOT / 'harbor_web/static/harbor_web/schedule-popover.js').read_text(encoding='utf-8')
         self.assertNotIn('예상', popover_js)
 
-        # Yard upcoming list matches ETA formula & cutoff warning class, without '예상'.
+        # Yard upcoming list matches ETA formula & cutoff warning class across all 22 items, without '예상' or '—'.
         upcoming = yard_resp.context['upcoming']
         self.assertEqual(upcoming[0]['eta_text'], expected_first_hm)
         self.assertTrue(upcoming[1]['eta_late'])
-        for item in upcoming[SIMULATION_LIMIT:]:
-            self.assertEqual(item['eta_text'], '—')
-            self.assertFalse(item['eta_late'])
+        for item in upcoming:
+            self.assertRegex(item['eta_text'], r'^\d\d:\d\d$')
+        self.assertEqual(
+            [(item['eta_at'], item['eta_text'], item['eta_late']) for item in upcoming],
+            [(row['eta_at'], row['eta_text'], row['eta_late']) for row in schedule],
+        )
         yard_html = yard_resp.content.decode()
         yard_upcoming_html = yard_html.split('class="yard-upcoming-list"', 1)[1].split('</ul>', 1)[0]
         self.assertNotIn('예상', yard_upcoming_html)
+        self.assertNotIn('계산 전', yard_upcoming_html)
+        self.assertNotIn('>—<', yard_upcoming_html)
         self.assertIn('yard-upcoming-eta is-late', yard_html)
         self.assertIsNone(re.search(r'\sstyle=', yard_html))
 

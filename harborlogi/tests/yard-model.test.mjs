@@ -170,3 +170,19 @@ assert.equal(occupiedStandDrop.valid, false);
 assert.equal(occupiedStandDrop.placement.level, 2);
 
 console.log('Yard draft bounds, occupancy, support, rotation, immutability, free drag and animation checks passed');
+
+// motionPath: sampled lift-move-lower arc used for the 3D route line.
+import {motionPath} from '../harbor_web/static/harbor_web/yard-model.mjs';
+{
+  const from = {id:'M', x:0, y:0, z:0, width:1, depth:1};
+  const to = {id:'M', x:4, y:2, z:1, width:1, depth:1};
+  const path = motionPath(from, to, 3.6, 24);
+  assert.equal(path.length, 25);
+  assert.deepEqual(path[0], {x:0, y:0, z:0});
+  assert.deepEqual(path.at(-1), {x:4, y:2, z:1});
+  assert.equal(path[12].z, 3.6);
+  assert.ok(path.every(point => point.z <= 3.6 + 1e-9));
+  assert.deepEqual(motionPath(null, to, 3), []);
+  assert.equal(motionPath(from, to, 3, 1).length, 3);
+  console.log('motionPath arc checks passed');
+}

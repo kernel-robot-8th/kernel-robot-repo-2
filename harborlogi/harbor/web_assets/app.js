@@ -355,7 +355,7 @@ async function calculatePlanning(focus = false) {
     }
     $('projected-bays').replaceChildren();
     if (ready) renderBays('projected-bays', data.projected_bays, cargo);
-    text('projected-note', ready ? '계획을 적용했을 때의 예상 배치입니다. 관측 배치를 수정하지 않았습니다.' : '유효한 계획이 없어 예상 완료 배치를 만들지 않았습니다.');
+    text('projected-note', ready ? '계획을 적용했을 때의 배치입니다. 관측 배치를 수정하지 않았습니다.' : '유효한 계획이 없어 완료 배치를 만들지 않았습니다.');
     text('reach-source', '팔 도달 정보는 합성 설치 표입니다. 실제 compile 사전 검증·실물 도달성의 근거가 아닙니다.');
     text('planning-message', (ready ? '계획안 생성' : '계획 보류') + ' · 합성 판단 시각 ' + formatTime(data.reference_time) + ' · 유효기간 ' + data.max_observation_age_seconds + '초는 이 합성 사례의 조건입니다.');
     $('planning-result').hidden = false;

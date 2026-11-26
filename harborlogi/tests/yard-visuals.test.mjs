@@ -223,3 +223,42 @@ test('yard 3D defaults to front view and places flat nameplates on top-of-stack 
   assert.equal(horizSpec.rotZ, 0);
   assert.equal(horizSpec.longAxis, 'x');
 });
+
+import {describeMoveText} from '../harbor_web/static/harbor_web/yard-visuals.mjs';
+
+const chainFrame = {
+  index: 2,
+  label: '2단계 · C-4 재취급',
+  move: {number: 2, cargo_id: 'C-4', phase_label: '재취급', primary_arm: 'A', source_place: 'yard-r2-c1-l2', destination_place: 'temp_a-r1-c1-l1'},
+};
+const chainSegment = {from: {id: 'C-4', x: 0, y: 1, z: 1}, to: {id: 'C-4', x: 8, y: 0, z: 0}};
+
+test('progress block caption: header n/N · cargo phase, route with arm, percent and sub-phase', () => {
+  const start = describeMoveText(chainFrame, chainSegment, 0, {total: 7});
+  assert.equal(start.step, '2/7 · C-4 재취급');
+  assert.equal(start.route, '팔 A · yard-r2-c1-l2 → temp_a-r1-c1-l1');
+  assert.equal(start.percent, 0);
+  assert.equal(start.phase, '들어 올림');
+  assert.equal(describeMoveText(chainFrame, chainSegment, 0.26, {total: 7}).phase, '이동');
+  assert.equal(describeMoveText(chainFrame, chainSegment, 0.26, {total: 7}).percent, 26);
+  assert.equal(describeMoveText(chainFrame, chainSegment, 0.8, {total: 7}).phase, '내려놓기');
+  const done = describeMoveText(chainFrame, chainSegment, 1, {total: 7});
+  assert.equal(done.phase, '완료');
+  assert.equal(done.percent, 100);
+  assert.equal(describeMoveText(chainFrame, chainSegment, 4, {total: 7}).percent, 100);
+});
+
+test('progress block caption omits the arm when the move has none and never says 예상', () => {
+  const frame = {index: 1, label: '1단계 · C-9 입고', move: {number: 1, cargo_id: 'C-9', phase_label: '입고', source_place: 'belt', destination_place: 'yard-r1-c4-l1'}};
+  const desc = describeMoveText(frame, {from: {id: 'C-9', x: 0, y: 0, z: 0}, to: {id: 'C-9', x: 3, y: 0, z: 0}}, 0.5, {total: 1});
+  assert.equal(desc.step, '1/1 · C-9 입고');
+  assert.equal(desc.route, 'belt → yard-r1-c4-l1');
+  assert.doesNotMatch(desc.route, /팔/);
+  for (const value of Object.values(desc)) assert.doesNotMatch(String(value), /예상/);
+});
+
+test('frame without a move keeps the current-yard heading', () => {
+  const desc = describeMoveText({index: 0, label: '현재 야드 배치', move: null}, {from: null, to: {id: 'X', x: 0, y: 0, z: 0}}, 1, {total: 3, locate: () => '1행 1열 1층'});
+  assert.equal(desc.step, '현재 야드 배치');
+  assert.equal(desc.phase, '배치 비교');
+});

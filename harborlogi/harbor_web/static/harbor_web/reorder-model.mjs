@@ -256,20 +256,20 @@ const KST_HHMM_FORMATTER = new Intl.DateTimeFormat('ko-KR', {
 });
 
 export function formatEtaHHMM(ms) {
-  if (!Number.isFinite(ms)) return '—';
+  if (!Number.isFinite(ms)) return '';
   const date = new Date(ms);
-  if (Number.isNaN(date.getTime())) return '—';
+  if (Number.isNaN(date.getTime())) return '';
   const formatted = KST_HHMM_FORMATTER.format(date);
   return formatted.startsWith('24:') ? `00:${formatted.slice(3)}` : formatted;
 }
 
 /**
  * Compute per-task ETA (baseTimeMs + priorMoves * moveSecondsEstimate) for up to `limit` simulated tasks.
- * Uncomputed tasks (index >= limit or !ok) receive '—'. Tasks past cutoffMs are flagged late=true.
+ * Uncomputed tasks (index >= limit or !ok) receive ''. Tasks past cutoffMs are flagged late=true.
  */
 export function computeScheduleEtas(
   items,
-  {baseTimeMs, moveSecondsEstimate = DEFAULT_MOVE_SECONDS_ESTIMATE, limit = 8} = {},
+  {baseTimeMs, moveSecondsEstimate = DEFAULT_MOVE_SECONDS_ESTIMATE, limit = Infinity} = {},
 ) {
   const results = new Map();
   const moveSec = Number.isFinite(Number(moveSecondsEstimate)) && Number(moveSecondsEstimate) > 0
@@ -282,7 +282,7 @@ export function computeScheduleEtas(
   (items || []).forEach((item, index) => {
     const id = String(item.id);
     if (!hasBase || index >= limit || !item.ok) {
-      results.set(id, {id, etaMs: null, etaText: '—', late: false});
+      results.set(id, {id, etaMs: null, etaText: '', late: false});
       return;
     }
     const etaMs = baseMs + cumulativeMoves * moveSec * 1000;

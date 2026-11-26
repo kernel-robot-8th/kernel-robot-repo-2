@@ -13,6 +13,17 @@ export function transit(from, to, progress, ceiling) {
     y:from.y + (to.y - from.y) * horizontal, z};
 }
 
+export function motionPath(from, to, ceiling, steps = 24) {
+  if (!from || !to) return [];
+  const count = Math.max(2, Number.isInteger(steps) ? steps : 24);
+  const points = [];
+  for (let i = 0; i <= count; i++) {
+    const pos = transit(from, to, i / count, ceiling);
+    points.push({x: pos.x, y: pos.y, z: pos.z});
+  }
+  return points;
+}
+
 const positiveInteger = value => Number.isInteger(value) && value > 0;
 const fail = reason => ({valid:false, reason});
 const key = (area, row, column, level) => JSON.stringify([area,row,column,level]);

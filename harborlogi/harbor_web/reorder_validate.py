@@ -7,6 +7,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from harbor.sequencing import ScheduleEntry, evaluate_schedule
+from harbor.site_recognition import placement_to_site_ref
 from harbor.spatial import CargoShape
 from harbor_web.auth import require_roles
 from harbor_web.command_models import ACTIVE_COMMAND_STATES
@@ -124,21 +125,38 @@ def _latest_footprints(orders):
     return footprints
 
 
-def _placement_label(recommendation, condition_payload):
+def _placement_label(recommendation, condition_payload=None):
     if recommendation is None:
         return ''
-    labels, slot = place_context(condition_payload)
-    return placement_text(
-        dict(
-            area_id=recommendation.area_id,
-            row=recommendation.row,
-            column=recommendation.column,
-            level=recommendation.level,
-            orientation=recommendation.orientation,
-        ),
-        labels,
-        slot,
-    )
+    if isinstance(recommendation, dict):
+        area_id = recommendation.get('area_id') or recommendation.get('area')
+        row = recommendation.get('row')
+        column = recommendation.get('column')
+        level = recommendation.get('level')
+        orientation = recommendation.get('orientation', 0)
+    else:
+        area_id = recommendation.area_id
+        row = recommendation.row
+        column = recommendation.column
+        level = recommendation.level
+        orientation = getattr(recommendation, 'orientation', 0)
+    try:
+        return placement_to_site_ref(area_id, int(row), int(column), int(level))
+    except (TypeError, ValueError):
+        if condition_payload is None:
+            return ''
+        labels, slot = place_context(condition_payload)
+        return placement_text(
+            dict(
+                area_id=area_id,
+                row=row,
+                column=column,
+                level=level,
+                orientation=orientation,
+            ),
+            labels,
+            slot,
+        )
 
 
 def _build_proposed_schedule(lanes, open_orders, base_schedule):

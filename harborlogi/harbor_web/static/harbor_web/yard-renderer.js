@@ -1,4 +1,5 @@
 import {transposeArea, transposeBox, transposePoint} from './yard-display.mjs';
+import {motionPath} from './yard-model.mjs';
 import {
   DEFAULT_CAMERA_VIEW,
   DEFAULT_FIT_PADDING,
@@ -169,7 +170,7 @@ export function bindDragInteraction({
   };
 }
 
-export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, onError, colors = {}, showVolumes = false, transpose = false} = {}) {
+export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, onError, onPlaybackKey, onUserCameraStart, colors = {}, showVolumes = false, transpose = false} = {}) {
   if (transpose) areas = areas.map(transposeArea);
   const context = canvas.getContext('webgl2', {antialias: true, preserveDrawingBuffer: true});
   if (!context) throw new Error('WebGL2 is unavailable');
@@ -229,6 +230,7 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
   const targetOutlineMaterial = keep(new THREE.LineBasicMaterial({color: palette.target}));
   const blockerOutlineMaterial = keep(new THREE.LineDashedMaterial({color: palette.blocker, dashSize: .14, gapSize: .08}));
   const selectedMaterial = keep(new THREE.LineBasicMaterial({color: palette.blocker}));
+  const motionMaterial = keep(new THREE.LineBasicMaterial({color: palette.target}));
   const dangerMaterial = keep(new THREE.LineBasicMaterial({color: palette.danger}));
   const validDropFill = keep(new THREE.MeshBasicMaterial({color: palette.stored, transparent: true, opacity: .28, depthWrite: false}));
   const invalidDropFill = keep(new THREE.MeshBasicMaterial({color: palette.danger, transparent: true, opacity: .38, depthWrite: false}));
@@ -245,10 +247,15 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
   dropPreview.add(dropFillMesh, dropEdgeMesh);
   dropPreview.visible = false;
   scene.add(dropPreview);
+  const motionLineGeometry = keep(new THREE.BufferGeometry());
+  const motionLineMaterial = keep(new THREE.LineBasicMaterial({color: palette.target}));
+  const motionLine = new THREE.Line(motionLineGeometry, motionLineMaterial);
+  motionLine.visible = false;
+  scene.add(motionLine);
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   const planeHit = new THREE.Vector3();
   const models = new Map();
-  let selected = null, isolated = null, editable = false, fitted = false;
+  let selected = null, isolated = null, editable = false, fitted = false, motionId = '';
   let disposed = false, failed = false, raf = 0, revision = 0, renderRevision = 0;
   let width = 0, height = 0;
 
@@ -292,6 +299,7 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
     invalidate();
   }
   orbit.addEventListener('change', cameraChanged);
+  orbit.addEventListener('start', () => onUserCameraStart?.());
 
   function label(text, foreground, background) {
     const surface = document.createElement('canvas');
@@ -477,10 +485,48 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
   function syncSelection() {
     models.forEach((model, id) => {
       model.group.visible = isolated === null || id === isolated;
-      model.outline.material = id === selected ? selectedMaterial : model.baseOutlineMaterial;
+      model.outline.material = id === selected ? selectedMaterial : id === motionId ? motionMaterial : model.baseOutlineMaterial;
     });
     syncNameplates();
     invalidate();
+  }
+  function setMotion(spec) {
+    if (!spec || !spec.to) {
+      motionId = '';
+      canvas.dataset.motionId = '';
+      motionLine.visible = false;
+      if (!dragInteraction.isDragging()) {
+        dropPreview.visible = false;
+      }
+      syncSelection();
+      return;
+    }
+    motionId = spec.id || spec.to.id || '';
+    canvas.dataset.motionId = motionId;
+    const shownTo = transpose ? transposeBox(spec.to) : spec.to;
+    dropPreview.position.set(shownTo.x + (shownTo.width || 1) / 2, (shownTo.z ?? 0) + .44, shownTo.y + (shownTo.depth || 1) / 2);
+    dropPreview.scale.set(shownTo.width || 1, .88, shownTo.depth || 1);
+    dropFillMesh.material = validDropFill;
+    dropEdgeMesh.material = validDropEdge;
+    dropPreview.visible = true;
+    if (spec.from) {
+      const ceiling = Number.isFinite(spec.ceiling) ? spec.ceiling : Math.max(...areas.map(a => a.levels)) + .6;
+      const samples = motionPath(spec.from, spec.to, ceiling, 24).map(pt => {
+        const shown = transpose
+          ? transposeBox({x: pt.x, y: pt.y, z: pt.z, width: spec.to.width || 1, depth: spec.to.depth || 1})
+          : {x: pt.x, y: pt.y, z: pt.z, width: spec.to.width || 1, depth: spec.to.depth || 1};
+        return new THREE.Vector3(
+          shown.x + (shown.width || 1) / 2,
+          (shown.z ?? 0) + .44,
+          shown.y + (shown.depth || 1) / 2,
+        );
+      });
+      motionLineGeometry.setFromPoints(samples);
+      motionLine.visible = samples.length >= 2;
+    } else {
+      motionLine.visible = false;
+    }
+    syncSelection();
   }
   function setBoxes(boxes) {
     if (transpose) boxes = boxes.map(transposeBox);
@@ -500,6 +546,9 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
     if (!fitted) { fit(); fitted = true; }
   }
   function fitPoints(id) {
+    if (id && typeof id === 'object' && Array.isArray(id.points)) {
+      return id.points;
+    }
     const points = [];
     if (id === '@location' && locationMarker.visible) {
       const box = new THREE.Box3().expandByObject(locationMarker);
@@ -513,7 +562,10 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
         points.push({x, y, z});
       return points;
     }
-    areas.forEach(a => {
+    const yardAreaId = (areas.find(a => a.id === 'yard') || areas[0])?.id;
+    const hasBox = areaId => [...models.values()].some(m => m.group.visible && m.box?.area === areaId);
+    const activeAreas = showVolumes ? areas : areas.filter(a => a.id === yardAreaId || hasBox(a.id));
+    (activeAreas.length ? activeAreas : areas).forEach(a => {
       for (const x of [a.x, a.x + a.columns]) {
         for (const z of [a.y, a.y + a.rows + .35]) {
           points.push({x, y: 0, z});
@@ -536,6 +588,51 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
       points.push({x: 0, y: 0, z: 0}, {x: 1, y: 1, z: 1});
     }
     return points;
+  }
+  function fitTo(rawPoints, {padding = FOCUS_FIT_PADDING, logical = false} = {}) {
+    if (!Array.isArray(rawPoints) || !rawPoints.length) return;
+    const points = logical
+      ? rawPoints.map(p => {
+          const t = transpose ? transposePoint({x: p.x, y: p.z, z: p.y}) : {x: p.x, y: p.z, z: p.y};
+          return {x: t.x, y: p.y, z: t.z};
+        })
+      : rawPoints;
+    const box = new THREE.Box3();
+    points.forEach(p => box.expandByPoint(new THREE.Vector3(p.x, p.y, p.z)));
+    const center = box.getCenter(new THREE.Vector3());
+    const frontVec = VIEW_DIRECTIONS[DEFAULT_CAMERA_VIEW] || VIEW_DIRECTIONS.front;
+    const direction = camera.position.clone().sub(orbit.target).normalize();
+    if (direction.lengthSq() < 1e-6) direction.set(frontVec.x, frontVec.y, frontVec.z).normalize();
+    const right = new THREE.Vector3().crossVectors(camera.up, direction).normalize();
+    const up = new THREE.Vector3().crossVectors(direction, right).normalize();
+    const distance = computeFitDistance(
+      points,
+      center,
+      direction,
+      right,
+      up,
+      camera.fov,
+      camera.aspect,
+      {padding, minDistance: orbit.minDistance, near: camera.near},
+    );
+    orbit.target.copy(center);
+    camera.position.copy(center).addScaledVector(direction, distance);
+    canvas.dataset.fitDistance = String(Number(distance.toFixed(3)));
+    orbit.update(); cameraChanged();
+  }
+  function fitBoxBounds(boxSpec) {
+    if (!boxSpec) return [];
+    const shown = transpose ? transposeBox(boxSpec) : boxSpec;
+    const w = shown.width || 1, d = shown.depth || 1, h = 1.05;
+    const pts = [];
+    for (const x of [shown.x, shown.x + w]) {
+      for (const y of [shown.z ?? 0, (shown.z ?? 0) + h]) {
+        for (const z of [shown.y, shown.y + d]) {
+          pts.push({x, y, z});
+        }
+      }
+    }
+    return pts;
   }
   function fit(id) {
     const points = fitPoints(id);
@@ -665,6 +762,9 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
     } else if (['+', '=', '-', 'Home'].includes(event.key)) {
       event.preventDefault();
       if (event.key === 'Home') fit(); else zoom(event.key === '-' ? 1 / 1.2 : 1.2);
+    } else if ([' ', '[', ']'].includes(event.key)) {
+      event.preventDefault();
+      onPlaybackKey?.(event.key);
     }
   }
   function resize() {
@@ -703,7 +803,7 @@ export function createRenderer(canvas, areas, {onSelect, onResolveDrop, onDrop, 
       invalidate();
     },
     fitLocation() { fit('@location'); },
-    fit, view, zoom,
+    fit, fitTo, fitBoxBounds, setMotion, view, zoom,
     isolate(id) { isolated = id || null; syncSelection(); },
     resize,
     dispose() {

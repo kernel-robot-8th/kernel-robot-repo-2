@@ -230,8 +230,9 @@ class SituationBoardTests(TestCase):
         current, upcoming = sequence.split('class="board-next-item"', 1)
         for text in ('지금', '현재 화물', '진행 중', '야드 → 반출대', '팔 A', 'href="/work/1/"'):
             self.assertIn(text, current)
-        for text in ('다음 1', '입고', '다음 화물', '대기', '반입대 → 야드', '팔 B', 'href="/requests/2/"'):
+        for text in ('다음 1', '입고', '다음 화물', '반입대 → 야드', '팔 B', 'href="/requests/2/"'):
             self.assertIn(text, upcoming)
+        self.assertNotIn('대기', upcoming)
         empty = render_to_string('overview.html', {'board': {'current_job': None, 'next_jobs': []}})
         self.assertIn('하는 일 없음', empty)
         self.assertNotIn('class="board-next-item"', empty)
@@ -328,6 +329,8 @@ class SituationBoardTests(TestCase):
 
         resp = self.client.get(f'/?observation={obs.pk}')
         board = resp.context['board']
+        self.assertEqual(board['current_job']['source'], 'yard-r1-c1-l2')
+        self.assertEqual(board['current_job']['destination'], 'temp_a-r1-c1-l1')
         ops_yard = resp.context['operations']['yard']
 
         # operations['yard'] must not be mutated
@@ -371,7 +374,8 @@ class SituationBoardTests(TestCase):
         self.assertEqual(in_plan.result['status'], 'READY')
         resp_in = self.client.get(f'/?observation={obs.pk}')
         in_board = resp_in.context['board']
-        self.assertEqual(in_board['current_job']['source'], '반입(컨베이어)')
+        self.assertEqual(in_board['current_job']['source'], 'belt')
+        self.assertRegex(in_board['current_job']['destination'], r'^yard-r\d+-c[14]-l\d+$')
         self.assertIn('<span class="slot-ghost">N1</span>', resp_in.content.decode())
 
     def test_board_even_container_css_tokens_and_slot_card_backwards_compat(self):

@@ -11,8 +11,8 @@ from harbor_web.models import clean_text, Cargo, CargoFootprint
 from harbor_web.service_common import _domain
 from harbor_web.yard_occupancy import AREA_LABELS
 
-DEFAULT_MOVE_SECONDS_ESTIMATE = 60  # 이동 1회 예상 초 (실측 전 기본값)
-MOVE_SECONDS_ESTIMATE_DESCRIPTION = '이동 1회 예상 초 (실측 전 기본값)'
+DEFAULT_MOVE_SECONDS_ESTIMATE = 60  # 이동 1회 기준 초 (실측 전 기본값)
+MOVE_SECONDS_ESTIMATE_DESCRIPTION = '이동 1회 기준 초 (실측 전 기본값)'
 
 
 def move_seconds_estimate(condition_payload=None) -> float:
