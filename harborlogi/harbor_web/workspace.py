@@ -42,7 +42,7 @@ def _yard_stages(order, plan, source):
         display_moves.append(display)
         by_id[move['source']]['cargo'].remove(move['cargo_id'])
         by_id[move['destination']]['cargo'].append(move['cargo_id'])
-        stages.append(stage(i + 1, phase, f'{i + 1}단계 후 예상 · {phase}', display))
+        stages.append(stage(i + 1, phase, f'{i + 1}단계 · {phase}', display))
     return stages, display_moves
 
 
@@ -72,7 +72,7 @@ def spatial_stages(order, source, moves, *, snapshot=None):
                        source_place=placement_text(move['source_placement'], labels, slot),
                        destination_place=placement_text(move['destination_placement'], labels, slot))
         display_moves.append(display)
-        stages.append(stage(i + 1, move['phase_label'], f"{i + 1}단계 후 예상 · {move['phase_label']}", display))
+        stages.append(stage(i + 1, move['phase_label'], f"{i + 1}단계 · {move['phase_label']}", display))
     return stages, display_moves
 
 
@@ -108,7 +108,7 @@ def workspace_context(order, plan=None, *, priority_form=None, plan_form=None, r
     elif plan and plan.result['status'] == 'HOLD':
         decision = dict(title='이 일은 지금 못 합니다', body=reason_text(plan.result['reason']), href='#moves-title', label='이유 보기', tone='attention')
     elif plan:
-        decision = dict(title='계획 검토 완료 · 실행 인계 대기', body=gate_text(gate['reason']) or '관측과 예상 이동을 검토한 뒤 현재 단계의 인계를 준비하세요.', href='#execution', label='실행 인계 조건 확인', tone='info')
+        decision = dict(title='계획 검토 완료 · 실행 인계 대기', body=gate_text(gate['reason']) or '관측과 계획 이동을 검토한 뒤 현재 단계의 인계를 준비하세요.', href='#execution', label='실행 인계 조건 확인', tone='info')
     else:
         decision = dict(title='관측 기준으로 계획 검토', body='대상 화물의 현재 위치와 재취급 공간을 확인한 뒤 반출 계획을 만드세요.', href='#planning', label='계획 짜기', tone='info')
 

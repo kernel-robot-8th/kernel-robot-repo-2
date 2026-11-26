@@ -33,8 +33,9 @@ class OrderTimelineTests(TestCase):
         response = self.get(plan.order)
         self.assertContains(response, 'Plan #%d' % plan.pk)
         self.assertContains(response, f'href="/plans/{plan.pk}/"')
-        self.assertContains(response, '예상 · 재취급')
-        self.assertContains(response, '예상 · 반출')
+        self.assertContains(response, '계획 · 재취급')
+        self.assertContains(response, '계획 · 반출')
+        self.assertNotContains(response, '예상')
         self.assertContains(response, '실행 기록 없음')
         self.assertEqual(response.context['actual_line'], [])
 

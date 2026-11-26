@@ -8,8 +8,8 @@
   <ol class="steps">{% for move in preview.moves %}<li class="step phase-other"><i>{{ move.number }}</i>{{ move.cargo }} <small>{{ move.source }} → {{ move.destination }}</small></li>{% endfor %}</ol>
   {% if preview.yard_scene %}
   <div class="inventory-yard yard-inline-3d" data-yard-preview>
-    <div class="preview-controls" aria-label="재배치 예상 단계 선택">{% for stage in preview.yard_stages %}<button type="button" class="quiet" data-yard-stage="{{ stage.index }}" aria-controls="{{ stage.panel_id }}" aria-pressed="{% if forloop.first %}true{% else %}false{% endif %}" hidden>{% if forloop.first %}현재{% else %}{{ stage.index }} · {{ stage.phase }}{% endif %}</button>{% endfor %}</div>
-    <p class="preview-status helptext" data-yard-status role="status">현재 배치 · 단계를 선택하면 예상 이동만 미리 봅니다.</p>
+    <div class="preview-controls" aria-label="재배치 단계 선택">{% for stage in preview.yard_stages %}<button type="button" class="quiet" data-yard-stage="{{ stage.index }}" aria-controls="{{ stage.panel_id }}" aria-pressed="{% if forloop.first %}true{% else %}false{% endif %}" hidden>{% if forloop.first %}현재{% else %}{{ stage.index }} · {{ stage.phase }}{% endif %}</button>{% endfor %}</div>
+    <p class="preview-status helptext" data-yard-status role="status">현재 배치 · 단계를 선택하면 계획 이동만 미리 봅니다.</p>
     {% include 'yard_3d.html' with yard_scene=preview.yard_scene %}
     <div data-yard-flat>{% for stage in preview.yard_stages %}{% include 'yard_stage.html' %}{% endfor %}</div>
   </div>

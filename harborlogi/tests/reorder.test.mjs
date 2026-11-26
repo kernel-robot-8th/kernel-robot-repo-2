@@ -205,20 +205,25 @@ assert.equal(DEFAULT_MOVE_SECONDS_ESTIMATE, 60);
   // INBOUND counts as 1 move -> +1m -> 10:06 KST (> 10:05 cutoff -> late!)
   assert.equal(etas.get('3').etaText, '10:06');
   assert.equal(etas.get('3').late, true);
-  // HOLD step -> '—'
-  assert.equal(etas.get('4').etaText, '—');
+  // HOLD step -> no time text (no '—' placeholder)
+  assert.equal(etas.get('4').etaText, '');
   assert.equal(etas.get('4').late, false);
-  // 9th step (index 8 >= limit 8) -> '—'
-  assert.equal(etas.get('9').etaText, '—');
+  // 9th step (index 8 >= explicit limit 8) -> no time text
+  assert.equal(etas.get('9').etaText, '');
   assert.equal(etas.get('9').late, false);
   for (const entry of etas.values()) {
     assert.equal(entry.etaText.includes('예상'), false);
+    assert.equal(entry.etaText.includes('—'), false);
   }
+  // Default limit covers the whole queue: the 9th step gets a time too.
+  const etasAll = computeScheduleEtas(steps, {baseTimeMs: baseMs, moveSecondsEstimate: 60});
+  assert.match(etasAll.get('9').etaText, /^\d\d:\d\d$/);
+  assert.equal(etasAll.get('4').etaText, '');
 
   // Custom moveSecondsEstimate (120s/move): 5 moves = +10m -> 10:10 KST
   const etas120 = computeScheduleEtas(steps.slice(0, 2), {baseTimeMs: baseMs, moveSecondsEstimate: 120});
   assert.equal(etas120.get('2').etaText, '10:10');
-  assert.equal(formatEtaHHMM(NaN), '—');
+  assert.equal(formatEtaHHMM(NaN), '');
 
   // formatEtaHHMM always renders KST (Asia/Seoul, UTC+9) regardless of host timezone
   assert.equal(formatEtaHHMM(Date.UTC(2026, 10, 26, 0, 0, 0)), '09:00');

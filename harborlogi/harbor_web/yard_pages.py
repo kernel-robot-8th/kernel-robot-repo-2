@@ -10,6 +10,7 @@ from harbor.process import anchor_address
 from harbor.model import OutboundRequest, YARD_ARMS
 from harbor.outbound import OutboundProposal, plan_outbound
 from harbor.placement import plan_placement
+from harbor.site_recognition import placement_to_site_ref
 from harbor.spatial import CargoShape, Placement, plan_rearrangement, plan_spatial
 from harbor_web import services
 from harbor_web.board import _is_empty_rearrange
@@ -382,7 +383,7 @@ def _inbound_scene(
             spatial_yard_view(projected, target=cargo_code),
             index=1,
             phase='입고',
-            label=f'1단계 후 예상 · {cargo_code} 입고',
+            label=f'1단계 · {cargo_code} 입고',
             move=display_move,
             panel_id=f'yard-in-{order.pk}-1',
         ),
@@ -548,7 +549,7 @@ def outbound_chain_replay(observation, *, allowed_order_ids=None, limit=PREVIEW_
                     spatial_yard_view(current, target=cargo_id, blockers=step_blockers),
                     index=move_number,
                     phase=move.phase_label,
-                    label=f'{move_number}단계 후 예상 · {cargo_id} {move.phase_label}',
+                    label=f'{move_number}단계 · {cargo_id} {move.phase_label}',
                     move=display,
                     panel_id=f'yard-chain-{move_number}',
                 ), observation.condition.payload))
@@ -591,7 +592,7 @@ def outbound_chain_replay(observation, *, allowed_order_ids=None, limit=PREVIEW_
 def yard_page_context(observation, *, now=None):
     """Build open queue schedule, in-memory 3D previews (never saving Plans), outbound chain replay, and current move arrows."""
     if observation is None:
-        return dict(upcoming=[], active_arrows=[], active_upcoming=None, outbound_chain=None)
+        return dict(upcoming=[], active_arrows=[], active_upcoming=None, outbound_chain=None, current_job_key='')
     wall_now = timezone.now() if now is None else now
     open_orders = list(
         Order.objects.exclude(pk__in=completed_order_ids())
@@ -599,7 +600,7 @@ def yard_page_context(observation, *, now=None):
         .order_by('priority_group', 'sequence', 'pk')
     )
     if not open_orders:
-        return dict(upcoming=[], active_arrows=[], active_upcoming=None, outbound_chain=None)
+        return dict(upcoming=[], active_arrows=[], active_upcoming=None, outbound_chain=None, current_job_key='')
     order_ids = [order.pk for order in open_orders]
     latest_plans = {}
     for plan in (
@@ -646,7 +647,7 @@ def yard_page_context(observation, *, now=None):
 
     ordered_orders = _ordered_open_orders(open_orders, all_commands, all_cell_plans, latest_commands, fallback_plans)
     if not ordered_orders:
-        return dict(upcoming=[], active_arrows=[], active_upcoming=None, outbound_chain=None)
+        return dict(upcoming=[], active_arrows=[], active_upcoming=None, outbound_chain=None, current_job_key='')
 
     is_spatial = observation.payload.get('schema') == 'grid-placement-v1'
     labels, slot = place_context(observation.condition.payload) if is_spatial else ({}, None)
@@ -738,79 +739,92 @@ def yard_page_context(observation, *, now=None):
         preview_skipped = index >= PREVIEW_COMPUTE_LIMIT
         result = None
 
-        if not preview_skipped:
-            if use_saved:
-                result = plan.result
-            else:
-                order_reserved = (
-                    frozenset().union(*(cells for oid, cells in auto_reservations.items() if oid != order.pk))
-                    if order.kind == 'INBOUND' and auto_reservations
-                    else frozenset()
-                )
-                result = _preview_plan_result(
-                    order,
-                    observation,
-                    is_spatial=is_spatial,
-                    spatial_snap=spatial_snap,
-                    spatial_pol=spatial_pol,
-                    legacy_yard=legacy_yard,
-                    legacy_constraints=legacy_constraints,
-                    schedule=active_schedule,
-                    footprints=footprints,
-                    now=preview_now,
-                    arm_candidates=arm_candidates,
-                    reserved_cells=order_reserved,
-                )
+        if use_saved:
+            result = plan.result
+        else:
+            order_reserved = (
+                frozenset().union(*(cells for oid, cells in auto_reservations.items() if oid != order.pk))
+                if order.kind == 'INBOUND' and auto_reservations
+                else frozenset()
+            )
+            result = _preview_plan_result(
+                order,
+                observation,
+                is_spatial=is_spatial,
+                spatial_snap=spatial_snap,
+                spatial_pol=spatial_pol,
+                legacy_yard=legacy_yard,
+                legacy_constraints=legacy_constraints,
+                schedule=active_schedule,
+                footprints=footprints,
+                now=preview_now,
+                arm_candidates=arm_candidates,
+                reserved_cells=order_reserved,
+            )
 
-        if preview_skipped:
-            if order.kind in ('OUTBOUND', 'INBOUND'):
-                summary_parts.append(order.tier_label)
-            summary_parts.append('3D 준비 안 됨')
-        elif result is None or result.get('status') != 'READY':
+        if result is None or result.get('status') != 'READY':
             hold_reason = _short_hold_reason((result or {}).get('reason', ''))
         elif order.kind in ('OUTBOUND', 'REARRANGE'):
             if order.kind == 'OUTBOUND':
                 summary_parts.append(order.tier_label)
             moves = result.get('moves') or []
             if moves:
-                advanced_snap = None
-                try:
+                if preview_skipped:
                     if is_spatial and spatial_snap is not None:
-                        stages, display_moves = spatial_stages(order, observation, moves, snapshot=spatial_snap)
-                        advanced_snap = _advance_spatial_moves(
-                            spatial_snap,
-                            moves,
-                            remove_cargo_id=order.cargo.code if order.kind == 'OUTBOUND' and order.cargo_id else None,
-                        )
-                    else:
-                        stages, display_moves = _yard_stages(order, plan or SimpleNamespace(result=result), observation)
-                except ValueError:
-                    stages, display_moves = [], []
-                    if use_saved and is_spatial and base_spatial_snap is not None and base_spatial_snap is not spatial_snap:
                         try:
-                            stages, display_moves = spatial_stages(order, observation, moves, snapshot=base_spatial_snap)
+                            spatial_snap = _advance_spatial_moves(
+                                spatial_snap,
+                                moves,
+                                remove_cargo_id=order.cargo.code if order.kind == 'OUTBOUND' and order.cargo_id else None,
+                            )
+                            if order.kind == 'OUTBOUND' and order.cargo_id:
+                                active_schedule.pop(order.cargo.code, None)
                         except ValueError:
-                            stages, display_moves = [], []
                             hold_reason = '확인 필요'
-                    else:
-                        hold_reason = '확인 필요'
-                if advanced_snap is not None:
-                    spatial_snap = advanced_snap
-                    if order.kind == 'OUTBOUND' and order.cargo_id:
-                        active_schedule.pop(order.cargo.code, None)
-                if stages:
-                    arrows = _arrows_from_moves(display_moves)
-                    occupancy = occupancy_map(stages[0], display_moves)
-                    scene = scene_for(stages)
-                    if scene:
-                        scene['rehandle'] = occupancy['rehandle_cargo'] if occupancy else []
-                        scene['arrows'] = arrows
-                        scene['title'] = title
-                        attach_cargo_metadata(scene, cargo_meta)
-                    arms = sorted({a['arm'] for a in arrows if a['arm']})
-                    summary_parts.append(f'이동 {len(arrows)}회')
-                    if arms:
-                        summary_parts.append(f"팔 {', '.join(arms)}")
+                    if not hold_reason:
+                        arms = sorted({m.get('primary_arm', '') for m in moves if m.get('primary_arm')})
+                        summary_parts.append(f'이동 {len(moves)}회')
+                        if arms:
+                            summary_parts.append(f"팔 {', '.join(arms)}")
+                else:
+                    advanced_snap = None
+                    try:
+                        if is_spatial and spatial_snap is not None:
+                            stages, display_moves = spatial_stages(order, observation, moves, snapshot=spatial_snap)
+                            advanced_snap = _advance_spatial_moves(
+                                spatial_snap,
+                                moves,
+                                remove_cargo_id=order.cargo.code if order.kind == 'OUTBOUND' and order.cargo_id else None,
+                            )
+                        else:
+                            stages, display_moves = _yard_stages(order, plan or SimpleNamespace(result=result), observation)
+                    except ValueError:
+                        stages, display_moves = [], []
+                        if use_saved and is_spatial and base_spatial_snap is not None and base_spatial_snap is not spatial_snap:
+                            try:
+                                stages, display_moves = spatial_stages(order, observation, moves, snapshot=base_spatial_snap)
+                            except ValueError:
+                                stages, display_moves = [], []
+                                hold_reason = '확인 필요'
+                        else:
+                            hold_reason = '확인 필요'
+                    if advanced_snap is not None:
+                        spatial_snap = advanced_snap
+                        if order.kind == 'OUTBOUND' and order.cargo_id:
+                            active_schedule.pop(order.cargo.code, None)
+                    if stages:
+                        arrows = _arrows_from_moves(display_moves)
+                        occupancy = occupancy_map(stages[0], display_moves)
+                        scene = scene_for(stages)
+                        if scene:
+                            scene['rehandle'] = occupancy['rehandle_cargo'] if occupancy else []
+                            scene['arrows'] = arrows
+                            scene['title'] = title
+                            attach_cargo_metadata(scene, cargo_meta)
+                        arms = sorted({a['arm'] for a in arrows if a['arm']})
+                        summary_parts.append(f'이동 {len(arrows)}회')
+                        if arms:
+                            summary_parts.append(f"팔 {', '.join(arms)}")
             else:
                 summary_parts.append('이동 없음')
         elif order.kind == 'INBOUND':
@@ -818,29 +832,47 @@ def yard_page_context(observation, *, now=None):
             decision = saved_decisions.get(str(plan.pk)) if plan is not None else None
             recommendation = (decision.detail.get('recommendation') if decision else None) or result.get('recommendation')
             if recommendation:
-                target_label = f'→ {placement_text(recommendation, labels, slot)}'
-                stages, scene, arrows, projected = _inbound_scene(
-                    order,
-                    observation,
-                    result,
-                    spatial_snap=spatial_snap,
-                    spatial_pol=spatial_pol,
-                    labels=labels,
-                    slot=slot,
-                    footprints=footprints,
-                    title=title,
-                    recommendation=recommendation,
-                    cargo_meta=cargo_meta,
-                )
-                if projected is not None:
-                    spatial_snap = projected
-                    auto_reservations.pop(order.pk, None)
-                elif use_saved and base_spatial_snap is not None and base_spatial_snap is not spatial_snap:
-                    stages, scene, arrows, _ = _inbound_scene(
+                try:
+                    target_ref = placement_to_site_ref(
+                        recommendation.get('area_id') or recommendation.get('area'),
+                        int(recommendation['row']),
+                        int(recommendation['column']),
+                        int(recommendation['level']),
+                    )
+                except (KeyError, TypeError, ValueError):
+                    target_ref = placement_text(recommendation, labels, slot)
+                target_label = f'→ {target_ref}'
+                if preview_skipped:
+                    cargo_code = recommendation.get('cargo_id') or (order.cargo.code if order.cargo_id else '')
+                    if is_spatial and spatial_snap is not None and cargo_code and not any(p.cargo_id == cargo_code for p in spatial_snap.placements):
+                        incoming_meta = result.get('incoming_shape') or {}
+                        footprint = footprints.get(order.cargo_id)
+                        length_cells = incoming_meta.get('length_cells') or (footprint.length_cells if footprint else (slot.size if slot else 1))
+                        footprint_rev = incoming_meta.get('footprint_revision') or (footprint.pk if footprint else 0)
+                        try:
+                            rec_placement = Placement(
+                                cargo_code,
+                                recommendation['area_id'],
+                                int(recommendation['row']),
+                                int(recommendation['column']),
+                                int(recommendation['level']),
+                                int(recommendation.get('orientation', 0)),
+                            )
+                            incoming = CargoShape(cargo_code, int(length_cells), int(footprint_rev))
+                            spatial_snap = replace(
+                                spatial_snap,
+                                shapes=spatial_snap.shapes + (incoming,),
+                                placements=spatial_snap.placements + (rec_placement,),
+                            )
+                            auto_reservations.pop(order.pk, None)
+                        except (KeyError, TypeError, ValueError):
+                            pass
+                else:
+                    stages, scene, arrows, projected = _inbound_scene(
                         order,
                         observation,
                         result,
-                        spatial_snap=base_spatial_snap,
+                        spatial_snap=spatial_snap,
                         spatial_pol=spatial_pol,
                         labels=labels,
                         slot=slot,
@@ -849,16 +881,56 @@ def yard_page_context(observation, *, now=None):
                         recommendation=recommendation,
                         cargo_meta=cargo_meta,
                     )
+                    if projected is not None:
+                        spatial_snap = projected
+                        auto_reservations.pop(order.pk, None)
+                    elif use_saved and base_spatial_snap is not None and base_spatial_snap is not spatial_snap:
+                        stages, scene, arrows, _ = _inbound_scene(
+                            order,
+                            observation,
+                            result,
+                            spatial_snap=base_spatial_snap,
+                            spatial_pol=spatial_pol,
+                            labels=labels,
+                            slot=slot,
+                            footprints=footprints,
+                            title=title,
+                            recommendation=recommendation,
+                            cargo_meta=cargo_meta,
+                        )
             if plan is not None:
                 summary_parts.append('자리 결정 완료' if decision else '자리 결정 대기')
             elif arrows and arrows[0].get('arm'):
                 summary_parts.append(f"팔 {arrows[0]['arm']}")
+            elif preview_skipped and recommendation and spatial_pol is not None and spatial_snap is not None:
+                yard_bays = {(c.row, c.column): c.bay_id for c in spatial_snap.layout.cells}
+                try:
+                    rec_p = Placement(
+                        recommendation.get('cargo_id') or (order.cargo.code if order.cargo_id else ''),
+                        recommendation['area_id'],
+                        int(recommendation['row']),
+                        int(recommendation['column']),
+                        int(recommendation['level']),
+                        int(recommendation.get('orientation', 0)),
+                    )
+                    cells = spatial_snap.cells(rec_p)
+                    locations = {yard_bays[r, c] for _, r, c, _ in cells} if rec_p.area_id == 'yard' else {rec_p.area_id}
+                    arm = next((a for a in YARD_ARMS if all((a, loc) in spatial_pol.arm_reach for loc in locations)), '')
+                    if arm:
+                        summary_parts.append(f'팔 {arm}')
+                except (KeyError, TypeError, ValueError):
+                    pass
 
-        if not preview_skipped and not hold_reason and result is not None and result.get('status') == 'READY':
+        if not hold_reason and result is not None and result.get('status') == 'READY':
             eta_at = eta_base + timedelta(seconds=cumulative_moves * move_sec)
             eta_text = format_eta(eta_at)
             eta_late = bool(order.cutoff_at is not None and eta_at > order.cutoff_at)
-            step_moves = len(arrows) if arrows else (1 if order.kind == 'INBOUND' else 0)
+            if arrows:
+                step_moves = len(arrows)
+            elif order.kind == 'INBOUND':
+                step_moves = 1
+            else:
+                step_moves = len(result.get('moves') or [])
             cumulative_moves += step_moves
         else:
             eta_at = None
@@ -896,6 +968,11 @@ def yard_page_context(observation, *, now=None):
         else None
     )
     active_arrows = active_upcoming['arrows'] if active_upcoming else []
+    current_job_key = (
+        active_upcoming['key']
+        if active_upcoming is not None
+        else (upcoming[0]['key'] if upcoming and upcoming[0]['scene'] is not None else '')
+    )
     head_outbound_ids = {
         order.pk for order in ordered_orders[:PREVIEW_COMPUTE_LIMIT] if order.kind == 'OUTBOUND'
     }
@@ -905,4 +982,5 @@ def yard_page_context(observation, *, now=None):
         active_arrows=active_arrows,
         active_upcoming=active_upcoming,
         outbound_chain=outbound_chain,
+        current_job_key=current_job_key,
     )

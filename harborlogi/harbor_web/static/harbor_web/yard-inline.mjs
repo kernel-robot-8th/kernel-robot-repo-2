@@ -10,7 +10,7 @@ export function stageButtonSpecs(scene) {
   if (frames.length <= 1) return [];
   return frames.map((frame, index) => ({
     index,
-    label: index === 0 ? '관측' : `${index} · ${frame.move?.phase_label || frame.phase || '예상'}`,
+    label: index === 0 ? '관측' : `${index} · ${frame.move?.phase_label || frame.phase || '단계'}`,
     pressed: index === 0,
   }));
 }
@@ -34,7 +34,7 @@ export function arrowsFromScene(scene) {
   return arrows;
 }
 
-export function renderArrows(container, arrows, {title = '', emptyText = '예상 이동 경로가 없습니다.'} = {}) {
+export function renderArrows(container, arrows, {title = '', emptyText = '이동 경로가 없습니다.'} = {}) {
   if (!container) return;
   const items = Array.isArray(arrows) ? arrows : [];
   if (!items.length) {
@@ -108,17 +108,17 @@ export function bindUpcomingPlans(root, {getViewer, onSwitch} = {}) {
     return node ? JSON.parse(node.textContent) : null;
   };
 
-  const applyViewerScene = (targetKey, scene, autoplay) => {
+  const applyViewerScene = (targetKey, scene, autoplay, {preview = false} = {}) => {
     const viewer = getViewer?.();
     if (!viewer || !scene) return;
     if (typeof viewer.then === 'function') {
       viewer.then(resolved => {
         if (activeKey === targetKey && resolved?.setScene) {
-          resolved.setScene(scene, {autoplay});
+          resolved.setScene(scene, {autoplay, preview});
         }
       });
     } else if (viewer.setScene) {
-      viewer.setScene(scene, {autoplay});
+      viewer.setScene(scene, {autoplay, preview});
     }
   };
 
@@ -155,6 +155,14 @@ export function bindUpcomingPlans(root, {getViewer, onSwitch} = {}) {
     };
     if (controller) button.addEventListener('click', handler, {signal: controller.signal});
     else button.addEventListener('click', handler);
+  }
+
+  const currentButton = buttons.find(btn => btn.hasAttribute?.('data-upcoming-current') || 'upcomingCurrent' in (btn.dataset || {}));
+  if (currentButton) {
+    const currentScene = readScene(currentButton.dataset.upcomingScene);
+    if (currentScene) {
+      applyViewerScene(null, currentScene, false, {preview: true});
+    }
   }
 
   return {

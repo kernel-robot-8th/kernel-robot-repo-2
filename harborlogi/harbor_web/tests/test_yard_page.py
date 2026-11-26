@@ -61,9 +61,11 @@ class YardPageTests(TestCase):
     def test_empty_observation_returns_empty_yard_page_context(self):
         self.assertEqual(
             yard_page_context(None),
-            dict(upcoming=[], active_arrows=[], active_upcoming=None, outbound_chain=None),
+            dict(upcoming=[], active_arrows=[], active_upcoming=None, outbound_chain=None, current_job_key=''),
         )
         self.assertIsNone(outbound_chain_replay(None))
+        # Observation with no open orders also yields empty current_job_key.
+        self.assertEqual(yard_page_context(self.observation)['current_job_key'], '')
 
     def test_outbound_rearrange_inbound_plans_and_filters(self):
         outbound = services.create_order(
@@ -181,7 +183,7 @@ class YardPageTests(TestCase):
         self.assertTrue(any(a['phase'] == '반출' and a['destination'] == '반출대' for a in out_item['arrows']))
 
         in_item = items[inbound.pk]
-        self.assertEqual(in_item['target_label'], '→ 2행 1열 3층')
+        self.assertEqual(in_item['target_label'], '→ yard-r1-c4-l3')
         self.assertIsNotNone(in_item['scene'])
         self.assertEqual(len(in_item['scene']['frames']), 2)
         self.assertEqual(in_item['scene']['frames'][1]['move']['source'], 'belt')
@@ -216,7 +218,7 @@ class YardPageTests(TestCase):
         self.assertIn(f'id="upcoming-scene-{outbound_plan.pk}"', html)
         self.assertIn(f'id="upcoming-scene-{rearrange_plan.pk}"', html)
         self.assertIn(f'id="upcoming-scene-{inbound_plan.pk}"', html)
-        self.assertIn('→ 2행 1열 3층', html)
+        self.assertIn('→ yard-r1-c4-l3', html)
         self.assertIn('data-yard-stages', html)
         self.assertIn(f'data-upcoming-plan="plan-{outbound_plan.pk}"', html)
         self.assertIn(f'data-upcoming-scene="upcoming-scene-{outbound_plan.pk}"', html)
@@ -598,10 +600,16 @@ class SeedYardScheduleTests(TestCase):
         ]
         self.assertEqual(yard_cargo_titles, board_titles)
 
-        # First 8 orders are previewed in memory; the rest are capped with '3D 준비 안 됨'.
+        # First 8 orders build 3D scenes in memory; all 22 items carry ETA and summary without '3D 준비 안 됨' or '—'.
         self.assertTrue(all(item['scene'] is not None for item in upcoming[:8]))
         self.assertTrue(all(item['scene'] is None and item['preview_skipped'] for item in upcoming[8:]))
-        self.assertIn('3D 준비 안 됨', yard_response.content.decode())
+        self.assertTrue(all(re.match(r'^\d\d:\d\d$', item['eta_text']) for item in upcoming))
+        self.assertEqual(yard_response.context['current_job_key'], upcoming[0]['key'])
+        yard_html = yard_response.content.decode()
+        self.assertIn('data-upcoming-current', yard_html)
+        self.assertNotIn('3D 준비 안 됨', yard_html)
+        self.assertNotIn('계산 전', yard_html)
+        self.assertNotIn('예상', yard_html)
 
         # First outbound (C-1) has a 5-step 3D scene (rehandle C-9, C-2 -> outbound C-1 -> return C-2, C-9).
         by_code = {item['order'].cargo.code: item for item in upcoming}
@@ -627,10 +635,10 @@ class SeedYardScheduleTests(TestCase):
         self.assertEqual(first_inbound['arrows'][0]['destination'], '2행 2열 2층')
         tier1_inbound_targets = [by_code[c]['target_label'] for c in ('C-5', 'C-8', 'C-18')]
         self.assertEqual(len(set(tier1_inbound_targets)), 3)
-        self.assertEqual(tier1_inbound_targets, ['→ 2행 2열 2층', '→ 2행 3열 2층', '→ 2행 2열 3층'])
+        self.assertEqual(tier1_inbound_targets, ['→ yard-r2-c4-l2', '→ yard-r3-c4-l2', '→ yard-r2-c4-l3'])
 
-        # Inbound C-6 (after outbound C-3) uses the slot freed by C-3 (row=1, col=4, level=2 -> 2행 1열 2층).
-        self.assertEqual(by_code['C-6']['target_label'], '→ 2행 1열 2층')
+        # Inbound C-6 (after outbound C-3) uses the slot freed by C-3 (row=1, col=4, level=2 -> yard-r1-c4-l2).
+        self.assertEqual(by_code['C-6']['target_label'], '→ yard-r1-c4-l2')
         self.assertNotIn('C-3', {b['id'] for b in by_code['C-6']['scene']['frames'][0]['boxes']})
         # Outbound chain is bounded to outbound orders within the first 8 queue items.
         chain = yard_response.context['outbound_chain']

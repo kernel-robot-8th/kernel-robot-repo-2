@@ -5,6 +5,8 @@ from django.db.models import CharField, Min, OuterRef, Subquery
 from django.db.models.functions import Cast
 from django.utils import timezone
 
+from harbor.cell_site_map import validate_canonical_wire_ref
+from harbor.site_recognition import placement_to_site_ref
 from harbor_web import access, executor
 from harbor_web.alert_pages import alerts_context
 from harbor_web.auth import roles
@@ -17,7 +19,6 @@ from harbor_web.yard_rows import (
     place_context,
     place_label,
     placement_text,
-    route_text as format_route_text,
     slot_key,
 )
 
@@ -140,6 +141,23 @@ def _today_counts(now, *, open_orders, completed_commands, latest_commands, late
     ]
 
 
+def _site_ref_or_label(placement, labels=None, slot=None):
+    if placement is None:
+        return validate_canonical_wire_ref('belt', allow_belt=True)
+    if isinstance(placement, dict):
+        area_id = placement.get('area_id') or placement.get('area')
+        try:
+            return placement_to_site_ref(
+                area_id,
+                int(placement['row']),
+                int(placement['column']),
+                int(placement['level']),
+            )
+        except (KeyError, TypeError, ValueError):
+            return placement_text(placement, labels, slot)
+    return place_label(placement, labels, slot)
+
+
 def _move_details(order, *, command=None, plan=None):
     """Extract display move fields and mini-yard slot keys without recomputing."""
     effective_plan = (
@@ -173,13 +191,9 @@ def _move_details(order, *, command=None, plan=None):
         if 'source_placement' in move or 'destination_placement' in move:
             src_p = move.get('source_placement')
             dst_p = move.get('destination_placement')
-            source = place_label(src_p, labels, slot) if src_p else '—'
-            destination = place_label(dst_p, labels, slot) if dst_p else '—'
-            route = (
-                format_route_text(move, labels, slot)
-                if (src_p and dst_p)
-                else f'{source} → {destination}'
-            )
+            source = _site_ref_or_label(src_p, labels, slot) if src_p else '—'
+            destination = _site_ref_or_label(dst_p, labels, slot) if dst_p else '—'
+            route = f'{source} → {destination}'
             origin_key = slot_key(src_p, slot or DEFAULT_SLOT) if src_p else None
             dest_key = slot_key(dst_p, slot or DEFAULT_SLOT) if dst_p else None
         else:
@@ -202,8 +216,8 @@ def _move_details(order, *, command=None, plan=None):
     rec = effective_plan.result.get('recommendation')
     if isinstance(rec, dict):
         cargo = rec.get('cargo_id') or default_cargo
-        source = place_label(None)
-        destination = placement_text(rec, labels, slot)
+        source = _site_ref_or_label(None)
+        destination = _site_ref_or_label(rec, labels, slot)
         return dict(
             cargo=cargo,
             arm=None,

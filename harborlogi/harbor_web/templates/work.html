@@ -29,7 +29,7 @@
           <span class="wf-tier-count" data-wf-count>{{ tier.rows|length }}건</span>
         </header>
         <ol class="wf-lane-list" data-wf-list="{{ tier.group }}" data-empty-label="{{ tier.name }} 단계 작업 없음">
-          {% for row in tier.rows %}<li class="wf-node work-{{ row.tone }}{% if row.is_next %} is-next{% endif %}{% if row.card_place_kind == 'blocked' %} is-sim-blocked{% endif %} wf-kind-{{ row.order.kind|lower }}" data-card-id="{{ row.order.pk }}" data-order="{{ row.order.pk }}" data-version="{{ row.order.version }}" data-tier="{{ tier.group }}" data-tier-name="{{ tier.name }}" data-kind="{{ row.order.kind }}" data-kind-label="{{ row.kind }}" data-code="{{ row.order.cargo.code }}" data-state="{{ row.state }}" data-shipper="{{ row.shipper }}" data-voyage="{{ row.voyage }}" data-cutoff="{{ row.cutoff_text }}" data-cutoff-iso="{{ row.cutoff_iso }}" data-eta="{{ row.eta_text }}" data-eta-late="{% if row.eta_late %}1{% else %}0{% endif %}" data-plan-summary="{{ row.plan_summary }}" data-href="{{ row.href }}" data-running="{% if row.state == '진행 중' %}1{% else %}0{% endif %}" data-done="0"><div class="wf-card work-chip" tabindex="0" role="button" aria-expanded="false"><div class="wf-card-top"><span class="wf-seq" data-reorder-seq>{{ row.seq_num }}</span>{% if row.state == '진행 중' %}<span class="work-tag">지금</span>{% elif row.is_next %}<span class="work-tag">다음</span>{% endif %}<span class="wf-kind wf-kind-{{ row.order.kind|lower }}">{{ row.kind }}</span><strong class="wf-code">{{ row.order.cargo.code }}</strong></div><div class="wf-card-meta"><span class="work-state">{{ row.state }}</span><span class="wf-eta{% if row.eta_late %} wf-eta-late{% endif %}" data-wf-eta>{{ row.eta_text }}</span>{% if row.card_place %}<span class="wf-place{% if row.card_place_kind == 'blocked' %} wf-place-blocked{% elif row.card_place_kind == 'uncomputed' %} wf-place-uncomputed{% endif %}">{{ row.card_place }}</span>{% endif %}{% if row.order.tie_policy == 'ANY' %}<small>단계 안 순서 자유</small>{% endif %}</div></div></li>{% endfor %}
+          {% for row in tier.rows %}<li class="wf-node work-{{ row.tone }}{% if row.is_next %} is-next{% endif %}{% if row.card_place_kind == 'blocked' %} is-sim-blocked{% endif %} wf-kind-{{ row.order.kind|lower }}" data-card-id="{{ row.order.pk }}" data-order="{{ row.order.pk }}" data-version="{{ row.order.version }}" data-tier="{{ tier.group }}" data-tier-name="{{ tier.name }}" data-kind="{{ row.order.kind }}" data-kind-label="{{ row.kind }}" data-code="{{ row.order.cargo.code }}" data-state="{{ row.state }}" data-shipper="{{ row.shipper }}" data-voyage="{{ row.voyage }}" data-cutoff="{{ row.cutoff_text }}" data-cutoff-iso="{{ row.cutoff_iso }}" data-eta="{{ row.eta_text }}" data-eta-late="{% if row.eta_late %}1{% else %}0{% endif %}" data-plan-summary="{{ row.plan_summary }}" data-href="{{ row.href }}"{% if row.action_label and row.action_href %} data-action-label="{{ row.action_label }}" data-action-href="{{ row.action_href }}"{% endif %} data-running="{% if row.state == '진행 중' %}1{% else %}0{% endif %}" data-done="0"><div class="wf-card work-chip" tabindex="0" role="button" aria-expanded="false"><div class="wf-card-top"><span class="wf-seq" data-reorder-seq>{{ row.seq_num }}</span>{% if row.state == '진행 중' %}<span class="work-tag">지금</span>{% elif row.is_next %}<span class="work-tag">다음</span>{% endif %}<span class="wf-kind wf-kind-{{ row.order.kind|lower }}">{{ row.kind }}</span><strong class="wf-code">{{ row.order.cargo.code }}</strong></div><div class="wf-card-meta">{% if row.state != '대기' %}<span class="work-state">{{ row.state }}</span>{% endif %}<span class="wf-eta{% if row.eta_late %} wf-eta-late{% endif %}" data-wf-eta>{{ row.eta_text }}</span>{% if row.card_place %}<span class="wf-place{% if row.card_place_kind == 'blocked' %} wf-place-blocked{% elif row.card_place_kind == 'uncomputed' %} wf-place-uncomputed{% endif %}">{{ row.card_place }}</span>{% endif %}{% if row.order.tie_policy == 'ANY' %}<small>단계 안 순서 자유</small>{% endif %}</div></div></li>{% endfor %}
         </ol>
       </section>
       {% endfor %}
@@ -39,19 +39,11 @@
     {% else %}<p>등록된 작업이 없습니다</p>{% endif %}
   </div>
 </section>
-<section class="panel" aria-labelledby="work-inbound">
-  <div class="panel-h"><h2 id="work-inbound">입고 자리</h2></div>
-  <div class="panel-b">
-    {% if inbound %}<ul class="work-inbound">
-    {% for row in inbound %}<li class="work-{{ row.tone }}"><a href="{{ row.href }}">{{ row.order.cargo.code }} 입고</a> <span>{{ row.place|default:row.place_hint }}</span> <span class="work-inbound-actions"><span class="work-state">{{ row.state }}</span>{% if row.place %}<a href="/plans/{{ row.plan.pk }}/">자리 결정하기</a>{% elif not row.auto %}<a href="{{ row.href }}">자리 계산하기</a>{% endif %}</span></li>{% endfor %}
-    </ul>{% else %}<p>남은 입고 작업이 없습니다</p>{% endif %}
-  </div>
-</section>
 <details class="panel work-auto">
   <summary>자동 재배치</summary>
   <div class="panel-b">
     {% if authorization %}<p>저장된 허용 범위: 이동 최대 {{ authorization.max_moves }}개 · 하루 최대 {{ authorization.daily_limit }}건 · {{ authorization.valid_until|date:'m-d H:i' }}까지</p>{% endif %}
-    {% if rearrangements %}<ul>{% for row in rearrangements %}<li><a href="{{ row.href }}">재배치 작업 보기</a> <span class="work-state">{{ row.state }}</span></li>{% endfor %}</ul>{% else %}<p>남은 재배치 작업이 없습니다</p>{% endif %}
+    {% if rearrangements %}<ul>{% for row in rearrangements %}<li><a href="{{ row.href }}">재배치 작업 보기</a>{% if row.state != '대기' %} <span class="work-state">{{ row.state }}</span>{% endif %}</li>{% endfor %}</ul>{% else %}<p>남은 재배치 작업이 없습니다</p>{% endif %}
     <a href="/rearrangement/">자동 재배치 상세</a>
   </div>
 </details>

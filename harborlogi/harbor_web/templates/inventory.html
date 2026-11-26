@@ -17,7 +17,7 @@
               {% include 'yard_3d.html' %}
               <div data-yard-flat>{% include 'yard_stage.html' with stage=yard_stage %}</div>
             </div>
-            <section class="yard-arrows-panel" data-yard-arrows aria-label="예상 이동 경로">
+            <section class="yard-arrows-panel" data-yard-arrows aria-label="이동 경로">
               {% if active_arrows %}
                 <h3>{% if active_upcoming %}{{ active_upcoming.title }} · {% endif %}이동 경로</h3>
                 <ol class="yard-arrows-list">
@@ -32,7 +32,7 @@
                   {% endfor %}
                 </ol>
               {% else %}
-                <p class="helptext yard-arrows-empty">지금 진행 중인 이동이 없습니다.{% if upcoming %} 남은 예정에서 항목을 선택해 예상 이동 경로를 확인하세요.{% endif %}</p>
+                <p class="helptext yard-arrows-empty">지금 진행 중인 이동이 없습니다.{% if upcoming %} 남은 예정에서 항목을 선택해 이동 경로를 확인하세요.{% endif %}</p>
               {% endif %}
             </section>
           </div>
@@ -47,7 +47,7 @@
                 {% include 'yard_3d.html' %}
                 <div data-yard-flat><div class="table-wrap"><table><caption>맵 정의 · 위치 ID 목록</caption><thead><tr><th scope="col">구역</th><th scope="col">위치 ID</th><th scope="col">위치</th></tr></thead><tbody>{% for item in definition_rows %}<tr><td>{{ item.area }}</td><td>{{ item.position_id }}</td><td>{{ item.place }}</td></tr>{% endfor %}</tbody></table></div></div>
               </div>
-              <section class="yard-arrows-panel" data-yard-arrows aria-label="예상 이동 경로" hidden></section>
+              <section class="yard-arrows-panel" data-yard-arrows aria-label="이동 경로" hidden></section>
             </div>
           </div>
           {% else %}
@@ -77,22 +77,22 @@
         {% for item in upcoming %}
         <li>
           {% if item.scene %}
-            <button type="button" class="yard-upcoming-btn" data-upcoming-plan="{{ item.key }}" data-upcoming-scene="{{ item.scene_id }}" aria-pressed="false">
+            <button type="button" class="yard-upcoming-btn" data-upcoming-plan="{{ item.key }}" data-upcoming-scene="{{ item.scene_id }}"{% if item.key == current_job_key %} data-upcoming-current{% endif %} aria-pressed="false">
               <span class="yard-upcoming-chips">
                 <span class="chip {% if item.kind == 'OUTBOUND' %}tone-info{% elif item.kind == 'INBOUND' %}tone-inbound{% endif %}">{{ item.kind_label }}</span>
                 {% if item.active %}<span class="chip tone-new">진행 중</span>{% endif %}
               </span>
-              <span class="yard-upcoming-main"><span class="yard-upcoming-head"><strong>{{ item.title }}</strong><span class="yard-upcoming-eta{% if item.eta_late %} is-late{% endif %}">{{ item.eta_text }}</span></span><small>{% if item.target_label %}{{ item.target_label }}{% endif %}{% if item.summary %}{% if item.target_label %} · {% endif %}{{ item.summary }}{% endif %}</small></span>
+              <span class="yard-upcoming-main"><span class="yard-upcoming-head"><strong>{{ item.title }}</strong>{% if item.eta_text %}<span class="yard-upcoming-eta{% if item.eta_late %} is-late{% endif %}">{{ item.eta_text }}</span>{% endif %}</span><small>{% if item.target_label %}{{ item.target_label }}{% endif %}{% if item.summary %}{% if item.target_label %} · {% endif %}{{ item.summary }}{% endif %}</small></span>
             </button>
             {{ item.scene|json_script:item.scene_id }}
           {% else %}
-            <div class="yard-upcoming-item">
+            <button type="button" class="yard-upcoming-btn yard-upcoming-item" disabled>
               <span class="yard-upcoming-chips">
                 <span class="chip {% if item.kind == 'OUTBOUND' %}tone-info{% elif item.kind == 'INBOUND' %}tone-inbound{% endif %}">{{ item.kind_label }}</span>
                 {% if item.active %}<span class="chip tone-new">진행 중</span>{% elif item.hold_reason %}<span class="chip tone-hold">보류</span>{% endif %}
               </span>
-              <span class="yard-upcoming-main"><span class="yard-upcoming-head"><strong>{{ item.title }}</strong><span class="yard-upcoming-eta{% if item.eta_late %} is-late{% endif %}">{{ item.eta_text }}</span></span><small>{% if item.hold_reason %}{{ item.hold_reason }}{% else %}{% if item.target_label %}{{ item.target_label }}{% endif %}{% if item.summary %}{% if item.target_label %} · {% endif %}{{ item.summary }}{% endif %}{% endif %}</small></span>
-            </div>
+              <span class="yard-upcoming-main"><span class="yard-upcoming-head"><strong>{{ item.title }}</strong>{% if item.eta_text %}<span class="yard-upcoming-eta{% if item.eta_late %} is-late{% endif %}">{{ item.eta_text }}</span>{% endif %}</span><small>{% if item.hold_reason %}{{ item.hold_reason }}{% else %}{% if item.target_label %}{{ item.target_label }}{% endif %}{% if item.summary %}{% if item.target_label %} · {% endif %}{{ item.summary }}{% endif %}{% endif %}</small></span>
+            </button>
           {% endif %}
         </li>
         {% endfor %}

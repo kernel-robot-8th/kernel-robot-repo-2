@@ -48,7 +48,7 @@ function mountReorderEditor(editor) {
     running: li.dataset.running === '1',
     simBlocked: li.classList.contains('is-sim-blocked'),
     cutoffIso: li.dataset.cutoffIso || '',
-    initialEta: li.dataset.eta || '—',
+    initialEta: li.dataset.eta || '',
     initialEtaLate: li.dataset.etaLate === '1',
     node: li,
   }));
@@ -160,7 +160,7 @@ function mountReorderEditor(editor) {
             return step.reason;
           }
         } else if (validation.items.length) {
-          return '계산 전';
+          return '';
         }
       }
       return data.planSummary;
@@ -517,8 +517,6 @@ function mountReorderEditor(editor) {
             class: 'wf-step-place wf-place-blocked',
             text: step.short_reason || '계산 보류',
           }));
-        } else if (validation.items.length) {
-          card.append(createEl('span', {class: 'wf-step-place wf-place-uncomputed', text: '계산 전'}));
         }
       }
 

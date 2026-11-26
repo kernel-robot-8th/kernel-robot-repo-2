@@ -92,7 +92,7 @@ export function mountLinkedGrid(preview, scene, onSelect, inspectDestination = (
     const heading = document.createElement('h3');
     heading.textContent = mode === 'map-definition' ? '맵 정의 · 배치 미관측' :
       mode === 'local-draft' ? '로컬 가상 배치 · 최종 배치 · 서버에 저장되지 않음' :
-      `${mode === 'original' ? '원본 관측' : '계획 후 예상'} · ${slotCells ? '자리 평면' : '층별 평면'}`;
+      `${mode === 'original' ? '원본 관측' : '계획 후 배치'} · ${slotCells ? '자리 평면' : '층별 평면'}`;
     grid.append(heading); grid.dataset.source = mode;
     const showOccupancy = mode !== 'map-definition';  // Nothing is observed there, so no height is claimed.
     if (showOccupancy && !slotCells) {
@@ -109,7 +109,7 @@ export function mountLinkedGrid(preview, scene, onSelect, inspectDestination = (
         item.append(swatch, '재취급 예정 화물'); legend.append(item);
       }
       const basis = document.createElement('p'); basis.className = 'helptext'; basis.dataset.linkedOccupancyBasis = '';
-      const kind = mode === 'local-draft' ? '가상 배치 · 실적 아님' : /예상/.test(stageLabel || '') ? '예상 · 실적 아님' : '관측값';
+      const kind = mode === 'local-draft' ? '가상 배치 · 실적 아님' : mode === 'predicted' ? '계획 · 실적 아님' : '관측값';
       basis.textContent = `쌓인 높이: ${mode === 'local-draft' ? '로컬 가상 배치' : stageLabel || '관측'} 기준 칸별 층 수 · ${kind} · 재취급 예정은 저장된 계획 기준`;
       grid.append(legend, basis);
     }
@@ -209,7 +209,7 @@ export function mountLinkedGrid(preview, scene, onSelect, inspectDestination = (
   function renderSlots() {
     const basis = document.createElement('p'); basis.className = 'helptext'; basis.dataset.linkedOccupancyBasis = '';
     basis.textContent = mode === 'map-definition' ? '자리 정의만 있습니다 · 화물 위치는 확인되지 않았습니다' :
-      `자리마다 위층부터 컨테이너 번호 · ${mode === 'local-draft' ? '가상 배치 · 실적 아님' : /예상/.test(stageLabel || '') ? '예상 · 실적 아님' : '관측값'}${rehandle.size && mode !== 'local-draft' ? ' · 재취급 예정은 저장된 계획 기준' : ''}`;
+      `자리마다 위층부터 컨테이너 번호 · ${mode === 'local-draft' ? '가상 배치 · 실적 아님' : mode === 'predicted' ? '계획 · 실적 아님' : '관측값'}${rehandle.size && mode !== 'local-draft' ? ' · 재취급 예정은 저장된 계획 기준' : ''}`;
     const yard = scene.areas.find(area => area.id === 'yard') || scene.areas[0];
     const sides = {left:[], center:[], right:[]};
     for (const area of scene.areas)

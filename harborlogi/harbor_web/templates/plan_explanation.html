@@ -18,7 +18,7 @@
       <ol>{% for step in route.steps %}<li>{{ step.number }}단계 · {{ step.phase }} · {{ step.source.label }} → {{ step.destination.label }} · 담당 팔 {{ step.primary_arm|default:'미지정' }}{% if step.alternate_arms %} · 대안 팔 {{ step.alternate_arms|join:', ' }}{% endif %}</li>{% endfor %}</ol>
       {% endif %}
     </article>
-  {% empty %}<p>제안된 이동이 없습니다. 보류된 계획의 부분 작업이나 예상 완료를 표시하지 않습니다.</p>{% endfor %}
+  {% empty %}<p>제안된 이동이 없습니다. 보류된 계획의 부분 작업이나 완료를 표시하지 않습니다.</p>{% endfor %}
   </div>
   {% if explanation.comparison %}
   <section class="plan-comparison" aria-label="이전 계획과 비교">

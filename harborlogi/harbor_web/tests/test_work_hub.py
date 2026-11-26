@@ -45,12 +45,13 @@ class WorkHubTests(TestCase):
 
     def test_empty_hub_has_unified_schedule_and_no_estimates_or_actions(self):
         response = self.get_hub()
-        for text in ('<h1>작업</h1>', '오늘 시간표', '입고 자리', '자동 재배치',
+        for text in ('<h1>작업</h1>', '오늘 시간표', '자동 재배치',
                      '등록된 작업이 없습니다',
                      '<a href="/rearrangement/">자동 재배치 상세</a>'):
             self.assertContains(response, text)
+        self.assertNotIn('inbound', response.context)
         body = response.content.decode().split('<main', 1)[1]
-        for text in ('입고·반출 순서', 'work-outbound', 'work-timeline',
+        for text in ('입고 자리', 'work-inbound', '입고·반출 순서', 'work-outbound', 'work-timeline',
                      'type="submit"', 'draggable=', '예정 시각', '희망 시각', '진행률', 'READY', 'HOLD', '#번호'):
             self.assertNotIn(text, body)
         self.assertEqual(body.count('<h2 id="work-today">오늘 시간표</h2>'), 1)
@@ -175,38 +176,48 @@ class WorkHubTests(TestCase):
         incoming = self.order('AUTO', kind='INBOUND')
         type(incoming).objects.filter(pk=incoming.pk).update(auto_replan=True)
         response = self.get_hub()
-        self.assertEqual(response.context['inbound'][0]['place_hint'], '자동 계산 대기')
+        row = response.context['schedule'][0]
+        self.assertEqual((row['action_label'], row['action_href']), ('', ''))
         self.assertNotContains(response, '자리 계산하기')
+        self.assertNotContains(response, 'data-action-label=')
 
     def test_inbound_only_shows_latest_current_recommendation_with_next_action(self):
         incoming = self.order('IN', kind='INBOUND')
         response = self.get_hub()
-        self.assertEqual(response.context['inbound'][0]['place_hint'], '자리 결정 대기')
-        self.assertContains(response, f'<a href="/requests/{incoming.pk}/">자리 계산하기</a>', html=True)
+        row = response.context['schedule'][0]
+        self.assertEqual((row['action_label'], row['action_href']), ('자리 계산하기', f'/requests/{incoming.pk}/'))
+        self.assertContains(response, 'data-action-label="자리 계산하기"')
+        self.assertContains(response, f'data-action-href="/requests/{incoming.pk}/"')
         result = {'status': 'READY', 'plan_kind': 'inbound-placement', 'recommendation': {
             'cargo_id': 'IN', 'area_id': 'yard', 'row': 2, 'column': 1, 'level': 3, 'orientation': 0}}
         self.plan(incoming, result=result)
         latest = self.plan(incoming, result={**result, 'recommendation': {
             **result['recommendation'], 'row': 1}})
         response = self.get_hub()
-        self.assertEqual(response.context['inbound'][0]['place'], '1행 3층')
-        self.assertContains(response, f'<a href="/plans/{latest.pk}/">자리 결정하기</a>', html=True)
+        row = response.context['schedule'][0]
+        self.assertEqual(row['place'], 'yard-r1-c1-l3')
+        self.assertEqual((row['action_label'], row['action_href']), ('자리 결정하기', f'/plans/{latest.pk}/'))
+        self.assertContains(response, 'yard-r1-c1-l3')
+        self.assertContains(response, 'data-action-label="자리 결정하기"')
+        self.assertContains(response, f'data-action-href="/plans/{latest.pk}/"')
         self.assertNotContains(response, '추천 자리 · 실제 적재는 실행 후 반영')
-        self.assertContains(response, f'/plans/{latest.pk}/')
         self.plan(incoming, result={'status': 'HOLD'})
         response = self.get_hub()
-        self.assertEqual(response.context['inbound'][0]['place'], None)
-        self.assertEqual(response.context['inbound'][0]['place_hint'], '보류 · 요청 확인')
-        self.assertContains(response, '보류 · 요청 확인')
+        row = response.context['schedule'][0]
+        self.assertEqual(row['place'], None)
+        self.assertEqual((row['action_label'], row['action_href']), ('자리 계산하기', f'/requests/{incoming.pk}/'))
+        self.assertContains(response, 'data-action-label="자리 계산하기"')
+        self.assertContains(response, f'data-action-href="/requests/{incoming.pk}/"')
         Order.objects.filter(pk=incoming.pk).update(version=2)
         for status in ('READY', 'HOLD'):
             with self.subTest(status=status):
-                stale = self.plan(incoming, result={**result, 'status': status})
+                self.plan(incoming, result={**result, 'status': status})
                 response = self.get_hub()
-                self.assertIsNone(response.context['inbound'][0]['place'])
-                self.assertEqual(response.context['inbound'][0]['place_hint'], '요청 바뀜 · 다시 계산')
-                self.assertContains(response, '요청 바뀜 · 다시 계산')
-                self.assertContains(response, f'<a href="/plans/{stale.pk}/">자리 계산하기</a>', html=True)
+                row = response.context['schedule'][0]
+                self.assertIsNone(row['place'])
+                self.assertEqual((row['action_label'], row['action_href']), ('자리 계산하기', f'/requests/{incoming.pk}/'))
+                self.assertContains(response, 'data-action-label="자리 계산하기"')
+                self.assertContains(response, f'data-action-href="/requests/{incoming.pk}/"')
 
     def test_access_and_read_only_get_and_post(self):
         order = self.order('C1')
